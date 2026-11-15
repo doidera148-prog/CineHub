@@ -3,8 +3,13 @@ name: Build CineHub
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
   pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   test:
@@ -79,3 +84,30 @@ jobs:
         with:
           name: cinehub-android-phone-tv
           path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+
+  release:
+    if: github.event_name != 'pull_request'
+    needs: [test, desktop, android]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Listar arquivos
+        run: find artifacts -type f | sort
+      - name: Publicar binários no GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: CineHub build ${{ github.run_number }}
+          body: |
+            Build automático do commit `${{ github.sha }}`.
+            Instaladores: Windows (.msi/.exe), macOS (.dmg), Linux (.deb/.AppImage) e Android (.apk, celular e Android TV).
+          files: |
+            artifacts/**/*.msi
+            artifacts/**/*.exe
+            artifacts/**/*.dmg
+            artifacts/**/*.deb
+            artifacts/**/*.AppImage
+            artifacts/**/*.apk
+          fail_on_unmatched_files: false
