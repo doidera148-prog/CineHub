@@ -38,7 +38,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      - name: Cache do Tauri CLI
+        id: tauri-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-tauri
+            ~/.cargo/bin/cargo-tauri.exe
+          key: tauri-cli-2-${{ runner.os }}-${{ hashFiles('.github/workflows/build.yml') }}
       - name: Instalar Tauri CLI
+        if: steps.tauri-cache.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version "^2" --locked
       - name: Gerar pacotes
         working-directory: src-tauri
@@ -70,7 +79,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      - name: Cache do Tauri CLI
+        id: tauri-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-tauri
+            ~/.cargo/bin/cargo-tauri.exe
+          key: tauri-cli-2-${{ runner.os }}-${{ hashFiles('.github/workflows/build.yml') }}
       - name: Instalar Tauri CLI
+        if: steps.tauri-cache.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version "^2" --locked
       - name: Inicializar projeto Android
         working-directory: src-tauri
@@ -112,3 +130,10 @@ jobs:
             artifacts/**/*.AppImage
             artifacts/**/*.apk
           fail_on_unmatched_files: false
+      - name: Limpar releases antigas (manter as 10 mais recentes)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --repo "${{ github.repository }}" --limit 200 --json tagName -q '.[].tagName' \
+            | grep '^build-' | tail -n +11 \
+            | while read -r tag; do gh release delete "$tag" --repo "${{ github.repository }}" --yes --cleanup-tag; done

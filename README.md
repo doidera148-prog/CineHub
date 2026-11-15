@@ -4,6 +4,7 @@ Aplicativo de streaming compatível com os addons do Stremio, para Windows, macO
 
 - **Backend:** Rust (Tauri 2). Fala com os addons pelo protocolo oficial do Stremio: `manifest`, `catalog` (com busca), `meta` e `stream`.
 - **Interface:** HTML, CSS e JavaScript, na pasta `web/`. Roda no WebView nativo de cada sistema.
+- **Player:** [Video.js](https://videojs.com/) (código aberto, MIT), com suporte a HLS (`.m3u8`) embutido. Empacotado em `web/vendor/`, funciona sem internet.
 - **Metadados em pt-BR:** o Cinemeta (addon oficial do Stremio) é instalado automaticamente na primeira execução.
 
 O app não traz fontes de conteúdo. Você instala os addons que tem autorização para usar, pela aba **Addons**.
@@ -20,6 +21,21 @@ src-tauri/
   src/store.rs       lista de addons instalados (JSON)
 .github/workflows/   builds automáticos para desktop e Android
 ```
+
+## Segurança e desempenho
+
+- Respostas de addons são limitadas a 8 MiB, e legendas a 2 MiB.
+- O comando de legenda só aceita URLs públicas. Endereços locais e privados (localhost, 10.x, 192.168.x, 169.254.x etc.) são bloqueados.
+- Catálogos, metadados e fontes ficam em cache por 10 minutos.
+- Metadados são consultados em paralelo em todos os addons.
+
+## Testes
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+Os testes de integração (`src-tauri/tests/addon_integration.rs`) sobem um addon falso em localhost e validam manifest, catálogo, meta, fontes, legendas, cache e os limites de tamanho.
 
 ## Desenvolver no computador
 
@@ -89,6 +105,7 @@ Os arquivos aparecem como artefatos na aba **Actions** do GitHub.
 - **Formatos de vídeo:** o player é o do próprio sistema (WebView). MP4 e WebM funcionam em todas as plataformas; MKV depende do codec e pode não tocar no Android ou no macOS.
 - **HTTP sem criptografia:** o Android bloqueia `http://` por padrão. Fontes de addon com `http://` podem não tocar no celular.
 - **Legendas:** só português (SRT ou VTT), baixadas pelo backend e convertidas para VTT.
+- **Validação de DNS:** a checagem de URL bloqueia endereços privados escritos diretamente, mas não impede um nome de domínio que resolva para uma rede interna.
 - **Fontes em torrent ou magnet:** não são reproduzidas por este app. Aparecem na lista marcadas como não suportadas.
 
 ## Licença

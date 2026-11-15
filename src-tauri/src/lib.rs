@@ -3,11 +3,12 @@
 //! O backend (este crate) fala com os addons pelo protocolo do Stremio e expõe comandos
 //! que a interface web chama via `invoke`. Funciona no Windows, macOS, Linux, Android e iOS.
 
-mod addon;
-mod commands;
-mod store;
+pub mod addon;
+pub mod commands;
+pub mod store;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use tauri::Manager;
 use tokio::sync::RwLock;
@@ -16,6 +17,7 @@ use addon::Installed;
 
 pub struct AppState {
     pub http: reqwest::Client,
+    pub cache: Arc<addon::Cache>,
     pub addons: RwLock<Vec<Installed>>,
     pub store_path: PathBuf,
 }
@@ -35,6 +37,7 @@ pub fn run() {
             let http = addon::client();
             app.manage(AppState {
                 http,
+                cache: Arc::new(addon::Cache::default()),
                 addons: RwLock::new(installed),
                 store_path,
             });

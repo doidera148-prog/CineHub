@@ -9,6 +9,9 @@ use crate::{
     store, AppState,
 };
 
+/// Tamanho máximo de uma legenda baixada (2 MiB).
+const MAX_SUBTITLE: usize = 2 * 1024 * 1024;
+
 #[tauri::command]
 pub async fn list_addons(state: State<'_, AppState>) -> Result<Value, String> {
     let list = state.addons.read().await;
@@ -55,7 +58,7 @@ pub async fn home(state: State<'_, AppState>, kind: String) -> Result<Value, Str
             }
         }
     }
-    let rows = run_catalogs(&state.http, jobs, String::new()).await;
+    let rows = run_catalogs(&state, jobs, String::new()).await;
     Ok(json!({ "rows": rows }))
 }
 
@@ -76,18 +79,19 @@ pub async fn search(state: State<'_, AppState>, q: String) -> Result<Value, Stri
         }
     }
     let extra = format!("search={}", addon::enc(&needle));
-    let rows = run_catalogs(&state.http, jobs, extra).await;
+    let rows = run_catalogs(&state, jobs, extra).await;
     Ok(json!({ "rows": rows }))
 }
 
-async fn run_catalogs(http: &reqwest::Client, jobs: Vec<(Installed, CatalogDef)>, extra: String) -> Vec<Value> {
+async fn run_catalogs(state: &AppState, jobs: Vec<(Installed, CatalogDef)>, extra: String) -> Vec<Value> {
     join_all(jobs.into_iter().map(|(a, c)| {
-        let http = http.clone();
+        let http = state.http.clone();
+        let cache = state.cache.clone();
         let extra = extra.clone();
         async move {
-            let (metas, error) = match addon::catalog(&http, &a, &c.kind, &c.id, &extra).await {
+            let (metas, error) = match addon::catalog(&http, &cache, &a, &c.kind, &c.id, &extra).await {
                 Ok(m) => (m, None),
-                Err(e) => (Vec::new(), Some(e)),
+                Err(e) => (Vec::new(), Some(format!("{}: {e}", a.manifest.name))),
             };
             json!({
                 "title": c.name.clone().unwrap_or_else(|| c.id.clone()),
@@ -102,61 +106,110 @@ async fn run_catalogs(http: &reqwest::Client, jobs: Vec<(Installed, CatalogDef)>
     .await
 }
 
-/// Metadados: pergunta ao primeiro addon que responde ao recurso "meta" para este id.
+/// Metadados: consulta em paralelo os addons com o recurso "meta" e usa o primeiro com dados.
 #[tauri::command]
 pub async fn meta(state: State<'_, AppState>, kind: String, id: String) -> Result<Value, String> {
     let addons: Vec<Installed> = state.addons.read().await.clone();
-    for a in addons.iter().filter(|a| a.supports("meta", &kind, &id)) {
-        if let Ok(Some(m)) = addon::meta(&state.http, a, &kind, &id).await {
-            return Ok(json!({ "meta": m, "addon": a.manifest.name }));
+    let jobs = addons
+        .iter()
+        .filter(|a| a.supports("meta", &kind, &id))
+        .map(|a| {
+            let http = state.http.clone();
+            let cache = state.cache.clone();
+            let (kind, id, a) = (kind.clone(), id.clone(), a.clone());
+            async move {
+                let result = addon::meta(&http, &cache, &a, &kind, &id).await;
+                (a.manifest.name.clone(), result)
+            }
+        });
+    for (name, result) in join_all(jobs).await {
+        if let Ok(Some(m)) = result {
+            return Ok(json!({ "meta": m, "addon": name }));
         }
     }
     Ok(json!({ "meta": null }))
 }
 
-/// Fontes: junta as respostas de todos os addons que respondem ao recurso "stream".
+/// Fontes: junta as fontes de todos os addons com o recurso "stream", e as legendas
+/// de addons com o recurso "subtitles". Cada fonte recebe um aviso quando o app não consegue tocá-la.
 #[tauri::command]
 pub async fn streams(state: State<'_, AppState>, kind: String, id: String) -> Result<Value, String> {
     let addons: Vec<Installed> = state.addons.read().await.clone();
-    let jobs = addons
-        .into_iter()
+
+    let stream_jobs = addons
+        .iter()
         .filter(|a| a.supports("stream", &kind, &id))
         .map(|a| {
             let http = state.http.clone();
-            let kind = kind.clone();
-            let id = id.clone();
+            let cache = state.cache.clone();
+            let (kind, id, a) = (kind.clone(), id.clone(), a.clone());
             async move {
-                let list = addon::streams(&http, &a, &kind, &id).await.unwrap_or_default();
+                let list = addon::streams(&http, &cache, &a, &kind, &id).await.unwrap_or_default();
                 list.into_iter()
                     .map(|mut s| {
-                        if let Some(o) = s.as_object_mut() {
-                            o.insert("addonName".into(), json!(a.manifest.name));
-                        }
+                        annotate(&mut s, &a.manifest.name);
                         s
                     })
                     .collect::<Vec<Value>>()
             }
         });
-    let all: Vec<Value> = join_all(jobs).await.into_iter().flatten().collect();
-    Ok(json!({ "streams": all }))
+    let streams: Vec<Value> = join_all(stream_jobs).await.into_iter().flatten().collect();
+
+    let sub_jobs = addons
+        .iter()
+        .filter(|a| a.supports("subtitles", &kind, &id))
+        .map(|a| {
+            let http = state.http.clone();
+            let cache = state.cache.clone();
+            let (kind, id, a) = (kind.clone(), id.clone(), a.clone());
+            async move { addon::subtitles(&http, &cache, &a, &kind, &id).await.unwrap_or_default() }
+        });
+    let subtitles: Vec<Value> = join_all(sub_jobs)
+        .await
+        .into_iter()
+        .flatten()
+        .filter(|s| s.get("url").and_then(Value::as_str).is_some())
+        .collect();
+
+    Ok(json!({ "streams": streams, "subtitles": subtitles }))
 }
 
-/// Legenda: baixa o arquivo e devolve em VTT, que o player do navegador exige.
+/// Marca o que o app consegue fazer com cada fonte e adiciona o nome do addon.
+fn annotate(s: &mut Value, addon_name: &str) {
+    let hints = s.get("behaviorHints").cloned().unwrap_or(Value::Null);
+    let needs_headers = hints.get("proxyHeaders").map_or(false, |v| !v.is_null());
+    let not_web_ready = hints.get("notWebReady").and_then(Value::as_bool).unwrap_or(false);
+    let url = s.get("url").and_then(Value::as_str).unwrap_or("").to_string();
+    let has_info_hash = s.get("infoHash").map_or(false, |v| !v.is_null());
+
+    let note: Option<&str> = if url.is_empty() {
+        if has_info_hash {
+            Some("fonte não suportada neste app")
+        } else {
+            Some("sem link reproduzível")
+        }
+    } else if needs_headers {
+        Some("exige cabeçalhos especiais; pode não tocar")
+    } else if not_web_ready || url.to_lowercase().contains(".mkv") {
+        Some("formato pode não tocar no player")
+    } else {
+        None
+    };
+
+    if let Some(o) = s.as_object_mut() {
+        o.insert("addonName".into(), json!(addon_name));
+        o.insert("note".into(), note.map(Value::from).unwrap_or(Value::Null));
+    }
+}
+
+/// Legenda: baixa o arquivo (só URLs públicas, com limite de tamanho) e devolve em VTT.
 #[tauri::command]
 pub async fn subtitle(state: State<'_, AppState>, url: String) -> Result<String, String> {
-    if !(url.starts_with("http://") || url.starts_with("https://")) {
-        return Err("URL de legenda inválida".into());
+    if !addon::is_safe_url(&url) {
+        return Err("URL de legenda bloqueada".into());
     }
-    let text = state
-        .http
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .text()
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(srt_to_vtt(&text))
+    let bytes = addon::read_capped(&state.http, &url, MAX_SUBTITLE).await?;
+    Ok(srt_to_vtt(&String::from_utf8_lossy(&bytes)))
 }
 
 fn srt_to_vtt(text: &str) -> String {

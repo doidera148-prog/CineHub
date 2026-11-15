@@ -5,10 +5,13 @@
 //!   /meta/{tipo}/{id}.json
 //!   /stream/{tipo}/{id}.json
 
-use std::time::Duration;
+use std::collections::HashMap;
+use std::net::IpAddr;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
-use reqwest::Client;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use reqwest::{Client, Url};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -123,13 +126,56 @@ pub fn client() -> Client {
         .expect("não foi possível criar o cliente HTTP")
 }
 
+/// Tamanho máximo de uma resposta de addon (8 MiB). Evita que um addon mal configurado
+/// consuma toda a memória do aparelho.
+pub const MAX_BODY: usize = 8 * 1024 * 1024;
+
+const CACHE_TTL: Duration = Duration::from_secs(600);
+const CACHE_MAX_ENTRIES: usize = 500;
+
+/// Cache em memória das respostas dos addons, para não refazer as mesmas chamadas.
+#[derive(Default)]
+pub struct Cache {
+    entries: Mutex<HashMap<String, (Instant, Value)>>,
+}
+
+impl Cache {
+    fn get(&self, key: &str) -> Option<Value> {
+        let map = self.entries.lock().ok()?;
+        let (at, value) = map.get(key)?;
+        (at.elapsed() < CACHE_TTL).then(|| value.clone())
+    }
+
+    fn put(&self, key: String, value: Value) {
+        if let Ok(mut map) = self.entries.lock() {
+            if map.len() >= CACHE_MAX_ENTRIES {
+                map.clear();
+            }
+            map.insert(key, (Instant::now(), value));
+        }
+    }
+}
+
 pub async fn fetch_manifest(client: &Client, url: &str) -> Result<Manifest, String> {
-    get_json(client, url).await
+    let body = read_capped(client, url, MAX_BODY).await?;
+    serde_json::from_slice(&body).map_err(|e| format!("manifest inválido: {e}"))
+}
+
+/// Lê um recurso JSON de addon usando o cache.
+async fn fetch_value(client: &Client, cache: &Cache, url: &str) -> Result<Value, String> {
+    if let Some(v) = cache.get(url) {
+        return Ok(v);
+    }
+    let body = read_capped(client, url, MAX_BODY).await?;
+    let value: Value = serde_json::from_slice(&body).map_err(|e| format!("resposta inválida: {e}"))?;
+    cache.put(url.to_string(), value.clone());
+    Ok(value)
 }
 
 /// Lê um catálogo. `extra` vem já codificado, ex.: "search=dark" ou vazio.
 pub async fn catalog(
     client: &Client,
+    cache: &Cache,
     a: &Installed,
     kind: &str,
     id: &str,
@@ -140,24 +186,32 @@ pub async fn catalog(
     } else {
         format!("{}/catalog/{}/{}/{}.json", a.base(), enc(kind), enc(id), extra)
     };
-    let v: Value = get_json(client, &url).await?;
+    let v = fetch_value(client, cache, &url).await?;
     Ok(v.get("metas").and_then(Value::as_array).cloned().unwrap_or_default())
 }
 
-pub async fn meta(client: &Client, a: &Installed, kind: &str, id: &str) -> Result<Option<Value>, String> {
+pub async fn meta(client: &Client, cache: &Cache, a: &Installed, kind: &str, id: &str) -> Result<Option<Value>, String> {
     let url = format!("{}/meta/{}/{}.json", a.base(), enc(kind), enc(id));
-    let v: Value = get_json(client, &url).await?;
+    let v = fetch_value(client, cache, &url).await?;
     Ok(v.get("meta").filter(|m| !m.is_null()).cloned())
 }
 
-pub async fn streams(client: &Client, a: &Installed, kind: &str, id: &str) -> Result<Vec<Value>, String> {
+pub async fn streams(client: &Client, cache: &Cache, a: &Installed, kind: &str, id: &str) -> Result<Vec<Value>, String> {
     let url = format!("{}/stream/{}/{}.json", a.base(), enc(kind), enc(id));
-    let v: Value = get_json(client, &url).await?;
+    let v = fetch_value(client, cache, &url).await?;
     Ok(v.get("streams").and_then(Value::as_array).cloned().unwrap_or_default())
 }
 
-async fn get_json<T: DeserializeOwned>(client: &Client, url: &str) -> Result<T, String> {
-    let resp = client
+/// Legendas externas do recurso "subtitles" (rota /subtitles/{tipo}/{id}.json).
+pub async fn subtitles(client: &Client, cache: &Cache, a: &Installed, kind: &str, id: &str) -> Result<Vec<Value>, String> {
+    let url = format!("{}/subtitles/{}/{}.json", a.base(), enc(kind), enc(id));
+    let v = fetch_value(client, cache, &url).await?;
+    Ok(v.get("subtitles").and_then(Value::as_array).cloned().unwrap_or_default())
+}
+
+/// Baixa um recurso até `max` bytes. Respostas maiores são recusadas.
+pub async fn read_capped(client: &Client, url: &str, max: usize) -> Result<Vec<u8>, String> {
+    let mut resp = client
         .get(url)
         .send()
         .await
@@ -166,7 +220,49 @@ async fn get_json<T: DeserializeOwned>(client: &Client, url: &str) -> Result<T, 
     if !status.is_success() {
         return Err(format!("HTTP {status}"));
     }
-    resp.json::<T>().await.map_err(|e| format!("resposta inválida: {e}"))
+    let mut body = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(|e| format!("falha ao ler resposta: {e}"))? {
+        if body.len() + chunk.len() > max {
+            return Err("resposta grande demais".into());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
+/// Aceita só http(s) com host público. Bloqueia localhost e endereços privados,
+/// para que o comando de legenda não sirva de porta de acesso à rede interna.
+pub fn is_safe_url(raw: &str) -> bool {
+    let Ok(url) = Url::parse(raw) else {
+        return false;
+    };
+    if !matches!(url.scheme(), "http" | "https") {
+        return false;
+    }
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let host = host.trim_start_matches('[').trim_end_matches(']').to_lowercase();
+    if host == "localhost" || host.ends_with(".local") {
+        return false;
+    }
+    match host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(v4)) => {
+            !(v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.is_documentation())
+        }
+        Ok(IpAddr::V6(v6)) => {
+            let first = v6.segments()[0];
+            let unique_local = (first & 0xfe00) == 0xfc00;
+            let link_local = (first & 0xffc0) == 0xfe80;
+            !(v6.is_loopback() || v6.is_unspecified() || unique_local || link_local)
+        }
+        Err(_) => true,
+    }
 }
 
 /// Codifica um segmento de URL, mantendo ":" (usado em ids como "tt123:1:2").

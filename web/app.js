@@ -26,7 +26,8 @@ const showError = (err) => setView(`<p class="muted">Erro: ${esc(err.message || 
 async function homePage() {
   setView('<h1>Início</h1><div id="rows" class="loading">Carregando catálogos…</div>');
   const [m, s] = await Promise.all([call('home', { kind: 'movie' }), call('home', { kind: 'series' })]);
-  renderRows([...m.rows, ...s.rows], 'Nenhum catálogo disponível. Instale addons na aba Addons.');
+  const cont = continueWatchingRow();
+  renderRows([...(cont ? [cont] : []), ...m.rows, ...s.rows], 'Nenhum catálogo disponível. Instale addons na aba Addons.');
 }
 
 async function catalogPage(kind, title) {
@@ -85,6 +86,7 @@ async function addonsPage() {
     : '<p class="muted">Nenhum addon instalado.</p>';
   $('#al').querySelectorAll('button[data-url]').forEach((b) => {
     b.onclick = async () => {
+      if (!confirm('Remover este addon? Os catálogos e fontes dele deixam de aparecer.')) return;
       await call('remove_addon', { url: b.dataset.url });
       addonsPage();
     };
@@ -121,7 +123,7 @@ async function detailPage(kind, id) {
   };
 
   if ((meta.type || kind) === 'series') renderSeries(meta);
-  else loadStreams('movie', meta.id, meta.name);
+  else loadStreams('movie', meta.id, meta.name, meta);
 }
 
 // ---------- Componentes ----------
@@ -201,17 +203,18 @@ function renderSeries(meta) {
     body.querySelectorAll('.ep').forEach((b) => {
       b.onclick = () => {
         const ep = eps.find((e) => e.id === b.dataset.id);
-        loadStreams('series', b.dataset.id, `${meta.name} · T${season}E${ep?.episode ?? ''}`);
+        loadStreams('series', b.dataset.id, `${meta.name} · T${season}E${ep?.episode ?? ''}`, { ...meta, type: 'series', seriesId: meta.id, poster: meta.poster, name: `${meta.name} · T${season}E${ep?.episode ?? ''}` });
       };
     });
   };
   draw();
 }
 
-async function loadStreams(kind, id, label) {
+async function loadStreams(kind, id, label, meta) {
   const box = $('#streams') || $('#body');
   box.innerHTML = '<div class="loading">Buscando fontes nos addons…</div>';
-  const { streams } = await call('streams', { kind, id });
+  const { streams, subtitles } = await call('streams', { kind, id });
+  lastSubtitles = subtitles || [];
   box.innerHTML = '';
 
   if (!streams.length) {
@@ -227,64 +230,117 @@ async function loadStreams(kind, id, label) {
     const playable = Boolean(s.url || s.externalUrl);
     const b = document.createElement('button');
     b.className = 'stream' + (playable ? '' : ' disabled');
+    const details = [s.addonName, s.note].filter(Boolean).join(' · ');
     b.innerHTML = `
       <strong>${esc(s.name || s.addonName)}</strong>
       <span>${esc((s.title || '').replace(/\n/g, ' · '))}</span>
-      <em class="muted small">${esc(s.addonName || '')}${playable ? '' : ' · formato não suportado neste app'}</em>`;
-    if (s.url) b.onclick = () => play(s, label, id);
+      <em class="muted small">${esc(details)}</em>`;
+    if (s.url) b.onclick = () => play(s, label, id, meta);
     else if (s.externalUrl) b.onclick = () => window.open(s.externalUrl, '_blank', 'noopener');
     box.append(b);
   }
 }
 
-// ---------- Player ----------
+// ---------- Player (Video.js, com HLS embutido) ----------
 
-function play(stream, label, id) {
-  video.pause();
-  video.innerHTML = '';
-  video.src = stream.url;
+const vjsPlayer = videojs(video, { controls: true, fluid: true, preload: 'auto', playsinline: true });
+let current = null; // { id, label, meta } do que está tocando agora
 
-  const sub = (stream.subtitles || []).find((s) => /^(por|pt)/i.test(s.lang || ''));
-  if (sub) addSubtitle(sub.url);
+function play(stream, label, id, meta) {
+  current = { id, label, meta };
+  vjsPlayer.src({ src: stream.url, type: stream.url.includes('.m3u8') ? 'application/x-mpegURL' : undefined });
+  clearTextTracks();
+  for (const sub of pickSubtitles(stream)) addSubtitle(sub.url);
 
-  // Retoma de onde parou, guardado no navegador.
-  const key = 'pos:' + id;
-  const saved = Number(localStorage.getItem(key) || 0);
-  video.onloadedmetadata = () => {
-    if (saved > 5 && saved < video.duration - 15) video.currentTime = saved;
-  };
-  video.ontimeupdate = () => {
-    if (video.currentTime > 5) localStorage.setItem(key, String(Math.floor(video.currentTime)));
-  };
+  const saved = getProgress()[id];
+  vjsPlayer.one('loadedmetadata', () => {
+    if (saved && saved.t > 5 && saved.t < vjsPlayer.duration() - 15) vjsPlayer.currentTime(saved.t);
+  });
+  vjsPlayer.off('timeupdate', onTimeUpdate);
+  vjsPlayer.on('timeupdate', onTimeUpdate);
 
   document.title = `${label} · CineHub`;
   player.classList.remove('hidden');
-  video.play().catch(() => {});
+  vjsPlayer.play().catch(() => {});
+}
+
+// Legendas: as da própria fonte + as de addons de legenda, só em português.
+function pickSubtitles(stream) {
+  const all = [...(stream.subtitles || []), ...(lastSubtitles || [])];
+  return all.filter((s) => /^(por|pt)/i.test(s.lang || '') && s.url).slice(0, 1);
+}
+let lastSubtitles = [];
+
+function clearTextTracks() {
+  const tracks = vjsPlayer.textTracks();
+  for (let i = tracks.length - 1; i >= 0; i--) vjsPlayer.removeRemoteTextTrack(tracks[i]);
 }
 
 async function addSubtitle(url) {
   try {
     const vtt = await call('subtitle', { url });
     const blobUrl = URL.createObjectURL(new Blob([vtt], { type: 'text/vtt' }));
-    const t = document.createElement('track');
-    t.kind = 'subtitles';
-    t.label = 'Português';
-    t.srclang = 'pt';
-    t.default = true;
-    t.src = blobUrl;
-    video.append(t);
+    vjsPlayer.addRemoteTextTrack({ kind: 'subtitles', label: 'Português', srclang: 'pt', src: blobUrl, default: true }, false);
   } catch (e) {
     console.warn('legenda indisponível:', e);
   }
 }
 
+// Progresso salvo por fonte, para retomar e para a fila "Continuar assistindo".
+function getProgress() {
+  try {
+    return JSON.parse(localStorage.getItem('progress') || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function onTimeUpdate() {
+  if (!current) return;
+  const t = vjsPlayer.currentTime();
+  const duration = vjsPlayer.duration() || 0;
+  if (t < 5) return;
+  const all = getProgress();
+  all[current.id] = {
+    t: Math.floor(t),
+    duration: Math.floor(duration),
+    label: current.label,
+    seriesId: current.meta.seriesId || current.meta.id,
+    type: current.meta.type,
+    name: current.meta.name,
+    poster: current.meta.poster || '',
+    updated: Date.now(),
+  };
+  localStorage.setItem('progress', JSON.stringify(all));
+}
+
 function closePlayer() {
-  video.pause();
-  video.removeAttribute('src');
-  video.innerHTML = '';
-  video.load();
+  if (current) onTimeUpdate();
+  vjsPlayer.pause();
+  clearTextTracks();
+  current = null;
   player.classList.add('hidden');
   document.title = 'CineHub';
+}
+
+// Fila de títulos com progresso parcial, do mais recente ao mais antigo.
+function continueWatchingRow() {
+  const items = Object.values(getProgress())
+    .filter((p) => p.duration > 0 && p.t > 5 && p.t < p.duration - 60)
+    .sort((a, b) => b.updated - a.updated)
+    .slice(0, 20);
+  if (!items.length) return null;
+  return {
+    title: 'Continuar assistindo',
+    addon: 'CineHub',
+    metas: items.map((p) => ({
+      id: p.seriesId,
+      type: p.type,
+      name: p.name,
+      poster: p.poster,
+      releaseInfo: p.label,
+    })),
+  };
 }
 
 $('#close-player').onclick = closePlayer;
