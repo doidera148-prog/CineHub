@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CineHub</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="logo">CineHub</div>
+    <nav>
+      <a href="#/" data-nav="home">Início</a>
+      <a href="#/movies" data-nav="movies">Filmes</a>
+      <a href="#/series" data-nav="series">Séries</a>
+      <a href="#/search" data-nav="search">Pesquisar</a>
+      <a href="#/library" data-nav="library">Biblioteca</a>
+      <a href="#/addons" data-nav="addons">Addons</a>
+    </nav>
+  </aside>
+
+  <main>
+    <header class="topbar">
+      <input id="q" type="search" placeholder="Pesquisar filmes e séries…">
+    </header>
+    <section id="view"></section>
+  </main>
+
+  <div id="player" class="hidden">
+    <div class="player-box">
+      <button id="close-player" class="close" title="Fechar (Esc)">✕</button>
+      <video id="video" controls></video>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

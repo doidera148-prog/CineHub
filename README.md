@@ -1,63 +1,95 @@
-# CineHub Addon
+# CineHub
 
-Addon para o [Stremio](https://www.stremio.com/) escrito em Rust. Ele expõe a sua biblioteca local de filmes e séries pelo protocolo oficial de addons, com metadados e legendas em português.
+Aplicativo de streaming compatível com os addons do Stremio, para Windows, macOS, Linux, Android e Android TV (iOS também é possível com o Tauri, sem testes ainda).
 
-Ele não busca, não baixa e não distribui conteúdo. Só serve arquivos que você já tem no seu computador ou NAS.
+- **Backend:** Rust (Tauri 2). Fala com os addons pelo protocolo oficial do Stremio: `manifest`, `catalog` (com busca), `meta` e `stream`.
+- **Interface:** HTML, CSS e JavaScript, na pasta `web/`. Roda no WebView nativo de cada sistema.
+- **Metadados em pt-BR:** o Cinemeta (addon oficial do Stremio) é instalado automaticamente na primeira execução.
 
-## Recursos
-
-- Protocolo de addons do Stremio: `manifest`, `catalog` (com busca), `meta` e `stream`
-- Reconhece filmes (`A Origem (2010) 1080p.mkv`) e episódios (`Dark.S01E02.mkv`)
-- Detecta a qualidade no nome do arquivo (2160p, 1080p, 720p, 480p)
-- Legendas em português ao lado do vídeo (`Dark.S01E02.pt-BR.srt`, `.vtt`, `.por.srt`)
-- Suporte a `Range`, para o player avançar e voltar
-- CORS liberado, para o Stremio Web conseguir consultar o addon
-
-## Requisitos
-
-- Rust estável (1.75 ou superior) com `cargo`
-
-## Executar
-
-```bash
-# coloque seus arquivos em ./media (ou defina MEDIA_DIR)
-MEDIA_DIR=/caminho/para/sua/biblioteca PORT=7000 cargo run --release
-```
-
-Variáveis de ambiente:
-
-| Variável    | Padrão                    | Descrição                                                                 |
-|-------------|---------------------------|---------------------------------------------------------------------------|
-| `MEDIA_DIR` | `./media`                 | Pasta com os vídeos (varredura recursiva)                                 |
-| `PORT`      | `7000`                    | Porta HTTP do addon                                                       |
-| `BASE_URL`  | `http://127.0.0.1:$PORT`  | URL pela qual o Stremio acessa o addon (ex.: `http://192.168.0.10:7000`)  |
-
-## Instalar no Stremio
-
-1. Confirme que o addon está rodando. O log mostra a URL do manifesto.
-2. Abra o Stremio, vá em **Addons** e escolha a opção de instalar por URL.
-3. Cole `http://<seu-ip>:7000/manifest.json` e confirme.
-
-Se você usa o Stremio Web, ele pode bloquear `http://` por ser conteúdo misto. Nesse caso, use o app de desktop ou exponha o addon por HTTPS (por exemplo, com um proxy reverso).
-
-## Nomes de arquivo
-
-- Filmes: `Titulo (Ano) qualidade.ext` ou `Titulo.Ano.qualidade.ext`
-- Séries: `Titulo.S01E02.qualidade.ext` ou `Titulo - s01e02.ext`
-- Legendas: mesmo começo do nome do vídeo, com marcador de português no nome: `.pt`, `.pt-BR`, `.por`, `.pob`
+O app não traz fontes de conteúdo. Você instala os addons que tem autorização para usar, pela aba **Addons**.
 
 ## Estrutura
 
 ```
-src/main.rs      rotas HTTP do protocolo do Stremio e entrega de arquivos
-src/library.rs   varredura da pasta, interpretação de nomes e legendas
+web/                 interface (index.html, app.js, style.css)
+src-tauri/
+  tauri.conf.json    configuração da janela e dos pacotes
+  src/lib.rs         inicialização e registro dos comandos
+  src/commands.rs    comandos chamados pela interface (catálogos, metas, fontes, legendas)
+  src/addon.rs       cliente do protocolo de addons do Stremio
+  src/store.rs       lista de addons instalados (JSON)
+.github/workflows/   builds automáticos para desktop e Android
 ```
 
-## Testes
+## Desenvolver no computador
+
+Pré-requisitos:
+
+- Rust estável (`rustup`)
+- Linux: `libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev`
+- Windows: WebView2 (já vem no Windows 10/11)
+- macOS: Xcode Command Line Tools
 
 ```bash
-cargo test
+cargo install tauri-cli --version "^2" --locked
+cd src-tauri
+cargo tauri dev        # abre a janela em modo de desenvolvimento
+cargo tauri build      # gera o instalador da sua plataforma
 ```
+
+Testes do backend:
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+## Android
+
+Requer Android Studio (ou SDK + NDK), Java 17 e as variáveis `ANDROID_HOME` e `NDK_HOME`.
+
+```bash
+rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+cd src-tauri
+cargo tauri android init
+cargo tauri android dev          # roda no emulador ou celular conectado
+cargo tauri android build --apk  # gera o APK
+```
+
+### Android TV
+
+O mesmo APK roda no celular e na TV. O script `src-tauri/android-tv/patch_manifest.py` ajusta o manifesto gerado pelo `cargo tauri android init` para o Android TV:
+
+- adiciona o `LEANBACK_LAUNCHER`, para o app aparecer na tela inicial da TV;
+- declara que o toque é opcional, para o app abrir sem tela sensível ao toque;
+- define o banner do launcher (`android-tv/banner.png`).
+
+Depois de inicializar o projeto Android, rode:
+
+```bash
+cd src-tauri
+python3 android-tv/patch_manifest.py gen/android/app/src/main/AndroidManifest.xml
+cargo tauri android build --apk
+```
+
+Na TV, a navegação é feita pelo controle remoto: as setas movem o foco e OK ativa o item. Para fechar o player, foque o botão ✕ e pressione OK.
+
+Limitação conhecida: o botão Voltar do controle ainda não fecha o player; ele apenas volta na navegação do WebView.
+
+## Builds na nuvem
+
+O workflow `.github/workflows/build.yml` gera, a cada push na `main`:
+
+- Windows (`.msi` / `.exe`), macOS (`.dmg` / `.app`), Linux (`.deb` / `.AppImage`)
+- Android (`.apk`), que serve para celular e Android TV
+
+Os arquivos aparecem como artefatos na aba **Actions** do GitHub.
+
+## Limitações conhecidas
+
+- **Formatos de vídeo:** o player é o do próprio sistema (WebView). MP4 e WebM funcionam em todas as plataformas; MKV depende do codec e pode não tocar no Android ou no macOS.
+- **HTTP sem criptografia:** o Android bloqueia `http://` por padrão. Fontes de addon com `http://` podem não tocar no celular.
+- **Legendas:** só português (SRT ou VTT), baixadas pelo backend e convertidas para VTT.
+- **Fontes em torrent ou magnet:** não são reproduzidas por este app. Aparecem na lista marcadas como não suportadas.
 
 ## Licença
 

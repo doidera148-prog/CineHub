@@ -1,0 +1,164 @@
+:root {
+  --bg: #0e0f14;
+  --panel: #171922;
+  --line: #2c2f40;
+  --accent: #8b5cf6;
+  --text: #e8e8ef;
+  --muted: #8a8fa3;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  display: flex;
+  min-height: 100vh;
+}
+
+input, button { font: inherit; }
+
+.sidebar {
+  width: 200px;
+  flex-shrink: 0;
+  background: var(--panel);
+  padding: 20px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.logo { font-weight: 800; font-size: 22px; padding: 8px 12px; color: var(--accent); }
+.sidebar nav a {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: var(--text);
+  text-decoration: none;
+}
+.sidebar nav a:hover, .sidebar nav a.active { background: #262838; }
+
+main { flex: 1; min-width: 0; padding: 20px 28px; }
+.topbar { margin-bottom: 20px; }
+.topbar input, #sf input, #af input {
+  width: 100%;
+  max-width: 520px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+}
+
+button {
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  border-radius: 8px;
+  padding: 9px 14px;
+  cursor: pointer;
+}
+button.danger { background: #7f1d1d; }
+button.chip { background: #262838; color: var(--text); }
+button.chip.on { background: var(--accent); }
+
+h1 { margin: 0 0 16px; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.loading { color: var(--muted); }
+.hidden { display: none !important; }
+
+.row { margin: 24px 0; }
+.row h2 { font-size: 18px; margin: 0 0 10px; }
+.strip { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 10px; }
+.grid { display: flex; flex-wrap: wrap; gap: 14px; }
+
+.card { flex: 0 0 150px; color: var(--text); text-decoration: none; }
+.poster {
+  height: 225px;
+  border-radius: 10px;
+  background: #222 center / cover no-repeat;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  text-align: center;
+  color: var(--muted);
+}
+.title { margin-top: 6px; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.hero {
+  min-height: 300px;
+  border-radius: 14px;
+  background: linear-gradient(90deg, var(--bg) 20%, transparent) , #222 center / cover no-repeat;
+  padding: 28px;
+  display: flex;
+  align-items: flex-end;
+}
+.hero-info { max-width: 620px; }
+.hero h1 { margin: 0 0 8px; }
+.actions { margin-top: 14px; }
+
+.seasons { display: flex; gap: 8px; flex-wrap: wrap; margin: 20px 0; }
+.episodes { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+.ep { background: var(--panel); color: var(--text); text-align: left; }
+
+#streams { margin-top: 20px; display: grid; gap: 8px; }
+#streams h3 { margin: 0 0 4px; }
+.stream {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.stream.disabled { opacity: 0.5; cursor: default; }
+
+.addform { display: flex; gap: 10px; margin-bottom: 16px; }
+.addform input { flex: 1; }
+.addon {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  background: var(--panel);
+  padding: 14px;
+  border-radius: 12px;
+  margin-bottom: 10px;
+}
+.addon img { width: 48px; height: 48px; border-radius: 8px; object-fit: cover; background: #222; }
+.addon > div { flex: 1; }
+
+#player {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.player-box { position: relative; width: min(1200px, 96vw); }
+#video { width: 100%; max-height: 85vh; background: #000; }
+.close { position: absolute; top: -44px; right: 0; }
+
+/* Foco visível para controle remoto e teclado */
+:focus { outline: none; }
+:focus-visible {
+  outline: 3px solid #ffffff;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 6px rgba(139, 92, 246, 0.45);
+}
+.card:focus-visible .poster { transform: scale(1.04); }
+.poster { transition: transform 0.15s ease; }
+
+/* Telas grandes (TV): textos e cartazes maiores, legíveis a 3 metros */
+html { font-size: 16px; }
+body { font-size: 1rem; }
+@media (min-width: 1500px) {
+  html { font-size: 20px; }
+  .card { flex-basis: 210px; }
+  .poster { height: 315px; }
+  .sidebar { width: 240px; }
+}
