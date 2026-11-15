@@ -58,9 +58,12 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
-      - name: NDK
-        run: sdkmanager --install "ndk;27.0.12077973"
+      - name: Android SDK e NDK
+        run: |
+          SDKMANAGER=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -1)
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;27.0.12077973"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
@@ -77,8 +80,6 @@ jobs:
         run: python3 android-tv/patch_manifest.py gen/android/app/src/main/AndroidManifest.xml
       - name: Gerar APK
         working-directory: src-tauri
-        env:
-          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
         run: cargo tauri android build --apk --target aarch64
       - uses: actions/upload-artifact@v4
         with:
@@ -86,7 +87,7 @@ jobs:
           path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
 
   release:
-    if: github.event_name != 'pull_request'
+    if: ${{ always() && github.event_name != 'pull_request' && needs.desktop.result == 'success' }}
     needs: [test, desktop, android]
     runs-on: ubuntu-22.04
     steps:
