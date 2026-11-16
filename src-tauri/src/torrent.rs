@@ -215,6 +215,14 @@ impl TorrentEngine {
             .ok_or_else(|| "o torrent não produziu um arquivo reproduzível".to_string())?;
         let id = handle.id();
 
+        // librqbit retorna o handle enquanto a inicialização ainda pode estar em andamento.
+        // A seleção de arquivos só funciona depois que o torrent sai desse estado; aguarde
+        // explicitamente para evitar "can't update initializing torrent" em fontes Torrentio.
+        tokio::time::timeout(OPEN_TIMEOUT, handle.wait_until_initialized())
+            .await
+            .map_err(|_| "a inicialização do torrent demorou demais".to_string())?
+            .map_err(|e| format!("não foi possível inicializar o torrent: {e:#}"))?;
+
         let plan = match prepare(&session, &handle, requested).await {
             Ok(plan) => plan,
             Err(e) => {
