@@ -1,0 +1,66 @@
+name: Matriz de instalação (diagnóstico)
+
+# Diagnóstico: instala o APK x86_64 da última release em vários níveis de Android,
+# com a assinatura original (v2+v3) e com uma variante que também tem assinatura v1.
+on:
+  push:
+    branches: [debug/install-test]
+  workflow_dispatch:
+
+jobs:
+  matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [24, 26, 29, 31, 33, 34]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Habilitar KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+
+      - name: Baixar APK x86_64 da última release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download --repo "${{ github.repository }}" --pattern 'app-x86_64-release.apk' --dir apks
+          mkdir -p variants
+          cp apks/app-x86_64-release.apk variants/original.apk
+
+      - name: Verificar assinatura com apksigner oficial
+        run: |
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          echo "build-tools: $BT"
+          "$BT/apksigner" verify --verbose --print-certs variants/original.apk | tee apksigner-original.txt
+
+      - name: Criar variante com assinatura v1 + v2 + v3
+        run: |
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          keytool -genkeypair -keystore test.jks -storepass android -keypass android \
+            -alias t -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=CineHub Teste"
+          # Remove a assinatura atual e assina de novo com os três esquemas
+          "$BT/zipalign" -f -p 4 variants/original.apk aligned.apk
+          "$BT/apksigner" sign --ks test.jks --ks-pass pass:android --ks-key-alias t \
+            --key-pass pass:android --v1-signing-enabled true --v2-signing-enabled true \
+            --v3-signing-enabled true --out variants/v1v2v3.apk aligned.apk
+          "$BT/apksigner" verify --verbose --print-certs variants/v1v2v3.apk | tee apksigner-v1v2v3.txt
+
+      - name: Instalar as duas variantes no Android ${{ matrix.api }}
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: default
+          disable-animations: true
+          script: |
+            adb wait-for-device
+            echo "== Android $(adb shell getprop ro.build.version.release) (API $(adb shell getprop ro.build.version.sdk)) | ABIs: $(adb shell getprop ro.product.cpu.abilist)"
+            for v in original v1v2v3; do
+              adb uninstall com.cinehub.app >/dev/null 2>&1 || true
+              echo "== instalando variante $v"
+              adb install -r variants/$v.apk; echo "exit=$?"
+              adb shell pm list packages | grep -i cinehub || echo "pacote não instalado"
+            done
