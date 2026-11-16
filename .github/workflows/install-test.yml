@@ -64,8 +64,8 @@ jobs:
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-          ls -la /dev/kvm || true
+          sudo udevadm trigger --name-match=kvm || true
+          ls -la /dev/kvm && echo "KVM disponível" || echo "SEM KVM: emulador rodará por software (lento)"
 
       - name: Baixar APK arm64 da última release
         env:
@@ -81,6 +81,7 @@ jobs:
           arch: arm64-v8a
           target: default
           disable-animations: true
+          emulator-boot-timeout: 1800
           script: |
             adb wait-for-device
             adb shell getprop ro.build.version.release
