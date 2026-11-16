@@ -1,0 +1,34 @@
+name: Teste de conflito de assinatura (diagnóstico)
+on:
+  push:
+    branches: [debug/install-test]
+  workflow_dispatch:
+jobs:
+  conflict:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Habilitar KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+      - name: Baixar as builds
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p variants
+          gh release download build-7 --repo "${{ github.repository }}" --pattern 'app-universal-release.apk' --dir variants
+          mv variants/app-universal-release.apk variants/build7.apk
+          gh release download build-18 --repo "${{ github.repository }}" --pattern 'app-x86_64-release.apk' --dir variants
+          mv variants/app-x86_64-release.apk variants/build18-x86_64.apk
+          ls -l variants
+      - name: Emulador Android 10 (x86_64)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          arch: x86_64
+          target: default
+          disable-animations: true
+          script: bash tests/android/conflict-check.sh
