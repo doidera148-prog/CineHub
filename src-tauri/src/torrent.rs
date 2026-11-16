@@ -465,7 +465,7 @@ mod tests {
         let suffix = axum::http::HeaderValue::from_static("bytes=-10");
         assert_eq!(parse_range(Some(&suffix), 100), Ok((90, 99, true)));
         let invalid = axum::http::HeaderValue::from_static("bytes=100-");
-        assert!(parse_range(Some(&invalid, 100).is_err());
+        assert!(parse_range(Some(&invalid), 100).is_err());
     }
 
     #[test]
