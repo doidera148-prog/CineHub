@@ -46,6 +46,7 @@ jobs:
         continue-on-error: true
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: src-tauri
 
   web-smoke:
     runs-on: ubuntu-22.04
