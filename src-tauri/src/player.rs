@@ -147,7 +147,15 @@ mod win {
     extern "system" {
         fn EnumChildWindows(parent: Hwnd, callback: EnumProc, lparam: isize) -> Bool;
         fn ShowWindow(hwnd: Hwnd, cmd: i32) -> Bool;
-        fn SetWindowPos(hwnd: Hwnd, after: Hwnd, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> Bool;
+        fn SetWindowPos(
+            hwnd: Hwnd,
+            after: Hwnd,
+            x: i32,
+            y: i32,
+            cx: i32,
+            cy: i32,
+            flags: u32,
+        ) -> Bool;
     }
 
     const SW_HIDE: i32 = 0;
@@ -171,7 +179,11 @@ mod win {
         let mut children: Vec<usize> = Vec::new();
         // SAFETY: parent é o HWND da janela principal; collect só lê o ponteiro passado.
         unsafe {
-            EnumChildWindows(parent as usize as Hwnd, collect, &mut children as *mut Vec<usize> as isize);
+            EnumChildWindows(
+                parent as usize as Hwnd,
+                collect,
+                &mut children as *mut Vec<usize> as isize,
+            );
         }
         let mut hidden = Vec::new();
         for handle in children {
@@ -186,7 +198,15 @@ mod win {
         }
         // SAFETY: video é o HWND do mpv (propriedade window-id).
         unsafe {
-            SetWindowPos(video, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+            SetWindowPos(
+                video,
+                HWND_TOP,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+            );
         }
         hidden
     }
