@@ -57,8 +57,9 @@ jobs:
             adb install -r apks/app-arm64-release.apk; echo "exit=$?"
 
   install-arm64:
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 60
+    # O SDK do Android não traz o emulador para Linux ARM64: o arm64 roda por software num runner x86_64.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 100
     steps:
       - name: Habilitar KVM
         run: |
@@ -81,7 +82,7 @@ jobs:
           arch: arm64-v8a
           target: default
           disable-animations: true
-          emulator-boot-timeout: 1800
+          emulator-boot-timeout: 5400
           script: |
             adb wait-for-device
             adb shell getprop ro.build.version.release
