@@ -94,6 +94,8 @@ jobs:
         if: matrix.platform == 'windows-latest'
         working-directory: src-tauri
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: ../.github/scripts/prepare-libmpv.ps1
       - name: Gerar pacotes
         working-directory: src-tauri

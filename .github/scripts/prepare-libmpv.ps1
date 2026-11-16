@@ -10,15 +10,22 @@
 param([string]$Root = (Get-Location).Path)
 $ErrorActionPreference = 'Stop'
 
+# Release fixada; o nome exato do arquivo (que inclui o hash do commit) é lido da API do GitHub.
 $Tag = '20260921'
-$Archive = "mpv-dev-x86_64-$Tag-git-e76a35ec95.7z"
-$Url = "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/$Tag/$Archive"
+$headers = @{ 'Accept' = 'application/vnd.github+json' }
+if ($env:GH_TOKEN) { $headers['Authorization'] = "Bearer $env:GH_TOKEN" }
+$release = Invoke-RestMethod -Headers $headers `
+    -Uri "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/tags/$Tag"
+$asset = $release.assets | Where-Object { $_.name -match '^mpv-dev-x86_64-\d{8}-git-[0-9a-f]+\.7z$' } | Select-Object -First 1
+if (-not $asset) { throw "nenhum pacote mpv-dev x86_64 na release $Tag" }
+$Archive = $asset.name
 
 $work = Join-Path $env:RUNNER_TEMP 'libmpv'
 $extract = Join-Path $work 'x'
 New-Item -ItemType Directory -Force $work | Out-Null
 $archivePath = Join-Path $work $Archive
-Invoke-WebRequest -Uri $Url -OutFile $archivePath
+Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $archivePath
+Write-Host "baixado: $Archive"
 
 $7z = 'C:\Program Files\7-Zip\7z.exe'
 & $7z x $archivePath "-o$extract" -y | Out-Null
