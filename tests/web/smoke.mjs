@@ -13,12 +13,15 @@ const server = createServer(async (req, res) => {
   const path = normalize(decodeURIComponent(new URL(req.url, 'http://x').pathname));
   const file = join(WEB, path === '/' ? 'index.html' : path);
   if (!file.startsWith(WEB)) return res.writeHead(403).end();
+  // Lê o arquivo antes de responder: se faltar, o 404 sai uma única vez.
+  let body;
   try {
-    res.writeHead(200, { 'Content-Type': TYPES[extname(file)] || 'application/octet-stream' });
-    res.end(await readFile(file));
+    body = await readFile(file);
   } catch {
-    res.writeHead(404).end();
+    return res.writeHead(404).end();
   }
+  res.writeHead(200, { 'Content-Type': TYPES[extname(file)] || 'application/octet-stream' });
+  res.end(body);
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -32,8 +35,11 @@ const fixtures = `
       case 'search': return { rows: [{ title: 'Busca', addon: 'Addon de teste', metas: metas(3, 'busca') }] };
       case 'catalog_page': return { metas: [] };
       case 'list_addons': return [{ transportUrl: 'http://x/manifest.json', manifest: { name: 'Addon de teste', version: '1.0.0', resources: ['catalog'], types: ['movie'] } }];
-      case 'meta': return { meta: { id: 'tt1', type: 'movie', name: 'Titulo de teste', description: 'Descrição', genres: ['Ação'] } };
-      case 'streams': return { streams: [{ name: 'Fonte', title: 'Qualidade', addonName: 'Addon de teste', note: null, externalUrl: 'javascript:alert(1)' }], subtitles: [] };
+      case 'meta': return { meta: { id: args.id, type: 'movie', name: 'Titulo ' + args.id, description: 'Descrição', genres: ['Ação'] } };
+      case 'streams':
+        // tt2 simula um addon que falha: a tela precisa mostrar o erro, não ficar carregando.
+        if (args.id === 'tt2') throw new Error('addon fora do ar');
+        return { streams: [{ name: 'Fonte', title: 'Qualidade', addonName: 'Addon de teste', note: null, externalUrl: 'javascript:alert(1)' }], subtitles: [], errors: [] };
       case 'subtitle': return 'WEBVTT';
       default: return {};
     }
@@ -58,6 +64,14 @@ async function check(viewport, label) {
     if (/Erro:/.test(text)) failures.push(`[${label}] ${hash}: página mostrou erro: ${text.slice(0, 120)}`);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     if (overflow > 0) failures.push(`[${label}] ${hash}: rolagem horizontal de ${overflow}px`);
+  }
+
+  // Fontes com erro: a mensagem aparece e o carregamento não fica travado.
+  await page.goto(`${base}/#/detail/movie/tt2`);
+  await page.waitForTimeout(500);
+  const fontes = await page.locator('#view').innerText();
+  if (/Buscando fontes/.test(fontes) || !/Não consegui buscar as fontes/.test(fontes)) {
+    failures.push(`[${label}] erro de fontes não foi mostrado ao usuário`);
   }
 
   await page.goto(`${base}/#/movies`);

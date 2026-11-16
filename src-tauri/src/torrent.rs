@@ -1,9 +1,21 @@
 //! Motor BitTorrent e servidor HTTP local com suporte a solicitações Range.
+//!
+//! Política de recursos:
+//! - Apenas um torrent fica ativo por vez. Abrir outro remove o anterior (sessão e arquivos
+//!   baixados) e invalida as URLs antigas.
+//! - A pasta de torrents é esvaziada ao iniciar o app, para não acumular dados de execuções
+//!   anteriores.
+//! - Somente o arquivo de vídeo escolhido é baixado.
+//! - Abrir um magnet tem limite de tempo; sem fontes o app informa o erro em vez de travar.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::Duration,
 };
 
 use axum::{
@@ -13,7 +25,7 @@ use axum::{
     routing::get,
     Router,
 };
-use librqbit::{AddTorrent, AddTorrentOptions, ManagedTorrent, Session};
+use librqbit::{api::TorrentIdOrHash, AddTorrent, ManagedTorrent, Session, SessionOptions};
 use serde::Serialize;
 use tokio::{
     io::{AsyncReadExt, AsyncSeekExt},
@@ -23,6 +35,9 @@ use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
 const MAX_TORRENT_BYTES: usize = 8 * 1024 * 1024;
+const MAX_MAGNET_BYTES: usize = 16 * 1024;
+/// Tempo máximo para obter metadados e adicionar o torrent.
+const OPEN_TIMEOUT: Duration = Duration::from_secs(90);
 
 #[derive(Clone)]
 struct StreamFile {
@@ -42,8 +57,11 @@ pub struct TorrentEngine {
     session: OnceCell<Arc<Session>>,
     download_dir: PathBuf,
     files: Arc<RwLock<HashMap<String, StreamFile>>>,
+    /// Id do torrent ativo. Também serializa as aberturas (uma por vez).
+    active: tokio::sync::Mutex<Option<usize>>,
     listener: Mutex<Option<std::net::TcpListener>>,
     base_url: String,
+    server_failed: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -56,8 +74,32 @@ pub struct TorrentPlayback {
     pub size_bytes: u64,
 }
 
+/// Arquivo de vídeo candidato dentro de um torrent.
+#[derive(Debug, Clone, PartialEq)]
+struct Candidate {
+    index: usize,
+    name: String,
+    size: u64,
+    mime: &'static str,
+}
+
+/// Resultado da preparação de um torrent recém-adicionado.
+struct Plan {
+    name: String,
+    file_index: usize,
+    file_name: String,
+    size: u64,
+    mime: &'static str,
+}
+
 impl TorrentEngine {
     pub fn new(download_dir: PathBuf) -> Result<Self, String> {
+        // A pasta é exclusiva do CineHub: apaga restos de execuções anteriores.
+        if download_dir.exists() {
+            if let Err(e) = std::fs::remove_dir_all(&download_dir) {
+                eprintln!("aviso: não consegui limpar a pasta de torrents: {e}");
+            }
+        }
         std::fs::create_dir_all(&download_dir).map_err(|e| format!("pasta de torrents: {e}"))?;
         let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
             .map_err(|e| format!("não foi possível iniciar o servidor de mídia: {e}"))?;
@@ -72,8 +114,10 @@ impl TorrentEngine {
             session: OnceCell::new(),
             download_dir,
             files: Arc::new(RwLock::new(HashMap::new())),
+            active: tokio::sync::Mutex::new(None),
             listener: Mutex::new(Some(listener)),
             base_url: format!("http://{addr}"),
+            server_failed: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -92,15 +136,25 @@ impl TorrentEngine {
             .with_state(HttpState {
                 files: self.files.clone(),
             });
-        axum::serve(listener, router)
+        let result = axum::serve(listener, router)
             .await
-            .map_err(|e| format!("servidor de mídia parou: {e}"))
+            .map_err(|e| format!("servidor de mídia parou: {e}"));
+        if result.is_err() {
+            self.server_failed.store(true, Ordering::Relaxed);
+        }
+        result
     }
 
     async fn session(&self) -> Result<Arc<Session>, String> {
         self.session
             .get_or_try_init(|| async {
-                Session::new(self.download_dir.clone())
+                // Sem descoberta na rede local (LSD) e sem porta de escuta de entrada:
+                // o app só baixa, não anuncia nem aceita conexões de terceiros.
+                let opts = SessionOptions {
+                    disable_local_service_discovery: true,
+                    ..SessionOptions::default()
+                };
+                Session::new_with_opts(self.download_dir.clone(), opts)
                     .await
                     .map_err(|e| format!("não foi possível iniciar o motor torrent: {e:#}"))
             })
@@ -114,17 +168,10 @@ impl TorrentEngine {
         file_index: Option<usize>,
     ) -> Result<TorrentPlayback, String> {
         let magnet = magnet.trim();
-        if !magnet.starts_with("magnet:?") || magnet.len() > 16 * 1024 {
+        if !magnet.starts_with("magnet:?") || magnet.len() > MAX_MAGNET_BYTES {
             return Err("link magnet inválido ou grande demais".into());
         }
-        let session = self.session().await?;
-        let handle = session
-            .add_torrent(AddTorrent::from_url(magnet), None)
-            .await
-            .map_err(|e| format!("não foi possível abrir o magnet: {e:#}"))?
-            .into_handle()
-            .ok_or_else(|| "o magnet não produziu um torrent reproduzível".to_string())?;
-        self.make_playback(handle, file_index).await
+        self.open(AddTorrent::from_url(magnet), file_index).await
     }
 
     pub async fn add_torrent_file(
@@ -135,77 +182,136 @@ impl TorrentEngine {
         if bytes.is_empty() || bytes.len() > MAX_TORRENT_BYTES {
             return Err("arquivo .torrent vazio ou maior que 8 MiB".into());
         }
-        let session = self.session().await?;
-        let handle = session
-            .add_torrent(
-                AddTorrent::from_bytes(bytes),
-                Some(AddTorrentOptions::default()),
-            )
-            .await
-            .map_err(|e| format!("não foi possível abrir o arquivo .torrent: {e:#}"))?
-            .into_handle()
-            .ok_or_else(|| "o arquivo .torrent não produziu um torrent reproduzível".to_string())?;
-        self.make_playback(handle, file_index).await
+        self.open(AddTorrent::from_bytes(bytes), file_index).await
     }
 
-    async fn make_playback(
+    async fn open(
         &self,
-        handle: Arc<ManagedTorrent>,
-        requested_index: Option<usize>,
+        add: AddTorrent<'_>,
+        requested: Option<usize>,
     ) -> Result<TorrentPlayback, String> {
-        let available = handle
-            .with_metadata(|metadata| {
-                metadata
-                    .info
-                    .iter_file_details()
-                    .enumerate()
-                    .map(|(index, file)| {
-                        let name = file.filename.to_string();
-                        let extension = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
-                        (index, name, file.len, mime_for_extension(&extension))
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .map_err(|e| format!("metadados do torrent indisponíveis: {e:#}"))?;
+        if self.server_failed.load(Ordering::Relaxed) {
+            return Err("o servidor de mídia parou; reinicie o CineHub".into());
+        }
+        // Uma abertura por vez: a trava também protege o torrent ativo.
+        let mut active = self.active.lock().await;
+        let session = self.session().await?;
 
-        let chosen = if let Some(index) = requested_index {
-            available
-                .iter()
-                .find(|(candidate, _, _, mime)| *candidate == index && mime.is_some())
-                .cloned()
-                .ok_or_else(|| {
-                    "o índice informado não corresponde a um arquivo de vídeo".to_string()
-                })?
-        } else {
-            available
-                .iter()
-                .filter(|(_, _, _, mime)| mime.is_some())
-                .max_by_key(|(_, _, size, _)| *size)
-                .cloned()
-                .ok_or_else(|| {
-                    "este torrent não contém um formato de vídeo compatível".to_string()
-                })?
+        let added = tokio::time::timeout(OPEN_TIMEOUT, session.add_torrent(add, None))
+            .await
+            .map_err(|_| "o torrent não respondeu a tempo (sem fontes ou sem conexão)".to_string())?
+            .map_err(|e| format!("não foi possível abrir o torrent: {e:#}"))?;
+        let handle = added
+            .into_handle()
+            .ok_or_else(|| "o torrent não produziu um arquivo reproduzível".to_string())?;
+        let id = handle.id();
+
+        let plan = match prepare(&session, &handle, requested).await {
+            Ok(plan) => plan,
+            Err(e) => {
+                // Remove o torrent recém-adicionado, sem tocar no ativo anterior.
+                if *active != Some(id) {
+                    let _ = session.delete(TorrentIdOrHash::Id(id), true).await;
+                }
+                return Err(e);
+            }
         };
-        let (file_index, file_name, size, mime) = chosen;
-        let mime = mime.expect("arquivo de vídeo validado");
+
+        // Só agora o torrent anterior sai: libera disco e invalida as URLs antigas.
+        if let Some(previous) = active.replace(id).filter(|prev| *prev != id) {
+            let _ = session.delete(TorrentIdOrHash::Id(previous), true).await;
+        }
         let token = Uuid::new_v4().simple().to_string();
-        self.files.write().await.insert(
-            token.clone(),
-            StreamFile {
-                torrent: handle.clone(),
-                file_index,
-                size,
-                mime_type: mime,
-            },
-        );
+        {
+            let mut files = self.files.write().await;
+            files.clear();
+            files.insert(
+                token.clone(),
+                StreamFile {
+                    torrent: handle,
+                    file_index: plan.file_index,
+                    size: plan.size,
+                    mime_type: plan.mime,
+                },
+            );
+        }
 
         Ok(TorrentPlayback {
             stream_url: format!("{}/stream/{token}", self.base_url),
-            name: handle.name().unwrap_or_else(|| "Torrent".into()),
-            file_name,
-            mime_type: mime.into(),
-            size_bytes: size,
+            name: plan.name,
+            file_name: plan.file_name,
+            mime_type: plan.mime.into(),
+            size_bytes: plan.size,
         })
+    }
+}
+
+/// Lê os metadados, escolhe o vídeo e restringe o download a esse arquivo.
+async fn prepare(
+    session: &Arc<Session>,
+    handle: &Arc<ManagedTorrent>,
+    requested: Option<usize>,
+) -> Result<Plan, String> {
+    let files = handle
+        .with_metadata(|metadata| {
+            metadata
+                .info
+                .iter_file_details()
+                .enumerate()
+                .map(|(index, file)| (index, file.filename.to_string(), file.len))
+                .collect::<Vec<_>>()
+        })
+        .map_err(|e| format!("metadados do torrent indisponíveis: {e:#}"))?;
+    let chosen = pick_video(&video_candidates(files), requested)?;
+
+    let only = HashSet::from([chosen.index]);
+    session
+        .update_only_files(handle, &only)
+        .await
+        .map_err(|e| format!("não foi possível selecionar o arquivo: {e:#}"))?;
+
+    Ok(Plan {
+        name: handle.name().unwrap_or_else(|| "Torrent".into()),
+        file_index: chosen.index,
+        file_name: chosen.name,
+        size: chosen.size,
+        mime: chosen.mime,
+    })
+}
+
+/// Mantém só arquivos de vídeo reproduzíveis e não vazios.
+fn video_candidates(files: impl IntoIterator<Item = (usize, String, u64)>) -> Vec<Candidate> {
+    files
+        .into_iter()
+        .filter_map(|(index, name, size)| {
+            let extension = name
+                .rsplit_once('.')
+                .map(|(_, ext)| ext.to_ascii_lowercase())
+                .unwrap_or_default();
+            let mime = mime_for_extension(&extension)?;
+            (size > 0).then_some(Candidate {
+                index,
+                name,
+                size,
+                mime,
+            })
+        })
+        .collect()
+}
+
+/// Com índice: exige que ele seja um dos candidatos. Sem índice: escolhe o maior vídeo.
+fn pick_video(candidates: &[Candidate], requested: Option<usize>) -> Result<Candidate, String> {
+    match requested {
+        Some(index) => candidates
+            .iter()
+            .find(|c| c.index == index)
+            .cloned()
+            .ok_or_else(|| "o índice informado não corresponde a um arquivo de vídeo".to_string()),
+        None => candidates
+            .iter()
+            .max_by_key(|c| c.size)
+            .cloned()
+            .ok_or_else(|| "este torrent não contém um formato de vídeo compatível".to_string()),
     }
 }
 
@@ -214,21 +320,28 @@ async fn stream_file(
     AxumPath(token): AxumPath<String>,
     headers: HeaderMap,
 ) -> Response<Body> {
-    let file = match state.files.read().await.get(&token).cloned() {
-        Some(file) => file,
-        None => return response_error(StatusCode::NOT_FOUND, "stream não encontrado"),
+    let Some(file) = state.files.read().await.get(&token).cloned() else {
+        return response_error(StatusCode::NOT_FOUND, "stream não encontrado");
     };
 
-    let (start, end, partial) = match parse_range(headers.get(header::RANGE), file.size) {
-        Ok(range) => range,
-        Err(()) => {
-            return Response::builder()
-                .status(StatusCode::RANGE_NOT_SATISFIABLE)
-                .header(header::CONTENT_RANGE, format!("bytes */{}", file.size))
-                .header(header::ACCEPT_RANGES, "bytes")
-                .body(Body::empty())
-                .unwrap_or_else(|_| Response::new(Body::empty()));
-        }
+    if file.size == 0 {
+        // Arquivo vazio: resposta válida sem corpo (evita Content-Length inconsistente).
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, file.mime_type)
+            .header(header::CONTENT_LENGTH, "0")
+            .header(header::ACCEPT_RANGES, "bytes")
+            .body(Body::empty())
+            .unwrap_or_else(|_| Response::new(Body::empty()));
+    }
+
+    let Ok((start, end, partial)) = parse_range(headers.get(header::RANGE), file.size) else {
+        return Response::builder()
+            .status(StatusCode::RANGE_NOT_SATISFIABLE)
+            .header(header::CONTENT_RANGE, format!("bytes */{}", file.size))
+            .header(header::ACCEPT_RANGES, "bytes")
+            .body(Body::empty())
+            .unwrap_or_else(|_| Response::new(Body::empty()));
     };
 
     let mut stream = match file.torrent.clone().stream(file.file_index).await {
@@ -246,7 +359,7 @@ async fn stream_file(
             &format!("seek torrent: {e}"),
         );
     }
-    let length = end.saturating_sub(start).saturating_add(1);
+    let length = end - start + 1;
     let body = Body::from_stream(ReaderStream::new(stream.take(length)));
     let status = if partial {
         StatusCode::PARTIAL_CONTENT
@@ -269,10 +382,9 @@ async fn stream_file(
         .unwrap_or_else(|_| Response::new(Body::empty()))
 }
 
+/// Interpreta o cabeçalho Range para um arquivo com `size > 0`.
+/// Retorna (início, fim inclusivo, se é resposta parcial).
 fn parse_range(value: Option<&axum::http::HeaderValue>, size: u64) -> Result<(u64, u64, bool), ()> {
-    if size == 0 {
-        return Ok((0, 0, false));
-    }
     let Some(value) = value else {
         return Ok((0, size - 1, false));
     };
@@ -327,6 +439,15 @@ fn mime_for_extension(extension: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
 
+    fn candidate(index: usize, size: u64) -> Candidate {
+        Candidate {
+            index,
+            name: format!("f{index}.mp4"),
+            size,
+            mime: "video/mp4",
+        }
+    }
+
     #[test]
     fn range_parser_handles_full_and_partial_requests() {
         assert_eq!(parse_range(None, 100), Ok((0, 99, false)));
@@ -343,5 +464,36 @@ mod tests {
         assert_eq!(mime_for_extension("mp4"), Some("video/mp4"));
         assert_eq!(mime_for_extension("mkv"), Some("video/x-matroska"));
         assert_eq!(mime_for_extension("txt"), None);
+    }
+
+    #[test]
+    fn candidates_skip_non_video_and_empty_files() {
+        let files = vec![
+            (0, "leia.txt".to_string(), 10),
+            (1, "vazio.mp4".to_string(), 0),
+            (2, "filme.MKV".to_string(), 500),
+            (3, "semextensao".to_string(), 900),
+        ];
+        let found = video_candidates(files);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].index, 2);
+        assert_eq!(found[0].mime, "video/x-matroska");
+    }
+
+    #[test]
+    fn default_pick_is_the_largest_video() {
+        let picked = pick_video(
+            &[candidate(0, 10), candidate(1, 99), candidate(2, 50)],
+            None,
+        );
+        assert_eq!(picked.map(|c| c.index), Ok(1));
+    }
+
+    #[test]
+    fn requested_index_must_be_a_video() {
+        let list = [candidate(0, 10), candidate(2, 50)];
+        assert_eq!(pick_video(&list, Some(2)).map(|c| c.index), Ok(2));
+        assert!(pick_video(&list, Some(1)).is_err());
+        assert!(pick_video(&[], None).is_err());
     }
 }

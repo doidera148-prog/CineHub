@@ -5,7 +5,7 @@ use std::{future::Future, time::Duration};
 use futures::future::join_all;
 use futures::stream::{self, StreamExt};
 use serde_json::{json, Value};
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::{
     addon::{self, CatalogDef, Installed},
@@ -55,9 +55,17 @@ pub async fn install_addon(state: State<'_, AppState>, url: String) -> Result<Va
     let _save = state.save_lock.lock().await;
     let snapshot = {
         let mut list = state.addons.write().await;
-        list.retain(|a| {
-            a.transport_url != installed.transport_url && a.manifest.id != installed.manifest.id
-        });
+        // Reinstalar o mesmo endereço atualiza o addon. Outro endereço com o mesmo id não
+        // substitui o existente sem aviso: ele é recusado.
+        if let Some(other) = list.iter().find(|a| {
+            a.manifest.id == installed.manifest.id && a.transport_url != installed.transport_url
+        }) {
+            return Err(format!(
+                "já existe um addon com este id ({}). Remova-o antes de instalar outro endereço.",
+                other.manifest.name
+            ));
+        }
+        list.retain(|a| a.transport_url != installed.transport_url);
         list.push(installed.clone());
         list.clone()
     };
@@ -93,10 +101,13 @@ pub async fn home(state: State<'_, AppState>, kind: String) -> Result<Value, Str
     Ok(json!({ "rows": rows }))
 }
 
+/// Tamanho máximo do texto de busca, em caracteres.
+const MAX_QUERY_CHARS: usize = 200;
+
 /// Busca em todos os catálogos que aceitam o parâmetro "search".
 #[tauri::command]
 pub async fn search(state: State<'_, AppState>, q: String) -> Result<Value, String> {
-    let needle = q.trim().to_string();
+    let needle: String = q.trim().chars().take(MAX_QUERY_CHARS).collect();
     if needle.is_empty() {
         return Ok(json!({ "rows": [] }));
     }
@@ -253,18 +264,29 @@ pub async fn streams(
             let cache = state.cache.clone();
             let (kind, id, a) = (kind.clone(), id.clone(), a.clone());
             async move {
-                let list = bounded(addon::streams(&http, &cache, &a, &kind, &id))
-                    .await
-                    .unwrap_or_default();
-                list.into_iter()
-                    .map(|mut s| {
-                        annotate(&mut s, &a.manifest.name);
-                        s
-                    })
-                    .collect::<Vec<Value>>()
+                match bounded(addon::streams(&http, &cache, &a, &kind, &id)).await {
+                    Ok(list) => (
+                        list.into_iter()
+                            .map(|mut s| {
+                                annotate(&mut s, &a.manifest.name);
+                                s
+                            })
+                            .collect::<Vec<Value>>(),
+                        None,
+                    ),
+                    Err(e) => (
+                        Vec::new(),
+                        Some(json!({ "addon": a.manifest.name, "error": e })),
+                    ),
+                }
             }
         });
-    let streams: Vec<Value> = join_all(stream_jobs).await.into_iter().flatten().collect();
+    let mut streams: Vec<Value> = Vec::new();
+    let mut errors: Vec<Value> = Vec::new();
+    for (list, error) in join_all(stream_jobs).await {
+        streams.extend(list);
+        errors.extend(error);
+    }
 
     let sub_jobs = addons
         .iter()
@@ -286,7 +308,7 @@ pub async fn streams(
         .filter(|s| s.get("url").and_then(Value::as_str).is_some())
         .collect();
 
-    Ok(json!({ "streams": streams, "subtitles": subtitles }))
+    Ok(json!({ "streams": streams, "subtitles": subtitles, "errors": errors }))
 }
 
 /// Marca o que o app consegue fazer com cada fonte e adiciona o nome do addon.
@@ -326,7 +348,9 @@ fn annotate(s: &mut Value, addon_name: &str) {
                 .map(|id| format!("https://www.youtube.com/watch?v={id}"))
         });
 
-    let note: Option<&str> = if !url.is_empty() {
+    let note: Option<&str> = if !url.is_empty() && !is_app_url(&url) {
+        Some("link não suportado pelo app")
+    } else if !url.is_empty() {
         if needs_headers {
             Some("exige cabeçalhos especiais; pode não tocar")
         } else if not_web_ready || url.to_lowercase().contains(".mkv") {
@@ -343,13 +367,22 @@ fn annotate(s: &mut Value, addon_name: &str) {
     };
 
     if let Some(o) = s.as_object_mut() {
+        // Um link com esquema desconhecido (file:, intent:, javascript:…) é descartado.
+        if !url.is_empty() && !is_app_url(&url) {
+            o.remove("url");
+        }
         o.insert("addonName".into(), json!(addon_name));
-        o.insert("note".into(), note.map(Value::from).unwrap_or(Value::Null));
+        o.insert("note".into(), note.map_or(Value::Null, Value::from));
         o.insert(
             "externalUrl".into(),
-            external.map(Value::from).unwrap_or(Value::Null),
+            external.map_or(Value::Null, Value::from),
         );
     }
+}
+
+/// Esquemas que o app reproduz: http(s) e magnet (este último vai para o motor torrent).
+fn is_app_url(url: &str) -> bool {
+    url.starts_with("https://") || url.starts_with("http://") || url.starts_with("magnet:?")
 }
 
 /// Legenda: baixa o arquivo (só URLs públicas, validando cada redirecionamento,
@@ -360,6 +393,8 @@ pub async fn subtitle(state: State<'_, AppState>, url: String) -> Result<String,
     Ok(srt_to_vtt(&String::from_utf8_lossy(&bytes)))
 }
 
+/// Abre um torrent (magnet ou bytes de .torrent) e devolve a URL local do arquivo de vídeo.
+/// Recebe exatamente um dos dois. Só um torrent fica ativo por vez.
 #[tauri::command]
 pub async fn torrent_open(
     state: State<'_, AppState>,
@@ -367,9 +402,13 @@ pub async fn torrent_open(
     torrent_bytes: Option<Vec<u8>>,
     file_index: Option<usize>,
 ) -> Result<Value, String> {
+    let engine = state
+        .torrent
+        .as_ref()
+        .ok_or("o motor de torrent não está disponível neste aparelho")?;
     match (magnet, torrent_bytes) {
         (Some(m), None) => {
-            let p = state.torrent.add_magnet(m, file_index).await?;
+            let p = engine.add_magnet(m, file_index).await?;
             Ok(json!({
                 "streamUrl": p.stream_url,
                 "name": p.name,
@@ -379,7 +418,7 @@ pub async fn torrent_open(
             }))
         }
         (None, Some(bytes)) => {
-            let p = state.torrent.add_torrent_file(bytes, file_index).await?;
+            let p = engine.add_torrent_file(bytes, file_index).await?;
             Ok(json!({
                 "streamUrl": p.stream_url,
                 "name": p.name,
@@ -390,6 +429,31 @@ pub async fn torrent_open(
         }
         _ => Err("forneça exatamente um magnet ou um arquivo .torrent".into()),
     }
+}
+
+/// Tamanho máximo de um backup da biblioteca (2 MiB).
+const MAX_EXPORT_BYTES: usize = 2 * 1024 * 1024;
+
+/// Salva o backup da biblioteca na pasta de dados do app e devolve o caminho do arquivo.
+/// (No Android essa pasta é privada do app; o caminho é mostrado ao usuário.)
+#[tauri::command]
+pub async fn save_export(app: tauri::AppHandle, content: String) -> Result<String, String> {
+    if content.len() > MAX_EXPORT_BYTES {
+        return Err("backup grande demais para salvar".into());
+    }
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("pasta de dados: {e}"))?
+        .join("exports");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("pasta de exportação: {e}"))?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let path = dir.join(format!("cinehub-dados-{stamp}.json"));
+    std::fs::write(&path, content).map_err(|e| format!("não foi possível salvar: {e}"))?;
+    Ok(path.display().to_string())
 }
 
 fn srt_to_vtt(text: &str) -> String {

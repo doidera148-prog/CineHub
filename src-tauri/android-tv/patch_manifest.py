@@ -19,18 +19,34 @@ LAUNCHER = '<category android:name="android.intent.category.LAUNCHER" />'
 LEANBACK = '<category android:name="android.intent.category.LEANBACK_LAUNCHER" />'
 
 
+def fail(message: str) -> None:
+    # Falha explícita: um manifesto sem as alterações de TV não pode passar como "ajustado".
+    sys.exit(f"erro ao ajustar o manifesto para TV: {message}")
+
+
 def main(path: str) -> None:
     manifest = pathlib.Path(path)
     xml = manifest.read_text(encoding="utf-8")
 
     if "android.software.leanback" not in xml:
-        xml = re.sub(r"(<manifest[^>]*>\n)", lambda m: m.group(1) + FEATURES, xml, count=1)
+        xml, n = re.subn(r"(<manifest[^>]*>\n)", lambda m: m.group(1) + FEATURES, xml, count=1)
+        if n == 0:
+            fail("tag <manifest> não encontrada")
 
-    if LEANBACK not in xml and LAUNCHER in xml:
+    if LEANBACK not in xml:
+        if LAUNCHER not in xml:
+            fail("categoria LAUNCHER não encontrada")
         xml = xml.replace(LAUNCHER, LAUNCHER + "\n                " + LEANBACK, 1)
 
     if "android:banner" not in xml:
-        xml = re.sub(r"<application\b", '<application android:banner="@drawable/banner"', xml, count=1)
+        xml, n = re.subn(r"<application\b", '<application android:banner="@drawable/banner"', xml, count=1)
+        if n == 0:
+            fail("tag <application> não encontrada")
+
+    # Confere o resultado antes de gravar.
+    for needle in ("android.software.leanback", LEANBACK, 'android:banner="@drawable/banner"'):
+        if needle not in xml:
+            fail(f"não foi possível inserir: {needle}")
 
     manifest.write_text(xml, encoding="utf-8")
 

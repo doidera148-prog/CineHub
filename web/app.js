@@ -14,7 +14,7 @@ const MAX_PROGRESS = 50; // quantidade de títulos guardados no progresso
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-// Chamadas ao backend Tauri (funciona em desktop, Android e iOS).
+// Chamadas ao backend Tauri (funciona em desktop, Android e Android TV).
 const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
 async function call(cmd, args) {
   try {
@@ -71,6 +71,22 @@ function isWebUrl(u) {
   return typeof u === 'string' && /^https?:\/\//i.test(u);
 }
 
+// Imagem de fundo em CSS: só http(s), com aspas e parênteses codificados para não quebrar o estilo.
+function cssUrl(u) {
+  if (!isWebUrl(u)) return '';
+  const safe = encodeURI(u).replace(/['()]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+  return `url('${safe}')`;
+}
+
+// Abre um link externo no navegador do aparelho (window.open não funciona no WebView do Android).
+async function openExternal(url) {
+  try {
+    await call('plugin:opener|open_url', { url });
+  } catch (err) {
+    toast(`Não consegui abrir o link: ${err.message}`);
+  }
+}
+
 function isTorrentStream(stream) {
   const url = String(stream?.url ?? '').trim();
   return url.startsWith('magnet:?') || Boolean(stream?.infoHash) || Boolean(stream?.hash);
@@ -93,11 +109,11 @@ async function openTorrentSource(stream, label, id, meta, subs) {
   }
 
   try {
-    toast('Preparando torrent...');
+    toast('Preparando torrent…');
     const result = await call('torrent_open', {
       magnet,
-      torrent_bytes: null,
-      file_index: stream?.fileIndex ?? null,
+      torrentBytes: null,
+      fileIndex: Number.isInteger(stream?.fileIndex) ? stream.fileIndex : null,
     });
     const fixed = { ...stream, url: result.streamUrl, mimeType: result.mimeType, name: result.name || stream?.name || label };
     await play(fixed, label, id, meta, subs);
@@ -199,8 +215,9 @@ function libraryPage() {
   };
 }
 
-// Exporta biblioteca e progresso em um arquivo JSON.
-function exportData() {
+// Exporta biblioteca e progresso: o backend grava o arquivo e informa o caminho.
+// (Download por blob não funciona no WebView do Android.)
+async function exportData() {
   const payload = {
     app: 'CineHub',
     version: 1,
@@ -208,14 +225,12 @@ function exportData() {
     favs: getFavs(),
     progress: store.get('progress', {}),
   };
-  const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'cinehub-dados.json';
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  try {
+    const path = await call('save_export', { content: JSON.stringify(payload, null, 2) });
+    toast(`Backup salvo em: ${path}`);
+  } catch (err) {
+    toast(`Não consegui exportar: ${err.message}`);
+  }
 }
 
 const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
@@ -287,7 +302,7 @@ async function addonsPage() {
       <button>Instalar</button>
     </form>
     <form id="tf" class="torrentform">
-      <input id="tm" placeholder="Cole um magnet: ou use um arquivo .torrent" aria-label="Magnet do torrent">
+      <input id="tm" placeholder="Cole um magnet: ou use um arquivo .torrent" aria-label="Link magnet do torrent">
       <label class="torrentfile">
         <span>Selecionar .torrent</span>
         <input id="torrent-file" type="file" accept=".torrent" hidden>
@@ -316,8 +331,13 @@ async function addonsPage() {
     try {
       if (input.files && input.files.length) {
         const file = input.files[0];
+        // Mesmo limite do backend (8 MiB), checado antes de enviar pelo IPC.
+        if (file.size > 8 * 1024 * 1024) {
+          toast('Arquivo .torrent maior que 8 MiB.');
+          return;
+        }
         const bytes = new Uint8Array(await file.arrayBuffer());
-        const result = await call('torrent_open', { magnet: null, torrent_bytes: Array.from(bytes), file_index: null });
+        const result = await call('torrent_open', { magnet: null, torrentBytes: Array.from(bytes), fileIndex: null });
         const streamUrl = result.streamUrl;
         const fake = { url: streamUrl, name: result.name, fileName: result.fileName, mimeType: result.mimeType };
         const playback = { id: `torrent:${Date.now()}`, label: result.name || file.name, name: result.name || file.name };
@@ -328,7 +348,7 @@ async function addonsPage() {
         toast('Cole um magnet ou selecione um .torrent.');
         return;
       }
-      const result = await call('torrent_open', { magnet, torrent_bytes: null, file_index: null });
+      const result = await call('torrent_open', { magnet, torrentBytes: null, fileIndex: null });
       const fake = { url: result.streamUrl, name: result.name, fileName: result.fileName, mimeType: result.mimeType };
       const playback = { id: `torrent:${Date.now()}`, label: result.name || 'Torrent', name: result.name || 'Torrent' };
       await play(fake, playback.label, playback.id, { ...playback, type: 'movie', name: playback.label }, []);
@@ -368,7 +388,7 @@ async function detailPage(kind, id, alive) {
   const bg = meta.background || meta.poster || '';
   const info = [meta.releaseInfo, (meta.genres || []).join(', ')].filter(Boolean).join(' · ');
   setView(`
-    <div class="hero" style="background-image: linear-gradient(90deg, var(--bg) 20%, transparent), url('${esc(bg)}')">
+    <div class="hero" style="${esc(heroStyle(bg))}">
       <div class="hero-info">
         <h1>${esc(meta.name)}</h1>
         <p class="muted">${esc(info)}</p>
@@ -461,12 +481,18 @@ function rowEl(row, pageable) {
   return sec;
 }
 
+function heroStyle(bg) {
+  const img = cssUrl(bg);
+  return `background-image: linear-gradient(90deg, var(--bg) 20%, transparent)${img ? ', ' + img : ''}`;
+}
+
 function cardHtml(m) {
-  const poster = m.poster ? `background-image: url('${esc(m.poster)}')` : '';
+  const img = cssUrl(m.poster);
+  const poster = img ? `background-image: ${img}` : '';
   const label = [m.name, m.releaseInfo].filter(Boolean).join(', ');
   return `
     <a class="card" href="#/detail/${esc(m.type)}/${encodeURIComponent(m.id)}" aria-label="${esc(label)}">
-      <div class="poster" style="${poster}">${m.poster ? '' : esc(m.name)}</div>
+      <div class="poster" style="${esc(poster)}">${img ? '' : esc(m.name)}</div>
       <div class="title">${esc(m.name)}</div>
       <div class="muted small">${esc(m.releaseInfo || '')}</div>
     </a>`;
@@ -532,14 +558,35 @@ async function loadStreams(kind, id, label, meta) {
   if (!first) return;
   first.innerHTML = '<div class="loading">Buscando fontes nos addons…</div>';
 
-  const { streams, subtitles } = await call('streams', { kind, id });
+  let result;
+  try {
+    result = await call('streams', { kind, id });
+  } catch (err) {
+    if (seq === streamsSeq) {
+      const box = $('#streams') || $('#body');
+      if (box) box.innerHTML = `<p class="muted">Não consegui buscar as fontes: ${esc(err.message)}</p>`;
+    }
+    return;
+  }
   if (seq !== streamsSeq) return;
+  const { streams = [], subtitles = [], errors = [] } = result;
   const box = $('#streams') || $('#body');
   if (!box) return;
   box.innerHTML = '';
 
+  // Addons que falharam aparecem aqui, mesmo quando outros devolveram fontes.
+  const showErrors = () => {
+    for (const e of errors) {
+      const p = document.createElement('p');
+      p.className = 'muted small';
+      p.textContent = `${e.addon}: ${e.error}`;
+      box.append(p);
+    }
+  };
+
   if (!streams.length) {
     box.innerHTML = '<p class="muted">Nenhuma fonte encontrada. Instale um addon de streams compatível na aba Addons.</p>';
+    showErrors();
     return;
   }
 
@@ -566,10 +613,11 @@ async function loadStreams(kind, id, label, meta) {
         await play(s, label, id, meta, subtitles || []);
       };
     } else if (isWebUrl(s.externalUrl)) {
-      b.onclick = () => window.open(s.externalUrl, '_blank', 'noopener');
+      b.onclick = () => openExternal(s.externalUrl);
     }
     box.append(b);
   }
+  showErrors();
 }
 
 // ---------- Player (Video.js, com HLS embutido) ----------
@@ -604,6 +652,7 @@ async function play(stream, label, id, meta, subs) {
 
   document.title = `${label} · CineHub`;
   showPlayer();
+  keepScreenOn(true);
   vjsPlayer.play().catch(() => {});
 }
 
@@ -611,6 +660,26 @@ function showPlayer() {
   if (!history.state?.player) history.pushState({ player: true }, '', location.href);
   player.classList.remove('hidden');
 }
+
+// Mantém a tela ligada enquanto o vídeo está aberto (quando o aparelho permite).
+let wakeLock = null;
+async function keepScreenOn(on) {
+  try {
+    if (on && 'wakeLock' in navigator && !wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => (wakeLock = null));
+    } else if (!on && wakeLock) {
+      await wakeLock.release();
+      wakeLock = null;
+    }
+  } catch {
+    wakeLock = null; // sem suporte ou negado: o app segue normalmente
+  }
+}
+// Ao voltar para o app, o sistema pode ter soltado a tela ligada: pede de novo.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && !player.classList.contains('hidden')) keepScreenOn(true);
+});
 
 // Legendas: as da própria fonte + as de addons de legenda, só em português.
 function pickSubtitles(stream, subs) {
@@ -683,6 +752,7 @@ function closePlayer(fromHistory = false) {
   clearTextTracks();
   current = null;
   player.classList.add('hidden');
+  keepScreenOn(false);
   document.title = 'CineHub';
   if (!fromHistory && history.state?.player) history.back();
 }
@@ -729,6 +799,10 @@ function isFav(id) {
 function toggleFav(meta) {
   const list = getFavs();
   const i = list.findIndex((f) => f.id === meta.id);
+  if (i < 0 && list.length >= MAX_FAVS) {
+    toast(`A biblioteca já tem ${MAX_FAVS} títulos. Remova algum para adicionar outro.`);
+    return;
+  }
   if (i >= 0) list.splice(i, 1);
   else
     list.unshift({
@@ -814,17 +888,24 @@ document.addEventListener('keydown', (e) => {
   const dir = DIRS[e.key];
   if (!dir || !player.classList.contains('hidden') || confirmDialog.open) return;
 
+  // Em campos de texto, esquerda/direita movem o cursor; a navegação por setas fica para cima/baixo.
+  const typing = document.activeElement;
+  const inTextField =
+    typing instanceof HTMLTextAreaElement ||
+    (typing instanceof HTMLInputElement && !['button', 'checkbox', 'radio', 'file', 'range'].includes(typing.type));
+  if (inTextField && (dir === 'left' || dir === 'right')) return;
+
   const list = focusables();
   if (!list.length) return;
-  const current = document.activeElement;
+  const focused = document.activeElement;
   e.preventDefault();
 
-  if (!list.includes(current)) {
+  if (!list.includes(focused)) {
     list[0].focus();
     return;
   }
 
-  const r = current.getBoundingClientRect();
+  const r = focused.getBoundingClientRect();
   const cx = r.left + r.width / 2;
   const cy = r.top + r.height / 2;
   const horizontal = dir === 'left' || dir === 'right';
@@ -832,7 +913,7 @@ document.addEventListener('keydown', (e) => {
   let best = null;
   let bestScore = Infinity;
   for (const el of list) {
-    if (el === current) continue;
+    if (el === focused) continue;
     const q = el.getBoundingClientRect();
     const dx = q.left + q.width / 2 - cx;
     const dy = q.top + q.height / 2 - cy;

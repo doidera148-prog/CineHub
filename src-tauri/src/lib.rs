@@ -1,7 +1,7 @@
 //! CineHub: aplicativo de streaming compatível com os addons do Stremio.
 //!
 //! O backend (este crate) fala com os addons pelo protocolo do Stremio e expõe comandos
-//! que a interface web chama via `invoke`. Funciona no Windows, macOS, Linux, Android e iOS.
+//! que a interface web chama via `invoke`. Roda no Windows, macOS, Linux, Android e Android TV.
 
 pub mod addon;
 pub mod commands;
@@ -23,7 +23,8 @@ pub struct AppState {
     pub cache: Arc<addon::Cache>,
     pub addons: RwLock<Vec<Installed>>,
     pub store_path: PathBuf,
-    pub torrent: Arc<torrent::TorrentEngine>,
+    /// Motor de torrent. `None` se ele não puder ser iniciado: o resto do app segue funcionando.
+    pub torrent: Option<Arc<torrent::TorrentEngine>>,
     /// Garante que as gravações de addons.json aconteçam uma de cada vez.
     pub save_lock: tokio::sync::Mutex<()>,
 }
@@ -68,22 +69,29 @@ async fn install_default_addon(handle: tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             let store_path = data_dir.join("addons.json");
             let installed = store::load(&store_path);
             let needs_default = installed.is_empty();
             let torrent_dir = data_dir.join("torrents");
-            let torrent = Arc::new(torrent::TorrentEngine::new(torrent_dir).map_err(|e| {
-                std::io::Error::other(format!("não foi possível iniciar o motor de torrent: {e}"))
-            })?);
-
-            let serve_torrent = torrent.clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = serve_torrent.serve().await {
-                    eprintln!("servidor de torrent local falhou: {e}");
+            let torrent = match torrent::TorrentEngine::new(torrent_dir) {
+                Ok(engine) => {
+                    let engine = Arc::new(engine);
+                    let serve_torrent = engine.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(e) = serve_torrent.serve().await {
+                            eprintln!("servidor de torrent local falhou: {e}");
+                        }
+                    });
+                    Some(engine)
                 }
-            });
+                Err(e) => {
+                    eprintln!("aviso: motor de torrent indisponível: {e}");
+                    None
+                }
+            };
 
             app.manage(AppState {
                 http: addon::client(),
@@ -112,6 +120,7 @@ pub fn run() {
             commands::streams,
             commands::subtitle,
             commands::torrent_open,
+            commands::save_export,
         ])
         .run(tauri::generate_context!())
         .expect("erro ao iniciar o CineHub");

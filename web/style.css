@@ -160,7 +160,21 @@ h1 { margin: 0 0 16px; }
 }
 .player-box { position: relative; width: min(1200px, 96vw); }
 #video { width: 100%; max-height: 85vh; background: #000; }
-.close { position: absolute; top: -44px; right: 0; }
+/* Dentro da área do vídeo, sempre visível (não sai da tela em celulares). */
+.close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 18px;
+  line-height: 40px;
+}
 
 /* Foco visível para controle remoto e teclado */
 :focus { outline: none; }
@@ -220,18 +234,24 @@ button:disabled { opacity: 0.5; cursor: default; }
 
 /* Celulares: navegação horizontal e conteúdo em largura total. */
 @media (max-width: 720px) {
-  body { flex-direction: column; }
+  /* Áreas do sistema (barra de status e barra de navegação): o conteúdo não pode ficar por baixo delas. */
+  body {
+    flex-direction: column;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
   .sidebar {
     width: 100%;
-    flex-direction: row;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 10px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+    padding: calc(6px + env(safe-area-inset-top, 0px)) 10px 4px;
     position: sticky;
     top: 0;
     z-index: 20;
+    background: var(--panel);
   }
-  .logo { padding: 4px 6px; font-size: 18px; flex-shrink: 0; }
+  /* Logo numa linha e o menu em outra, com rolagem horizontal: nada fica cortado sobre a barra de status. */
+  .logo { padding: 2px 6px; font-size: 18px; }
   .sidebar nav { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
   .sidebar nav::-webkit-scrollbar { display: none; }
   .sidebar nav a { white-space: nowrap; padding: 8px 12px; font-size: 15px; }

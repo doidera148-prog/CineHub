@@ -6,10 +6,12 @@
 //!   /stream/{tipo}/{id}.json
 
 use std::collections::HashMap;
-use std::net::IpAddr;
-use std::sync::Mutex;
+use std::fmt::Write as _;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -123,8 +125,28 @@ impl Installed {
 /// Máximo de redirecionamentos seguidos ao falar com um addon.
 const ADDON_MAX_REDIRECTS: usize = 5;
 
+/// Resolvedor de DNS que entrega só endereços públicos. Como a conexão usa estes endereços,
+/// um nome que aponte para a rede interna é recusado mesmo que a checagem anterior tenha passado.
+struct PublicResolver;
+
+impl Resolve for PublicResolver {
+    fn resolve(&self, name: Name) -> Resolving {
+        let host = name.as_str().to_string();
+        Box::pin(async move {
+            let found: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
+                .await?
+                .filter(|a| ip_is_public(a.ip()))
+                .collect();
+            if found.is_empty() {
+                return Err("endereço não permitido ou inexistente".into());
+            }
+            Ok(Box::new(found.into_iter()) as Addrs)
+        })
+    }
+}
+
 /// Cliente para os addons. Segue redirecionamentos, mas só até um limite e só para
-/// endereços que não sejam locais ou privados (checagem dos literais, sem rede).
+/// endereços públicos (literais checados aqui; nomes checados pelo resolvedor).
 pub fn client() -> Client {
     let policy = reqwest::redirect::Policy::custom(|attempt| {
         if attempt.previous().len() >= ADDON_MAX_REDIRECTS {
@@ -139,6 +161,7 @@ pub fn client() -> Client {
         .timeout(Duration::from_secs(20))
         .user_agent("CineHub/0.2")
         .redirect(policy)
+        .dns_resolver(Arc::new(PublicResolver))
         .build()
         .expect("não foi possível criar o cliente HTTP")
 }
@@ -149,26 +172,38 @@ pub const MAX_BODY: usize = 8 * 1024 * 1024;
 
 const CACHE_TTL: Duration = Duration::from_secs(600);
 const CACHE_MAX_ENTRIES: usize = 500;
+/// Limite do cache pelo tamanho das respostas originais (o valor já decodificado ocupa mais).
+const CACHE_MAX_BYTES: usize = 8 * 1024 * 1024;
+
+#[derive(Default)]
+struct CacheInner {
+    map: HashMap<String, (Instant, Value, usize)>,
+    bytes: usize,
+}
 
 /// Cache em memória das respostas dos addons, para não refazer as mesmas chamadas.
 #[derive(Default)]
 pub struct Cache {
-    entries: Mutex<HashMap<String, (Instant, Value)>>,
+    inner: Mutex<CacheInner>,
 }
 
 impl Cache {
     fn get(&self, key: &str) -> Option<Value> {
-        let map = self.entries.lock().ok()?;
-        let (at, value) = map.get(key)?;
+        let inner = self.inner.lock().ok()?;
+        let (at, value, _) = inner.map.get(key)?;
         (at.elapsed() < CACHE_TTL).then(|| value.clone())
     }
 
-    fn put(&self, key: String, value: Value) {
-        if let Ok(mut map) = self.entries.lock() {
-            if map.len() >= CACHE_MAX_ENTRIES {
-                map.clear();
+    fn put(&self, key: String, value: Value, size: usize) {
+        if let Ok(mut inner) = self.inner.lock() {
+            if inner.map.len() >= CACHE_MAX_ENTRIES || inner.bytes + size > CACHE_MAX_BYTES {
+                inner.map.clear();
+                inner.bytes = 0;
             }
-            map.insert(key, (Instant::now(), value));
+            if let Some((_, _, old)) = inner.map.insert(key, (Instant::now(), value, size)) {
+                inner.bytes -= old;
+            }
+            inner.bytes += size;
         }
     }
 }
@@ -186,7 +221,7 @@ async fn fetch_value(client: &Client, cache: &Cache, url: &str) -> Result<Value,
     let body = read_capped(client, url, MAX_BODY).await?;
     let value: Value =
         serde_json::from_slice(&body).map_err(|e| format!("resposta inválida: {e}"))?;
-    cache.put(url.to_string(), value.clone());
+    cache.put(url.to_string(), value.clone(), body.len());
     Ok(value)
 }
 
@@ -279,35 +314,47 @@ pub fn client_no_redirect() -> Client {
         .timeout(Duration::from_secs(20))
         .user_agent("CineHub/0.2")
         .redirect(reqwest::redirect::Policy::none())
+        .dns_resolver(Arc::new(PublicResolver))
         .build()
         .expect("não foi possível criar o cliente HTTP")
 }
 
-/// true se o endereço IP é público (não loopback, privado, link-local, etc.).
+/// true se o endereço IP é público (não loopback, privado, reservado, etc.).
 /// IPv6 mapeado para IPv4 (::ffff:a.b.c.d) é avaliado como o IPv4 correspondente.
 pub fn ip_is_public(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
+            let [a, b, c, _] = v4.octets();
+            let reserved = a == 0                        // 0.0.0.0/8
+                || (a == 100 && (b & 0xc0) == 64)        // 100.64.0.0/10 (CGNAT, ex.: Tailscale)
+                || (a == 192 && b == 0 && c == 0)        // 192.0.0.0/24 (protocolos IETF)
+                || (a == 198 && (b & 0xfe) == 18)        // 198.18.0.0/15 (testes de rede)
+                || a >= 240; // 240.0.0.0/4 (reservado)
             !(v4.is_private()
                 || v4.is_loopback()
                 || v4.is_link_local()
                 || v4.is_unspecified()
                 || v4.is_broadcast()
                 || v4.is_documentation()
-                || v4.is_multicast())
+                || v4.is_multicast()
+                || reserved)
         }
         IpAddr::V6(v6) => {
             if let Some(v4) = v6.to_ipv4_mapped() {
                 return ip_is_public(IpAddr::V4(v4));
             }
-            let first = v6.segments()[0];
-            let unique_local = (first & 0xfe00) == 0xfc00;
-            let link_local = (first & 0xffc0) == 0xfe80;
+            let segs = v6.segments();
+            let unique_local = (segs[0] & 0xfe00) == 0xfc00;
+            let link_local = (segs[0] & 0xffc0) == 0xfe80;
+            let site_local = (segs[0] & 0xffc0) == 0xfec0;
+            let documentation = segs[0] == 0x2001 && segs[1] == 0x0db8;
             !(v6.is_loopback()
                 || v6.is_unspecified()
                 || v6.is_multicast()
                 || unique_local
-                || link_local)
+                || link_local
+                || site_local
+                || documentation)
         }
     }
 }
@@ -423,7 +470,7 @@ pub fn enc(s: &str) -> String {
         if b.is_ascii_alphanumeric() || b"-_.~:".contains(&b) {
             out.push(b as char);
         } else {
-            out.push_str(&format!("%{b:02X}"));
+            let _ = write!(out, "%{b:02X}");
         }
     }
     out

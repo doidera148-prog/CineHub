@@ -4,3 +4,12 @@ src-tauri/target/
 src-tauri/gen/
 node_modules/
 tests/web/node_modules/
+
+# Segredos e binários de assinatura/instalação (nunca versionar)
+*.apk
+*.aab
+*.jks
+*.keystore
+*.p12
+*.b64
+*.corrupt

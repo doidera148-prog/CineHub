@@ -1,33 +1,42 @@
 # CineHub
 
-Aplicativo de streaming compatível com os addons do Stremio, para Windows, macOS, Linux, Android e Android TV (iOS também é possível com o Tauri, sem testes ainda).
+Aplicativo de streaming compatível com os addons do Stremio, para Windows, macOS, Linux, Android e Android TV.
 
-- **Backend:** Rust (Tauri 2). Fala com os addons pelo protocolo oficial do Stremio: `manifest`, `catalog` (com busca), `meta` e `stream`.
+- **Backend:** Rust (Tauri 2). Fala com os addons pelo protocolo oficial do Stremio: `manifest`, `catalog` (com busca), `meta`, `stream` e `subtitles`.
 - **Interface:** HTML, CSS e JavaScript, na pasta `web/`. Roda no WebView nativo de cada sistema.
-- **Player:** [Video.js](https://videojs.com/) (código aberto, MIT), com suporte a HLS (`.m3u8`) embutido. Empacotado em `web/vendor/`, funciona sem internet.
-- **Metadados em pt-BR:** o Cinemeta (addon oficial do Stremio) é instalado automaticamente na primeira execução.
+- **Player:** [Video.js](https://videojs.com/) (código aberto, licença Apache 2.0), com suporte a HLS (`.m3u8`) embutido. Empacotado em `web/vendor/`, funciona sem internet.
+- **Metadados:** o Cinemeta (addon oficial do Stremio) é instalado automaticamente na primeira execução. O idioma dos títulos depende do addon.
 
 O app não traz fontes de conteúdo. Você instala os addons que tem autorização para usar, pela aba **Addons**.
 
 ## Estrutura
 
 ```
-web/                 interface (index.html, app.js, style.css)
+web/                       interface (index.html, app.js, style.css, vendor/ com o Video.js)
 src-tauri/
-  tauri.conf.json    configuração da janela e dos pacotes
-  src/lib.rs         inicialização e registro dos comandos
-  src/commands.rs    comandos chamados pela interface (catálogos, metas, fontes, legendas)
-  src/addon.rs       cliente do protocolo de addons do Stremio
-  src/store.rs       lista de addons instalados (JSON)
-.github/workflows/   builds automáticos para desktop e Android
+  tauri.conf.json          configuração da janela e dos pacotes
+  capabilities/            permissões concedidas à interface
+  src/lib.rs               inicialização e registro dos comandos
+  src/commands.rs          comandos chamados pela interface (catálogos, metas, fontes, legendas,
+                           torrent, exportação de backup)
+  src/addon.rs             cliente do protocolo de addons do Stremio e regras de endereços seguros
+  src/store.rs             lista de addons instalados (JSON)
+  src/torrent.rs           motor BitTorrent local e servidor de reprodução (127.0.0.1)
+  tests/                   testes de integração com um addon falso
+  android-tv/              ajustes do manifesto para Android TV
+tests/web/                 teste de fumaça da interface (Playwright)
+tests/android/             scripts de instalação usados nos diagnósticos do APK
+.github/workflows/         builds automáticos para desktop e Android
 ```
 
 ## Segurança e desempenho
 
 - Respostas de addons são limitadas a 8 MiB, e legendas a 2 MiB.
-- O comando de legenda só aceita URLs públicas. Endereços locais e privados (localhost, 10.x, 192.168.x, 169.254.x etc.) são bloqueados.
-- Catálogos, metadados e fontes ficam em cache por 10 minutos.
-- Metadados são consultados em paralelo em todos os addons.
+- Addons, legendas e os links de fonte só acessam endereços públicos. IPs locais, privados e reservados são recusados, inclusive quando um nome de domínio aponta para eles: o filtro é aplicado no momento da conexão.
+- Redirecionamentos são limitados e cada destino passa pela mesma regra.
+- Catálogos, metadados e fontes ficam em cache por 10 minutos, com limite de 500 entradas e de 8 MiB no total.
+- Metadados são consultados em paralelo em todos os addons. Um addon que não responde em 15 segundos é ignorado, e o erro aparece na lista de fontes.
+- Uma lista de addons ilegível não é sobrescrita: vai para `addons.json.corrupt`.
 
 ## Testes
 
@@ -35,7 +44,7 @@ src-tauri/
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-Os testes de integração (`src-tauri/tests/addon_integration.rs`) sobem um addon falso em localhost e validam manifest, catálogo, meta, fontes, legendas, cache e os limites de tamanho.
+Os testes de integração (`src-tauri/tests/addon_integration.rs`) sobem um addon falso em localhost e validam manifest, catálogo, meta, fontes, legendas, cache, os limites de tamanho, as faixas de endereço reservadas e a recusa de nomes que apontam para `localhost`.
 
 ## Desenvolver no computador
 
@@ -43,7 +52,7 @@ Pré-requisitos:
 
 - Rust estável (`rustup`)
 - Linux: `libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev`
-- Windows: WebView2 (já vem no Windows 10/11)
+- Windows: WebView2 (normalmente já vem instalado no Windows 11 e em versões atualizadas do Windows 10)
 - macOS: Xcode Command Line Tools
 
 ```bash
@@ -96,6 +105,8 @@ python3 android-tv/patch_manifest.py gen/android/app/src/main/AndroidManifest.xm
 cargo tauri android build --apk
 ```
 
+O script para com erro se não conseguir fazer alguma das alterações, então um manifesto sem os ajustes de TV não passa despercebido.
+
 Na TV, a navegação é feita pelo controle remoto: as setas movem o foco e OK ativa o item. Para fechar o player, foque o botão ✕ e pressione OK.
 
 No Android, o botão Voltar fecha o player antes de sair do app. Na TV, o foco inicial vai para o conteúdo ao trocar de seção pelo menu.
@@ -140,9 +151,10 @@ Depois, em **Settings → Secrets and variables → Actions**, crie os segredos:
 - **HTTP sem criptografia:** o Android bloqueia `http://` por padrão. Fontes de addon com `http://` podem não tocar no celular.
 - **Legendas:** só português (SRT ou VTT), baixadas pelo backend e convertidas para VTT. O backend só baixa de endereços públicos e recusa redirecionamentos para a rede interna.
 - **Catálogos:** o botão "Carregar mais" depende de o addon aceitar o parâmetro `skip`. Addons que ignoram esse parâmetro simplesmente não mostram novos itens.
-- **Validação de DNS:** a checagem de URL bloqueia endereços privados escritos diretamente, mas não impede um nome de domínio que resolva para uma rede interna.
+- **Validação de DNS:** o nome do domínio é resolvido e os endereços internos são descartados na própria conexão. Ainda assim, a checagem de instalação e a conexão resolvem o nome em momentos diferentes; um servidor que muda de endereço entre as duas pode, em tese, contornar a primeira checagem.
+- **iOS:** não é alvo de build nem de teste neste projeto.
 - **Torrent e magnet:** o app inclui um motor BitTorrent local (librqbit) que reproduz fontes `magnet:` e arquivos `.torrent`, servidos por um endereço local (`127.0.0.1`). Quem usa é responsável pelo conteúdo que abre; a legalidade depende do conteúdo e do país.
-- **Dados da biblioteca:** biblioteca e progresso ficam no aparelho. Use **Exportar dados** na aba Biblioteca para levá-los a outro aparelho; o arquivo tem os mesmos dados para importar depois.
+- **Dados da biblioteca:** biblioteca e progresso ficam no aparelho. Use **Exportar dados** na aba Biblioteca: o backup é salvo na pasta de dados do app e o caminho aparece na tela. No Android essa pasta é privada, então o arquivo não aparece no gerenciador de arquivos; para levá-lo a outro aparelho, é preciso um recurso de compartilhamento que ainda não foi adicionado. **Importar dados** aceita o arquivo gerado.
 
 ## Licença
 

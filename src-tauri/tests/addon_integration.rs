@@ -12,10 +12,11 @@ type Routes = Arc<HashMap<String, String>>;
 type Hits = Arc<Mutex<HashMap<String, usize>>>;
 
 /// Servidor HTTP mínimo: responde ao caminho exato com o corpo configurado e conta as chamadas.
-async fn spawn_addon(routes: HashMap<String, String>) -> (String, Hits) {
+/// `build` recebe o endereço real do servidor, para que as rotas possam citá-lo.
+async fn spawn_addon(build: impl FnOnce(&str) -> HashMap<String, String>) -> (String, Hits) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
-    let routes: Routes = Arc::new(routes);
+    let routes: Routes = Arc::new(build(&base));
     let hits: Hits = Arc::new(Mutex::new(HashMap::new()));
     let hits_task = hits.clone();
 
@@ -69,12 +70,28 @@ fn installed(base: &str) -> Installed {
 
 #[tokio::test]
 async fn full_protocol_flow_and_cache() {
-    let base_placeholder = "PLACEHOLDER";
-    let mut routes = HashMap::new();
-    routes.insert(
-        "/manifest.json".to_string(),
-        manifest_json(base_placeholder),
-    );
+    let (base, hits) = spawn_addon(|base| {
+        let mut routes = HashMap::new();
+        routes.insert("/manifest.json".to_string(), manifest_json(base));
+        add_protocol_routes(&mut routes);
+        routes
+    })
+    .await;
+    let a = installed(&base);
+    let client = addon::client();
+    let cache = Cache::default();
+
+    // Manifest lido pela rede: o endereço dentro dele é o do servidor de teste.
+    let m = addon::fetch_manifest(&client, &format!("{base}/manifest.json"))
+        .await
+        .unwrap();
+    assert_eq!(m.name, "Addon de teste");
+    assert_eq!(m.logo.as_deref(), Some(format!("{base}/logo.png").as_str()));
+
+    rest_of_flow(client, cache, a, hits).await;
+}
+
+fn add_protocol_routes(routes: &mut HashMap<String, String>) {
     routes.insert(
         "/catalog/movie/top.json".to_string(),
         r#"{"metas":[{"id":"tt1","type":"movie","name":"Filme A"}]}"#.to_string(),
@@ -92,20 +109,9 @@ async fn full_protocol_flow_and_cache() {
         r#"{"subtitles":[{"id":"s1","url":"https://subs.example/pt.srt","lang":"por"}]}"#
             .to_string(),
     );
-    let (base, hits) = spawn_addon(routes).await;
-    // Reescreve o manifest com o endereço real do servidor.
-    let manifest_body = manifest_json(&base);
-    let a = installed(&base);
-    let client = addon::client();
-    let cache = Cache::default();
+}
 
-    // Manifest lido pela rede
-    let m = addon::fetch_manifest(&client, &format!("{base}/manifest.json"))
-        .await
-        .unwrap();
-    assert_eq!(m.name, "Addon de teste");
-    assert!(manifest_body.contains(&base));
-
+async fn rest_of_flow(client: reqwest::Client, cache: Cache, a: Installed, hits: Hits) {
     // Recursos e tipos
     assert!(a.supports("meta", "movie", "tt1"));
     assert!(!a.supports("meta", "movie", "xx1"));
@@ -146,9 +152,12 @@ async fn full_protocol_flow_and_cache() {
 
 #[tokio::test]
 async fn oversized_responses_are_rejected() {
-    let mut routes = HashMap::new();
-    routes.insert("/big".to_string(), "x".repeat(5_000));
-    let (base, _hits) = spawn_addon(routes).await;
+    let (base, _hits) = spawn_addon(|_| {
+        let mut routes = HashMap::new();
+        routes.insert("/big".to_string(), "x".repeat(5_000));
+        routes
+    })
+    .await;
     let client = addon::client();
     let err = addon::read_capped(&client, &format!("{base}/big"), 1_000)
         .await
@@ -158,7 +167,7 @@ async fn oversized_responses_are_rejected() {
 
 #[tokio::test]
 async fn http_errors_are_reported() {
-    let (base, _hits) = spawn_addon(HashMap::new()).await;
+    let (base, _hits) = spawn_addon(|_| HashMap::new()).await;
     let client = addon::client();
     let err = addon::read_capped(&client, &format!("{base}/nao-existe"), 1_000)
         .await
@@ -189,4 +198,35 @@ async fn ipv4_mapped_ipv6_cannot_reach_private_hosts() {
     assert!(!addon::is_safe_url("http://[::ffff:10.0.0.1]/x").await);
     assert!(!addon::is_safe_url("http://[::ffff:169.254.169.254]/x").await);
     assert!(!addon::is_safe_url("http://[::]/x").await);
+}
+
+#[test]
+fn reserved_ranges_are_not_public() {
+    use std::net::IpAddr;
+    for ip in [
+        "100.64.0.1",  // CGNAT
+        "0.1.2.3",     // 0.0.0.0/8
+        "192.0.0.8",   // IETF
+        "198.18.0.1",  // testes de rede
+        "240.0.0.1",   // reservado
+        "fec0::1",     // site-local (obsoleto, mas ainda roteável só em redes antigas)
+        "2001:db8::1", // documentação
+    ] {
+        let ip: IpAddr = ip.parse().unwrap();
+        assert!(!addon::ip_is_public(ip), "{ip} deveria ser recusado");
+    }
+    assert!(addon::ip_is_public("93.184.216.34".parse().unwrap()));
+}
+
+#[tokio::test]
+async fn names_resolving_to_local_addresses_are_refused() {
+    // "localhost" é um nome, não um literal: a recusa vem do resolvedor de DNS.
+    let client = addon::client();
+    let err = addon::read_capped(&client, "http://localhost:9/x", 1_000)
+        .await
+        .unwrap_err();
+    assert!(
+        err.contains("conectar") || err.contains("permitido"),
+        "erro inesperado: {err}"
+    );
 }
