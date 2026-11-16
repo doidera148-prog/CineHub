@@ -72,10 +72,7 @@ pub fn run() {
             let needs_default = installed.is_empty();
             let torrent_dir = data_dir.join("torrents");
             let torrent = Arc::new(torrent::TorrentEngine::new(torrent_dir).map_err(|e| {
-                tauri::Error::Runtime(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("não foi possível iniciar o motor de torrent: {e}"),
-                )))
+                std::io::Error::other(format!("não foi possível iniciar o motor de torrent: {e}"))
             })?);
 
             let serve_torrent = torrent.clone();

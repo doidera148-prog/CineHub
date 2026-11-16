@@ -13,9 +13,12 @@ use axum::{
     routing::get,
     Router,
 };
-use librqbit::{AddTorrent, AddTorrentOptions, ManagedTorrentHandle, Session};
+use librqbit::{AddTorrent, AddTorrentOptions, ManagedTorrent, Session};
 use serde::Serialize;
-use tokio::{io::AsyncSeekExt, sync::{OnceCell, RwLock}};
+use tokio::{
+    io::{AsyncReadExt, AsyncSeekExt},
+    sync::{OnceCell, RwLock},
+};
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
@@ -23,7 +26,7 @@ const MAX_TORRENT_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Clone)]
 struct StreamFile {
-    torrent: ManagedTorrentHandle,
+    torrent: Arc<ManagedTorrent>,
     file_index: usize,
     size: u64,
     mime_type: &'static str,
@@ -145,7 +148,7 @@ impl TorrentEngine {
 
     async fn make_playback(
         &self,
-        handle: ManagedTorrentHandle,
+        handle: Arc<ManagedTorrent>,
         requested_index: Option<usize>,
     ) -> Result<TorrentPlayback, String> {
         let available = handle
@@ -217,7 +220,7 @@ async fn stream_file(
         }
     };
 
-    let mut stream = match file.torrent.stream(file.file_index).await {
+    let mut stream = match file.torrent.clone().stream(file.file_index).await {
         Ok(stream) => stream,
         Err(e) => return response_error(StatusCode::SERVICE_UNAVAILABLE, &format!("stream torrent: {e:#}")),
     };
@@ -231,8 +234,7 @@ async fn stream_file(
         .status(status)
         .header(header::CONTENT_TYPE, file.mime_type)
         .header(header::CONTENT_LENGTH, length.to_string())
-        .header(header::ACCEPT_RANGES, "bytes")
-        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+        .header(header::ACCEPT_RANGES, "bytes");
     if partial {
         builder = builder.header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{}", file.size));
     }
@@ -247,7 +249,7 @@ fn parse_range(value: Option<&axum::http::HeaderValue>, size: u64) -> Result<(u6
     let value = value.to_str().map_err(|_| ())?;
     let range = value.strip_prefix("bytes=").ok_or(())?;
     if range.contains(',') { return Err(()); }
-    let (start, end) = range.split_once('-').ok_or(())?;
+    let (start, end) = range.split_once('-').ok_or(() )?;
     if start.is_empty() {
         let suffix: u64 = end.parse().map_err(|_| ())?;
         if suffix == 0 { return Err(()); }
