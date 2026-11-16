@@ -591,7 +591,13 @@ async function route() {
 }
 
 // Em TV e teclado, o foco vai para o conteúdo quando a página muda pelo menu lateral.
+// Só age quando a última interação foi pelo teclado ou controle remoto (não pelo toque).
+let usingKeys = false;
+document.addEventListener('keydown', () => (usingKeys = true), true);
+document.addEventListener('pointerdown', () => (usingKeys = false), true);
+
 function focusContent() {
+  if (!usingKeys) return;
   const a = document.activeElement;
   if (a && a !== document.body && !a.closest('.sidebar')) return;
   const first = view.querySelector('.strip a, #rows a, #view a[href], #view button:not([disabled])');
