@@ -727,6 +727,8 @@ async function playNative(stream, label, id, meta, subs) {
     return true;
   } catch (e) {
     console.warn('player nativo indisponível, usando o do navegador:', e);
+    // Mostra o motivo na tela: sem ele, a mensagem do player web (MKV) esconde a falha real.
+    toast(`Player nativo falhou: ${String(e).slice(0, 180)}`);
     return false;
   } finally {
     current = null;
