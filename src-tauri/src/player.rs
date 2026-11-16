@@ -90,16 +90,27 @@ mod imp {
 
         let mut position = 0f64;
         let mut duration = 0f64;
+        let mut failed = false;
+        // Dentro da janela do app: esconde os controles web e traz o vídeo para frente (Windows).
+        #[cfg(all(windows, feature = "mpv"))]
+        let mut hidden: Vec<usize> = Vec::new();
+        #[cfg(all(windows, feature = "mpv"))]
+        let mut embedded = false;
         loop {
             match mpv.wait_event(0.25) {
                 Some(Ok(Event::EndFile(reason))) => {
-                    if reason == mpv_end_file_reason::Error {
-                        return Err("o mpv não conseguiu tocar este vídeo".into());
-                    }
+                    failed = reason == mpv_end_file_reason::Error;
                     break;
                 }
                 Some(Ok(Event::Shutdown)) => break,
                 _ => {}
+            }
+            #[cfg(all(windows, feature = "mpv"))]
+            if let (Some(parent), false) = (wid, embedded) {
+                if let Ok(video) = mpv.get_property::<i64>("window-id") {
+                    embedded = true;
+                    hidden = super::win::take_over(parent, video);
+                }
             }
             // Guarda a última posição conhecida: depois do fim do arquivo as propriedades não existem mais.
             if let Ok(t) = mpv.get_property::<f64>("time-pos") {
@@ -110,10 +121,84 @@ mod imp {
             }
         }
 
+        #[cfg(all(windows, feature = "mpv"))]
+        super::win::restore(&hidden);
+
+        if failed {
+            return Err("o mpv não conseguiu tocar este vídeo".into());
+        }
         Ok(PlayerResult {
             position_ms: (position * 1000.0) as i64,
             duration_ms: (duration * 1000.0) as i64,
         })
+    }
+}
+
+#[cfg(all(windows, feature = "mpv"))]
+mod win {
+    //! Ajustes de janela (Win32) para o vídeo aparecer por cima da interface web.
+    use std::ffi::c_void;
+
+    type Hwnd = *mut c_void;
+    type Bool = i32;
+    type EnumProc = unsafe extern "system" fn(Hwnd, isize) -> Bool;
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn EnumChildWindows(parent: Hwnd, callback: EnumProc, lparam: isize) -> Bool;
+        fn ShowWindow(hwnd: Hwnd, cmd: i32) -> Bool;
+        fn SetWindowPos(hwnd: Hwnd, after: Hwnd, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> Bool;
+    }
+
+    const SW_HIDE: i32 = 0;
+    const SW_SHOW: i32 = 5;
+    const HWND_TOP: Hwnd = std::ptr::null_mut();
+    const SWP_NOSIZE: u32 = 0x0001;
+    const SWP_NOMOVE: u32 = 0x0002;
+    const SWP_SHOWWINDOW: u32 = 0x0040;
+
+    unsafe extern "system" fn collect(hwnd: Hwnd, lparam: isize) -> Bool {
+        // SAFETY: lparam aponta para o Vec criado em `take_over`, que vive até o retorno de EnumChildWindows.
+        let list = &mut *(lparam as *mut Vec<usize>);
+        list.push(hwnd as usize);
+        1
+    }
+
+    /// Esconde os filhos da janela principal (a webview) exceto o vídeo, e traz o vídeo para frente.
+    /// Devolve os handles escondidos, para `restore`.
+    pub fn take_over(parent: i64, video: i64) -> Vec<usize> {
+        let video = video as usize as Hwnd;
+        let mut children: Vec<usize> = Vec::new();
+        // SAFETY: parent é o HWND da janela principal; collect só lê o ponteiro passado.
+        unsafe {
+            EnumChildWindows(parent as usize as Hwnd, collect, &mut children as *mut Vec<usize> as isize);
+        }
+        let mut hidden = Vec::new();
+        for handle in children {
+            if handle == video as usize {
+                continue;
+            }
+            // SAFETY: handles vieram de EnumChildWindows nesta mesma chamada.
+            unsafe {
+                ShowWindow(handle as Hwnd, SW_HIDE);
+            }
+            hidden.push(handle);
+        }
+        // SAFETY: video é o HWND do mpv (propriedade window-id).
+        unsafe {
+            SetWindowPos(video, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+        }
+        hidden
+    }
+
+    /// Mostra de novo os controles web escondidos por `take_over`.
+    pub fn restore(hidden: &[usize]) {
+        for handle in hidden {
+            // SAFETY: handles escondidos por take_over; podem já ter sido destruídos, o que só faz ShowWindow falhar.
+            unsafe {
+                ShowWindow(*handle as Hwnd, SW_SHOW);
+            }
+        }
     }
 }
 
