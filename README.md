@@ -100,7 +100,30 @@ O workflow `.github/workflows/build.yml` gera, a cada push na `main`:
 
 Os arquivos aparecem como artefatos na aba **Actions** do GitHub e, quando todos os testes passam, são publicados em **Releases** (as 10 publicações mais recentes são mantidas). O APK traz as arquiteturas arm64, armv7, x86 e x86_64. Antes de compilar, o workflow verifica formatação, Clippy (com avisos tratados como erro) e vulnerabilidades nas dependências.
 
-Para assinar o APK de release, é preciso adicionar a chave de assinatura como segredo do repositório; isso não é feito automaticamente.
+### Assinatura do APK
+
+Android só instala APK assinado. Sem os segredos abaixo, o CI assina com uma chave temporária: o APK instala, mas cada build tem uma assinatura diferente, então é preciso desinstalar a versão anterior antes de instalar a nova.
+
+Para ter atualizações normais, crie uma chave uma única vez e guarde-a com segurança (perdê-la impede atualizar o app):
+
+```bash
+keytool -genkeypair -v -keystore cinehub-release.jks -alias cinehub \
+  -keyalg RSA -keysize 2048 -validity 10000
+base64 -w0 cinehub-release.jks > cinehub-release.b64
+```
+
+Depois, em **Settings → Secrets and variables → Actions**, crie os segredos:
+
+- `ANDROID_KEYSTORE_BASE64`: conteúdo de `cinehub-release.b64`
+- `ANDROID_KEYSTORE_PASSWORD`: senha do keystore
+- `ANDROID_KEY_ALIAS`: `cinehub`
+- `ANDROID_KEY_PASSWORD`: senha da chave
+
+### Instalar no celular
+
+1. Baixe o APK da release mais recente no celular.
+2. Permita a instalação de fontes desconhecidas para o navegador ou gerenciador de arquivos usado.
+3. Se já houver uma versão instalada com outra assinatura, desinstale-a primeiro.
 
 ## Limitações conhecidas
 

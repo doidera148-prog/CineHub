@@ -121,10 +121,39 @@ jobs:
       - name: Gerar APK
         working-directory: src-tauri
         run: cargo tauri android build --apk --target aarch64 --target armv7 --target i686 --target x86_64
+      - name: Assinar APK
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          BT="$ANDROID_HOME/build-tools/34.0.0"
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > release.jks
+            KS=release.jks; PASS="$KEYSTORE_PASS"; ALIAS="$KEY_ALIAS"; KPASS="$KEY_PASS"
+          else
+            # Sem segredos configurados: chave temporária do build. Instala, mas cada build
+            # tem assinatura diferente, então é preciso desinstalar a versão anterior.
+            echo "::warning::Segredos ANDROID_KEYSTORE_* não configurados; APK assinado com chave temporária."
+            keytool -genkeypair -keystore release.jks -storepass android -keypass android \
+              -alias cinehub -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=CineHub"
+            KS=release.jks; PASS=android; ALIAS=cinehub; KPASS=android
+          fi
+          mkdir -p signed
+          find src-tauri/gen/android/app/build/outputs/apk -name "*-unsigned.apk" | while read -r apk; do
+            out="signed/$(basename "${apk/-unsigned/}")"
+            "$BT/zipalign" -f -p 4 "$apk" aligned.apk
+            "$BT/apksigner" sign --ks "$KS" --ks-pass "pass:$PASS" --ks-key-alias "$ALIAS" \
+              --key-pass "pass:$KPASS" --out "$out" aligned.apk
+            "$BT/apksigner" verify --verbose "$out"
+          done
+          ls -la signed
       - uses: actions/upload-artifact@v4
         with:
           name: cinehub-android-phone-tv
-          path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          path: signed/*.apk
 
   release:
     if: ${{ always() && github.event_name != 'pull_request' && needs.test.result == 'success' && (needs.desktop.result == 'success' || needs.android.result == 'success') }}
