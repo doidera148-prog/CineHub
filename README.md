@@ -62,6 +62,8 @@ cargo tauri dev        # abre a janela em modo de desenvolvimento
 cargo tauri build      # gera o instalador da sua plataforma
 ```
 
+No Windows, o build de instalador espera `src-tauri/resources/mpv-2.dll` (libmpv, usado pelo player nativo). O CI baixa a DLL sozinho; localmente, copie a DLL de um pacote `mpv-dev` ou rode `.github/scripts/prepare-libmpv.ps1` antes do `cargo tauri build`. Para compilar o player nativo localmente, use `cargo build --features mpv` (exige libmpv instalada no sistema).
+
 Testes do backend:
 
 ```bash
