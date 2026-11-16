@@ -1,0 +1,10 @@
+# Vulnerabilidades conhecidas que não podemos corrigir hoje. Cada uma precisa de um motivo.
+
+[advisories]
+ignore = [
+    # RUSTSEC-2026-0293 (ringbuf 0.4.8): usado por librqbit-utp 0.7.0, que é dependência não opcional
+    # do librqbit 9.1.0. A correção exige ringbuf >= 0.5.2, que o librqbit-utp ainda não usa.
+    # O problema só ocorre se o Drop de um elemento entrar em pânico. Revisar quando o librqbit
+    # for atualizado.
+    "RUSTSEC-2026-0293",
+]
