@@ -2,7 +2,6 @@
 
 use std::{
     collections::HashMap,
-    net::SocketAddr,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
@@ -16,15 +15,12 @@ use axum::{
 };
 use librqbit::{AddTorrent, AddTorrentOptions, ManagedTorrentHandle, Session};
 use serde::Serialize;
-use tauri::State;
 use tokio::{
-    io::{AsyncReadExt, AsyncSeekExt},
+    io::AsyncSeekExt,
     sync::{OnceCell, RwLock},
 };
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
-
-use crate::AppState;
 
 const MAX_TORRENT_BYTES: usize = 8 * 1024 * 1024;
 
@@ -93,9 +89,7 @@ impl TorrentEngine {
             .map_err(|e| format!("listener do servidor de mídia: {e}"))?;
         let router = Router::new()
             .route("/stream/{token}", get(stream_file))
-            .with_state(HttpState {
-                files: self.files.clone(),
-            });
+            .with_state(HttpState { files: self.files.clone() });
         axum::serve(listener, router)
             .await
             .map_err(|e| format!("servidor de mídia parou: {e}"))
@@ -211,24 +205,6 @@ impl TorrentEngine {
             size_bytes: size,
         })
     }
-}
-
-#[tauri::command]
-pub async fn add_magnet(
-    state: State<'_, AppState>,
-    magnet: String,
-    file_index: Option<usize>,
-) -> Result<TorrentPlayback, String> {
-    state.torrent.add_magnet(magnet, file_index).await
-}
-
-#[tauri::command]
-pub async fn add_torrent_file(
-    state: State<'_, AppState>,
-    bytes: Vec<u8>,
-    file_index: Option<usize>,
-) -> Result<TorrentPlayback, String> {
-    state.torrent.add_torrent_file(bytes, file_index).await
 }
 
 async fn stream_file(

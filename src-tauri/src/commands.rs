@@ -278,8 +278,11 @@ fn annotate(s: &mut Value, addon_name: &str) {
         .map(str::to_string);
     let yt_id = s.get("ytId").and_then(Value::as_str).map(str::to_string);
     let has_info_hash = s.get("infoHash").is_some_and(|v| !v.is_null());
+    let has_magnet = s
+        .get("url")
+        .and_then(Value::as_str)
+        .is_some_and(|u| u.starts_with("magnet:?"));
 
-    // Trailer do YouTube: vira link externo, aberto no navegador.
     let external = external.or_else(|| {
         yt_id
             .as_ref()
@@ -300,8 +303,8 @@ fn annotate(s: &mut Value, addon_name: &str) {
         }
     } else if external.is_some() {
         Some("abre no navegador")
-    } else if has_info_hash {
-        Some("fonte não suportada neste app")
+    } else if has_info_hash || has_magnet {
+        Some("torrent: será resolvido pelo motor local")
     } else {
         Some("sem link reproduzível")
     };
@@ -322,6 +325,38 @@ fn annotate(s: &mut Value, addon_name: &str) {
 pub async fn subtitle(state: State<'_, AppState>, url: String) -> Result<String, String> {
     let bytes = addon::fetch_public_capped(&state.sub_http, &url, MAX_SUBTITLE).await?;
     Ok(srt_to_vtt(&String::from_utf8_lossy(&bytes)))
+}
+
+#[tauri::command]
+pub async fn torrent_open(
+    state: State<'_, AppState>,
+    magnet: Option<String>,
+    torrent_bytes: Option<Vec<u8>>,
+    file_index: Option<usize>,
+) -> Result<Value, String> {
+    match (magnet, torrent_bytes) {
+        (Some(m), None) => {
+            let p = state.torrent.add_magnet(m, file_index).await?;
+            Ok(json!({
+                "streamUrl": p.stream_url,
+                "name": p.name,
+                "fileName": p.file_name,
+                "mimeType": p.mime_type,
+                "sizeBytes": p.size_bytes,
+            }))
+        }
+        (None, Some(bytes)) => {
+            let p = state.torrent.add_torrent_file(bytes, file_index).await?;
+            Ok(json!({
+                "streamUrl": p.stream_url,
+                "name": p.name,
+                "fileName": p.file_name,
+                "mimeType": p.mime_type,
+                "sizeBytes": p.size_bytes,
+            }))
+        }
+        _ => Err("forneça exatamente um magnet ou um arquivo .torrent".into()),
+    }
 }
 
 fn srt_to_vtt(text: &str) -> String {

@@ -6,6 +6,7 @@
 pub mod addon;
 pub mod commands;
 pub mod store;
+pub mod torrent;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -22,6 +23,7 @@ pub struct AppState {
     pub cache: Arc<addon::Cache>,
     pub addons: RwLock<Vec<Installed>>,
     pub store_path: PathBuf,
+    pub torrent: Arc<torrent::TorrentEngine>,
 }
 
 /// Addon de metadados oficial do Stremio, instalado na primeira execução.
@@ -68,6 +70,20 @@ pub fn run() {
             let store_path = data_dir.join("addons.json");
             let installed = store::load(&store_path);
             let needs_default = installed.is_empty();
+            let torrent_dir = data_dir.join("torrents");
+            let torrent = Arc::new(torrent::TorrentEngine::new(torrent_dir).map_err(|e| {
+                tauri::Error::Runtime(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("não foi possível iniciar o motor de torrent: {e}"),
+                )))
+            })?);
+
+            let serve_torrent = torrent.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = serve_torrent.serve().await {
+                    eprintln!("servidor de torrent local falhou: {e}");
+                }
+            });
 
             app.manage(AppState {
                 http: addon::client(),
@@ -75,6 +91,7 @@ pub fn run() {
                 cache: Arc::new(addon::Cache::default()),
                 addons: RwLock::new(installed),
                 store_path,
+                torrent,
             });
 
             if needs_default {
@@ -93,6 +110,7 @@ pub fn run() {
             commands::meta,
             commands::streams,
             commands::subtitle,
+            commands::torrent_open,
         ])
         .run(tauri::generate_context!())
         .expect("erro ao iniciar o CineHub");
