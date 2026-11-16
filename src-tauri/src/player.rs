@@ -20,13 +20,35 @@ pub fn is_playable_url(url: &str) -> bool {
     (u.starts_with("http://") || u.starts_with("https://")) && !u.starts_with('-')
 }
 
+/// Handle da janela principal, para o mpv desenhar o vídeo dentro dela (Windows).
+/// Em outras plataformas (ou se não der certo) o mpv abre a própria janela.
+fn embed_handle(app: &tauri::AppHandle) -> Option<i64> {
+    #[cfg(windows)]
+    {
+        use tauri::Manager;
+        let window = app.get_webview_window("main")?;
+        let hwnd = window.hwnd().ok()?;
+        return Some(hwnd.0 as isize as i64);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        None
+    }
+}
+
 #[tauri::command]
-pub async fn player_play(url: String, start_ms: Option<i64>) -> Result<PlayerResult, String> {
+pub async fn player_play(
+    app: tauri::AppHandle,
+    url: String,
+    start_ms: Option<i64>,
+) -> Result<PlayerResult, String> {
     if !is_playable_url(&url) {
         return Err("endereço de vídeo inválido".into());
     }
     let start = start_ms.unwrap_or(0).max(0);
-    tauri::async_runtime::spawn_blocking(move || imp::play(&url, start))
+    let wid = embed_handle(&app);
+    tauri::async_runtime::spawn_blocking(move || imp::play(&url, start, wid))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -37,17 +59,26 @@ mod imp {
     use libmpv2::events::Event;
     use libmpv2::{mpv_end_file_reason, Mpv};
 
-    pub fn play(url: &str, start_ms: i64) -> Result<PlayerResult, String> {
+    pub fn play(url: &str, start_ms: i64, wid: Option<i64>) -> Result<PlayerResult, String> {
         let mpv = Mpv::with_initializer(|init| {
             init.set_option("vo", "gpu")?;
             init.set_option("hwdec", "auto-safe")?;
             // Sem yt-dlp: a URL é sempre um vídeo direto vindo de um addon ou do torrent local.
             init.set_option("ytdl", "no")?;
-            init.set_option("force-window", "yes")?;
-            init.set_option("title", "CineHub")?;
+            match wid {
+                // Dentro da janela do CineHub: o mpv cria uma janela filha que cobre a área do app.
+                Some(handle) => init.set_option("wid", handle)?,
+                None => {
+                    init.set_option("force-window", "yes")?;
+                    init.set_option("title", "CineHub")?;
+                }
+            }
             Ok(())
         })
         .map_err(|e| format!("não consegui iniciar o mpv: {e}"))?;
+
+        // Esc também fecha o vídeo (além do q padrão do mpv).
+        let _ = mpv.command("keybind", &["ESC", "quit"]);
 
         if start_ms > 0 {
             let opts = format!("start={:.3}", start_ms as f64 / 1000.0);
@@ -90,7 +121,7 @@ mod imp {
 mod imp {
     use super::PlayerResult;
 
-    pub fn play(_url: &str, _start_ms: i64) -> Result<PlayerResult, String> {
+    pub fn play(_url: &str, _start_ms: i64, _wid: Option<i64>) -> Result<PlayerResult, String> {
         Err("player nativo não incluído nesta versão".into())
     }
 }
