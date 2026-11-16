@@ -66,6 +66,41 @@ function askConfirm(msg, okLabel) {
   });
 }
 
+function isTorrentStream(stream) {
+  const url = String(stream?.url ?? '').trim();
+  return url.startsWith('magnet:?') || Boolean(stream?.infoHash) || Boolean(stream?.hash);
+}
+
+function magnetFromInfoHash(hash, name = 'CineHub') {
+  const clean = String(hash ?? '').trim();
+  if (!clean) return '';
+  return `magnet:?xt=urn:btih:${clean}&dn=${encodeURIComponent(name)}`;
+}
+
+async function openTorrentSource(stream, label, id, meta, subs) {
+  const currentUrl = String(stream?.url ?? '').trim();
+  const magnet = currentUrl.startsWith('magnet:?')
+    ? currentUrl
+    : magnetFromInfoHash(stream?.infoHash ?? stream?.hash ?? '', label || meta?.name || 'CineHub');
+  if (!magnet) {
+    toast('Fonte torrent inválida.');
+    return;
+  }
+
+  try {
+    toast('Preparando torrent...');
+    const result = await call('torrent_open', {
+      magnet,
+      torrent_bytes: null,
+      file_index: stream?.fileIndex ?? null,
+    });
+    const fixed = { ...stream, url: result.streamUrl, mimeType: result.mimeType, name: result.name || stream?.name || label };
+    await play(fixed, label, id, meta, subs);
+  } catch (err) {
+    toast(err.message || String(err));
+  }
+}
+
 // ---------- Páginas ----------
 
 async function homePage(alive) {
@@ -153,6 +188,14 @@ async function addonsPage() {
       <input id="au" placeholder="Cole o link do addon (manifest.json ou stremio://…)" aria-label="Link do addon">
       <button>Instalar</button>
     </form>
+    <form id="tf" class="torrentform">
+      <input id="tm" placeholder="Cole um magnet: ou use um arquivo .torrent" aria-label="Magnet do torrent">
+      <label class="torrentfile">
+        <span>Selecionar .torrent</span>
+        <input id="torrent-file" type="file" accept=".torrent" hidden>
+      </label>
+      <button type="submit" class="chip">Abrir torrent</button>
+    </form>
     <p class="muted small">Addons compatíveis com o protocolo do Stremio. Instale apenas fontes que você tem autorização para acessar.</p>
     <div id="al" class="loading">Carregando…</div>`);
 
@@ -168,9 +211,37 @@ async function addonsPage() {
     }
   };
 
+  $('#tf').onsubmit = async (e) => {
+    e.preventDefault();
+    const input = $('#torrent-file');
+    const magnet = $('#tm').value.trim();
+    try {
+      if (input.files && input.files.length) {
+        const file = input.files[0];
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const result = await call('torrent_open', { magnet: null, torrent_bytes: Array.from(bytes), file_index: null });
+        const streamUrl = result.streamUrl;
+        const fake = { url: streamUrl, name: result.name, fileName: result.fileName, mimeType: result.mimeType };
+        const playback = { id: `torrent:${Date.now()}`, label: result.name || file.name, name: result.name || file.name };
+        await play(fake, playback.label, playback.id, { ...playback, type: 'movie', name: playback.label }, []);
+        return;
+      }
+      if (!magnet) {
+        toast('Cole um magnet ou selecione um .torrent.');
+        return;
+      }
+      const result = await call('torrent_open', { magnet, torrent_bytes: null, file_index: null });
+      const fake = { url: result.streamUrl, name: result.name, fileName: result.fileName, mimeType: result.mimeType };
+      const playback = { id: `torrent:${Date.now()}`, label: result.name || 'Torrent', name: result.name || 'Torrent' };
+      await play(fake, playback.label, playback.id, { ...playback, type: 'movie', name: playback.label }, []);
+    } catch (err) {
+      toast(err.message || String(err));
+    }
+  };
+
   const list = await call('list_addons');
   const al = $('#al');
-  if (!al) return; // a página mudou enquanto carregava
+  if (!al) return;
   al.className = '';
   al.innerHTML = list.length ? list.map(addonHtml).join('') : '<p class="muted">Nenhum addon instalado.</p>';
   al.querySelectorAll('button[data-url]').forEach((b) => {
@@ -280,7 +351,7 @@ function rowEl(row, pageable) {
         });
         const added = append(next);
         skip += next.length;
-        if (!next.length || !added) more.remove(); // fim do catálogo, ou o addon ignora a paginação
+        if (!next.length || !added) more.remove();
         else more.disabled = false;
       } catch (e) {
         toast(e.message);
@@ -379,7 +450,7 @@ async function loadStreams(kind, id, label, meta) {
   box.append(title);
 
   for (const s of streams) {
-    const playable = Boolean(s.url || s.externalUrl);
+    const playable = Boolean(s.url || s.externalUrl || s.infoHash || s.hash || String(s.url || '').startsWith('magnet:?'));
     const b = document.createElement('button');
     b.className = 'stream' + (playable ? '' : ' disabled');
     b.disabled = !playable;
@@ -388,8 +459,17 @@ async function loadStreams(kind, id, label, meta) {
       <strong>${esc(s.name || s.addonName)}</strong>
       <span>${esc((s.title || '').replace(/\n/g, ' · '))}</span>
       <em class="muted small">${esc(details)}</em>`;
-    if (s.url) b.onclick = () => play(s, label, id, meta, subtitles || []);
-    else if (s.externalUrl) b.onclick = () => window.open(s.externalUrl, '_blank', 'noopener');
+    if (playable && (isTorrentStream(s) || s.url)) {
+      b.onclick = async () => {
+        if (isTorrentStream(s)) {
+          await openTorrentSource(s, label, id, meta, subtitles || []);
+          return;
+        }
+        await play(s, label, id, meta, subtitles || []);
+      };
+    } else if (s.externalUrl) {
+      b.onclick = () => window.open(s.externalUrl, '_blank', 'noopener');
+    }
     box.append(b);
   }
 }
@@ -402,8 +482,13 @@ let playSeq = 0; // muda a cada fonte; legendas de fontes antigas são descartad
 let blobUrls = [];
 let lastSave = 0;
 
-function play(stream, label, id, meta, subs) {
-  saveProgress(true); // salva o que estava tocando antes de trocar a referência
+async function play(stream, label, id, meta, subs) {
+  if (isTorrentStream(stream)) {
+    await openTorrentSource(stream, label, id, meta, subs);
+    return;
+  }
+
+  saveProgress(true);
   const seq = ++playSeq;
   current = { id, label, meta };
 
@@ -425,7 +510,6 @@ function play(stream, label, id, meta, subs) {
 }
 
 function showPlayer() {
-  // Uma entrada no histórico faz o botão Voltar do Android fechar o player, e não sair do app.
   if (!history.state?.player) history.pushState({ player: true }, '', location.href);
   player.classList.remove('hidden');
 }
@@ -446,7 +530,7 @@ function clearTextTracks() {
 async function addSubtitle(url, seq) {
   try {
     const vtt = await call('subtitle', { url });
-    if (seq !== playSeq) return; // a fonte já mudou
+    if (seq !== playSeq) return;
     const blobUrl = URL.createObjectURL(new Blob([vtt], { type: 'text/vtt' }));
     blobUrls.push(blobUrl);
     vjsPlayer.addRemoteTextTrack({ kind: 'subtitles', label: 'Português', srclang: 'pt', src: blobUrl, default: true }, false);
@@ -487,7 +571,7 @@ vjsPlayer.on('pause', () => saveProgress(true));
 vjsPlayer.on('ended', () => {
   if (!current) return;
   const all = store.get('progress', {});
-  delete all[current.id]; // terminou: sai da fila "Continuar assistindo"
+  delete all[current.id];
   store.set('progress', all);
 });
 vjsPlayer.on('error', () => {
@@ -530,7 +614,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !player.classList.contains('hidden')) closePlayer(false);
 });
 window.addEventListener('popstate', () => {
-  if (!player.classList.contains('hidden')) closePlayer(true); // Voltar do Android fecha o player
+  if (!player.classList.contains('hidden')) closePlayer(true);
 });
 
 // ---------- Biblioteca (favoritos no navegador) ----------
@@ -573,7 +657,7 @@ const NAV = {
 let routeSeq = 0;
 async function route() {
   const seq = ++routeSeq;
-  const alive = () => seq === routeSeq; // páginas antigas não sobrescrevem a atual
+  const alive = () => seq === routeSeq;
   clearTimeout(debounceTimer);
 
   const path = location.hash.replace(/^#\/?/, '').split('?')[0];
@@ -590,8 +674,6 @@ async function route() {
   if (alive()) focusContent();
 }
 
-// Em TV e teclado, o foco vai para o conteúdo quando a página muda pelo menu lateral.
-// Só age quando a última interação foi pelo teclado ou controle remoto (não pelo toque).
 let usingKeys = false;
 document.addEventListener('keydown', () => (usingKeys = true), true);
 document.addEventListener('pointerdown', () => (usingKeys = false), true);
@@ -618,10 +700,6 @@ topQ.addEventListener('keydown', (e) => {
 window.addEventListener('hashchange', route);
 route();
 
-// ---------- Controle remoto (Android TV) e teclado ----------
-// Setas movem o foco para o elemento mais próximo na direção pressionada.
-// OK/Enter ativa o elemento focado (o próprio navegador já faz isso em <a> e <button>).
-
 const FOCUSABLE = 'a[href], button:not([disabled]), input, video';
 const DIRS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
 
@@ -631,7 +709,7 @@ function focusables() {
 
 document.addEventListener('keydown', (e) => {
   const dir = DIRS[e.key];
-  if (!dir || !player.classList.contains('hidden') || confirmDialog.open) return; // com o player aberto, as setas controlam o vídeo
+  if (!dir || !player.classList.contains('hidden') || confirmDialog.open) return;
 
   const list = focusables();
   if (!list.length) return;
@@ -659,7 +737,7 @@ document.addEventListener('keydown', (e) => {
     if (!ahead) continue;
     const main = horizontal ? Math.abs(dx) : Math.abs(dy);
     const cross = horizontal ? Math.abs(dy) : Math.abs(dx);
-    const score = main + cross * 2; // prefere o que está alinhado na mesma faixa
+    const score = main + cross * 2;
     if (score < bestScore) {
       bestScore = score;
       best = el;
