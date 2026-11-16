@@ -1,6 +1,6 @@
 # Prepara o libmpv para o build de Windows do CineHub (feature `mpv`).
 #
-# - Baixa o pacote de desenvolvimento do mpv (versão fixada abaixo).
+# - Baixa o pacote de desenvolvimento do mpv (release mais recente que o contém).
 # - Copia mpv-2.dll para src-tauri/resources/ (o Tauri instala a DLL junto do app).
 # - Procura mpv.lib (import library MSVC). Se o pacote não tiver, gera um a partir das
 #   exportações da DLL, usando dumpbin/lib do Visual Studio.
@@ -10,14 +10,17 @@
 param([string]$Root = (Get-Location).Path)
 $ErrorActionPreference = 'Stop'
 
-# Release fixada; o nome exato do arquivo (que inclui o hash do commit) é lido da API do GitHub.
-$Tag = '20260921'
+# Usa a release mais recente que tenha o pacote mpv-dev x86_64 (o nome do arquivo inclui a data
+# e o hash do commit, então ele é lido da API em vez de escrito à mão).
 $headers = @{ 'Accept' = 'application/vnd.github+json' }
 if ($env:GH_TOKEN) { $headers['Authorization'] = "Bearer $env:GH_TOKEN" }
-$release = Invoke-RestMethod -Headers $headers `
-    -Uri "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/tags/$Tag"
-$asset = $release.assets | Where-Object { $_.name -match '^mpv-dev-x86_64-\d{8}-git-[0-9a-f]+\.7z$' } | Select-Object -First 1
-if (-not $asset) { throw "nenhum pacote mpv-dev x86_64 na release $Tag" }
+$releases = Invoke-RestMethod -Headers $headers -Uri 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases?per_page=10'
+$asset = $null
+foreach ($release in $releases) {
+    $asset = $release.assets | Where-Object { $_.name -match '^mpv-dev-x86_64-\d{8}-git-[0-9a-f]+\.7z$' } | Select-Object -First 1
+    if ($asset) { Write-Host "release usada: $($release.tag_name)"; break }
+}
+if (-not $asset) { throw 'nenhum pacote mpv-dev x86_64 nas releases recentes' }
 $Archive = $asset.name
 
 $work = Join-Path $env:RUNNER_TEMP 'libmpv'
