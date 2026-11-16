@@ -34,14 +34,21 @@ $7z = 'C:\Program Files\7-Zip\7z.exe'
 & $7z x $archivePath "-o$extract" -y | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "falha ao extrair $Archive" }
 
-$dll = Get-ChildItem $extract -Recurse -Filter 'mpv-2.dll' | Select-Object -First 1
-if (-not $dll) { throw 'mpv-2.dll não encontrada no pacote do mpv' }
+# O nome da DLL varia entre pacotes (mpv-2.dll ou libmpv-2.dll). Se não achar, lista o pacote no log.
+$dll = Get-ChildItem $extract -Recurse -Filter '*.dll' |
+    Where-Object { $_.Name -match '^(lib)?mpv(-\d)?\.dll$' } | Select-Object -First 1
+if (-not $dll) {
+    Write-Host 'Conteúdo do pacote mpv-dev:'
+    Get-ChildItem $extract -Recurse -File | ForEach-Object { Write-Host "  $($_.FullName.Substring($extract.Length))" }
+    throw 'DLL do libmpv não encontrada no pacote'
+}
+Write-Host "DLL encontrada: $($dll.Name)"
 
 $libDir = Join-Path $work 'lib'
 New-Item -ItemType Directory -Force $libDir | Out-Null
 $libOut = Join-Path $libDir 'mpv.lib'
 
-$lib = Get-ChildItem $extract -Recurse -Filter 'mpv.lib' | Select-Object -First 1
+$lib = Get-ChildItem $extract -Recurse -Filter '*.lib' | Where-Object { $_.Name -match '^(lib)?mpv\.lib$' } | Select-Object -First 1
 if ($lib) {
     Copy-Item $lib.FullName $libOut -Force
 } else {
