@@ -25,7 +25,9 @@ use axum::{
     routing::get,
     Router,
 };
-use librqbit::{api::TorrentIdOrHash, AddTorrent, ManagedTorrent, Session, SessionOptions};
+use librqbit::{
+    api::TorrentIdOrHash, AddTorrent, DhtSessionConfig, ManagedTorrent, Session, SessionOptions,
+};
 use serde::Serialize;
 use tokio::{
     io::{AsyncReadExt, AsyncSeekExt},
@@ -150,8 +152,15 @@ impl TorrentEngine {
             .get_or_try_init(|| async {
                 // Sem descoberta na rede local (LSD) e sem porta de escuta de entrada:
                 // o app só baixa, não anuncia nem aceita conexões de terceiros.
+                // Mantém a DHT para descobrir peers, mas desativa a persistência dela:
+                // librqbit tenta buscar um diretório de projeto padrão, que pode não existir
+                // em ambientes móveis/sandbox (por exemplo Android), impedindo a sessão de iniciar.
                 let opts = SessionOptions {
                     disable_local_service_discovery: true,
+                    dht: Some(DhtSessionConfig {
+                        persistence: None,
+                        ..DhtSessionConfig::default()
+                    }),
                     ..SessionOptions::default()
                 };
                 Session::new_with_opts(self.download_dir.clone(), opts)
@@ -456,7 +465,7 @@ mod tests {
         let suffix = axum::http::HeaderValue::from_static("bytes=-10");
         assert_eq!(parse_range(Some(&suffix), 100), Ok((90, 99, true)));
         let invalid = axum::http::HeaderValue::from_static("bytes=100-");
-        assert!(parse_range(Some(&invalid), 100).is_err());
+        assert!(parse_range(Some(&invalid, 100).is_err());
     }
 
     #[test]
