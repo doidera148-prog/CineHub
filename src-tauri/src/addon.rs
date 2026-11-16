@@ -105,7 +105,9 @@ impl Installed {
         m.resources.iter().any(|r| {
             let (name, types, prefixes) = match r {
                 Resource::Name(n) => (n.as_str(), None, None),
-                Resource::Detailed(d) => (d.name.as_str(), d.types.as_ref(), d.id_prefixes.as_ref()),
+                Resource::Detailed(d) => {
+                    (d.name.as_str(), d.types.as_ref(), d.id_prefixes.as_ref())
+                }
             };
             if name != resource {
                 return false;
@@ -113,7 +115,7 @@ impl Installed {
             let types = types.unwrap_or(&m.types);
             let prefixes = prefixes.or(m.id_prefixes.as_ref());
             types.iter().any(|t| t == kind)
-                && prefixes.map_or(true, |p| p.iter().any(|pre| id.starts_with(pre.as_str())))
+                && prefixes.is_none_or(|p| p.iter().any(|pre| id.starts_with(pre.as_str())))
         })
     }
 }
@@ -167,7 +169,8 @@ async fn fetch_value(client: &Client, cache: &Cache, url: &str) -> Result<Value,
         return Ok(v);
     }
     let body = read_capped(client, url, MAX_BODY).await?;
-    let value: Value = serde_json::from_slice(&body).map_err(|e| format!("resposta inválida: {e}"))?;
+    let value: Value =
+        serde_json::from_slice(&body).map_err(|e| format!("resposta inválida: {e}"))?;
     cache.put(url.to_string(), value.clone());
     Ok(value)
 }
@@ -184,29 +187,62 @@ pub async fn catalog(
     let url = if extra.is_empty() {
         format!("{}/catalog/{}/{}.json", a.base(), enc(kind), enc(id))
     } else {
-        format!("{}/catalog/{}/{}/{}.json", a.base(), enc(kind), enc(id), extra)
+        format!(
+            "{}/catalog/{}/{}/{}.json",
+            a.base(),
+            enc(kind),
+            enc(id),
+            extra
+        )
     };
     let v = fetch_value(client, cache, &url).await?;
-    Ok(v.get("metas").and_then(Value::as_array).cloned().unwrap_or_default())
+    Ok(v.get("metas")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default())
 }
 
-pub async fn meta(client: &Client, cache: &Cache, a: &Installed, kind: &str, id: &str) -> Result<Option<Value>, String> {
+pub async fn meta(
+    client: &Client,
+    cache: &Cache,
+    a: &Installed,
+    kind: &str,
+    id: &str,
+) -> Result<Option<Value>, String> {
     let url = format!("{}/meta/{}/{}.json", a.base(), enc(kind), enc(id));
     let v = fetch_value(client, cache, &url).await?;
     Ok(v.get("meta").filter(|m| !m.is_null()).cloned())
 }
 
-pub async fn streams(client: &Client, cache: &Cache, a: &Installed, kind: &str, id: &str) -> Result<Vec<Value>, String> {
+pub async fn streams(
+    client: &Client,
+    cache: &Cache,
+    a: &Installed,
+    kind: &str,
+    id: &str,
+) -> Result<Vec<Value>, String> {
     let url = format!("{}/stream/{}/{}.json", a.base(), enc(kind), enc(id));
     let v = fetch_value(client, cache, &url).await?;
-    Ok(v.get("streams").and_then(Value::as_array).cloned().unwrap_or_default())
+    Ok(v.get("streams")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default())
 }
 
 /// Legendas externas do recurso "subtitles" (rota /subtitles/{tipo}/{id}.json).
-pub async fn subtitles(client: &Client, cache: &Cache, a: &Installed, kind: &str, id: &str) -> Result<Vec<Value>, String> {
+pub async fn subtitles(
+    client: &Client,
+    cache: &Cache,
+    a: &Installed,
+    kind: &str,
+    id: &str,
+) -> Result<Vec<Value>, String> {
     let url = format!("{}/subtitles/{}/{}.json", a.base(), enc(kind), enc(id));
     let v = fetch_value(client, cache, &url).await?;
-    Ok(v.get("subtitles").and_then(Value::as_array).cloned().unwrap_or_default())
+    Ok(v.get("subtitles")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default())
 }
 
 /// Baixa um recurso até `max` bytes. Respostas maiores são recusadas.
@@ -216,23 +252,53 @@ pub async fn read_capped(client: &Client, url: &str, max: usize) -> Result<Vec<u
         .send()
         .await
         .map_err(|e| format!("falha ao conectar: {e}"))?;
-    let status = resp.status();
-    if !status.is_success() {
-        return Err(format!("HTTP {status}"));
-    }
-    let mut body = Vec::new();
-    while let Some(chunk) = resp.chunk().await.map_err(|e| format!("falha ao ler resposta: {e}"))? {
-        if body.len() + chunk.len() > max {
-            return Err("resposta grande demais".into());
-        }
-        body.extend_from_slice(&chunk);
-    }
-    Ok(body)
+    read_body(&mut resp, max).await
 }
 
-/// Aceita só http(s) com host público. Bloqueia localhost e endereços privados,
-/// para que o comando de legenda não sirva de porta de acesso à rede interna.
-pub fn is_safe_url(raw: &str) -> bool {
+/// Limite de redirecionamentos seguidos ao baixar uma legenda.
+const MAX_REDIRECTS: usize = 3;
+
+/// Cliente que NÃO segue redirecionamentos sozinho: cada destino é validado antes.
+pub fn client_no_redirect() -> Client {
+    Client::builder()
+        .timeout(Duration::from_secs(20))
+        .user_agent("CineHub/0.2")
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .expect("não foi possível criar o cliente HTTP")
+}
+
+/// true se o endereço IP é público (não loopback, privado, link-local, etc.).
+/// IPv6 mapeado para IPv4 (::ffff:a.b.c.d) é avaliado como o IPv4 correspondente.
+pub fn ip_is_public(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            !(v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                || v4.is_multicast())
+        }
+        IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return ip_is_public(IpAddr::V4(v4));
+            }
+            let first = v6.segments()[0];
+            let unique_local = (first & 0xfe00) == 0xfc00;
+            let link_local = (first & 0xffc0) == 0xfe80;
+            !(v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                || unique_local
+                || link_local)
+        }
+    }
+}
+
+/// Checagem só dos literais (sem rede): esquema, nomes locais e IPs escritos diretamente.
+pub fn literal_host_is_public(raw: &str) -> bool {
     let Ok(url) = Url::parse(raw) else {
         return false;
     };
@@ -242,27 +308,97 @@ pub fn is_safe_url(raw: &str) -> bool {
     let Some(host) = url.host_str() else {
         return false;
     };
-    let host = host.trim_start_matches('[').trim_end_matches(']').to_lowercase();
-    if host == "localhost" || host.ends_with(".local") {
+    let host = host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_lowercase();
+    if host == "localhost" || host.ends_with(".local") || host.ends_with(".localhost") {
         return false;
     }
     match host.parse::<IpAddr>() {
-        Ok(IpAddr::V4(v4)) => {
-            !(v4.is_private()
-                || v4.is_loopback()
-                || v4.is_link_local()
-                || v4.is_unspecified()
-                || v4.is_broadcast()
-                || v4.is_documentation())
-        }
-        Ok(IpAddr::V6(v6)) => {
-            let first = v6.segments()[0];
-            let unique_local = (first & 0xfe00) == 0xfc00;
-            let link_local = (first & 0xffc0) == 0xfe80;
-            !(v6.is_loopback() || v6.is_unspecified() || unique_local || link_local)
-        }
+        Ok(ip) => ip_is_public(ip),
         Err(_) => true,
     }
+}
+
+/// Checagem completa: os literais e também o DNS. Todo endereço que o nome resolve
+/// precisa ser público. (Um DNS que muda a resposta depois ainda pode burlar isso.)
+pub async fn is_safe_url(raw: &str) -> bool {
+    if !literal_host_is_public(raw) {
+        return false;
+    }
+    let Ok(url) = Url::parse(raw) else {
+        return false;
+    };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let host = host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_string();
+    if host.parse::<IpAddr>().is_ok() {
+        return true; // IP literal já verificado acima
+    }
+    let port = url.port_or_known_default().unwrap_or(443);
+    match tokio::net::lookup_host((host, port)).await {
+        Ok(addrs) => {
+            let addrs: Vec<_> = addrs.collect();
+            !addrs.is_empty() && addrs.iter().all(|a| ip_is_public(a.ip()))
+        }
+        Err(_) => false,
+    }
+}
+
+/// Baixa uma legenda pública, validando cada redirecionamento e limitando o tamanho.
+pub async fn fetch_public_capped(
+    client: &Client,
+    raw: &str,
+    max: usize,
+) -> Result<Vec<u8>, String> {
+    let mut current = Url::parse(raw).map_err(|_| "URL inválida".to_string())?;
+    for _ in 0..=MAX_REDIRECTS {
+        if !is_safe_url(current.as_str()).await {
+            return Err("destino bloqueado por segurança".into());
+        }
+        let mut resp = client
+            .get(current.clone())
+            .send()
+            .await
+            .map_err(|e| format!("falha ao conectar: {e}"))?;
+        if resp.status().is_redirection() {
+            let location = resp
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|v| v.to_str().ok())
+                .ok_or_else(|| "redirecionamento sem destino".to_string())?;
+            current = current
+                .join(location)
+                .map_err(|_| "redirecionamento inválido".to_string())?;
+            continue;
+        }
+        return read_body(&mut resp, max).await;
+    }
+    Err("redirecionamentos demais".into())
+}
+
+async fn read_body(resp: &mut reqwest::Response, max: usize) -> Result<Vec<u8>, String> {
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(format!("HTTP {status}"));
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| format!("falha ao ler resposta: {e}"))?
+    {
+        if body.len() + chunk.len() > max {
+            return Err("resposta grande demais".into());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
 }
 
 /// Codifica um segmento de URL, mantendo ":" (usado em ids como "tt123:1:2").

@@ -21,7 +21,9 @@ async fn spawn_addon(routes: HashMap<String, String>) -> (String, Hits) {
 
     tokio::spawn(async move {
         loop {
-            let Ok((mut sock, _)) = listener.accept().await else { break };
+            let Ok((mut sock, _)) = listener.accept().await else {
+                break;
+            };
             let routes = routes.clone();
             let hits = hits_task.clone();
             tokio::spawn(async move {
@@ -69,7 +71,10 @@ fn installed(base: &str) -> Installed {
 async fn full_protocol_flow_and_cache() {
     let base_placeholder = "PLACEHOLDER";
     let mut routes = HashMap::new();
-    routes.insert("/manifest.json".to_string(), manifest_json(base_placeholder));
+    routes.insert(
+        "/manifest.json".to_string(),
+        manifest_json(base_placeholder),
+    );
     routes.insert(
         "/catalog/movie/top.json".to_string(),
         r#"{"metas":[{"id":"tt1","type":"movie","name":"Filme A"}]}"#.to_string(),
@@ -84,7 +89,8 @@ async fn full_protocol_flow_and_cache() {
     );
     routes.insert(
         "/subtitles/movie/tt1.json".to_string(),
-        r#"{"subtitles":[{"id":"s1","url":"https://subs.example/pt.srt","lang":"por"}]}"#.to_string(),
+        r#"{"subtitles":[{"id":"s1","url":"https://subs.example/pt.srt","lang":"por"}]}"#
+            .to_string(),
     );
     let (base, hits) = spawn_addon(routes).await;
     // Reescreve o manifest com o endereço real do servidor.
@@ -94,7 +100,9 @@ async fn full_protocol_flow_and_cache() {
     let cache = Cache::default();
 
     // Manifest lido pela rede
-    let m = addon::fetch_manifest(&client, &format!("{base}/manifest.json")).await.unwrap();
+    let m = addon::fetch_manifest(&client, &format!("{base}/manifest.json"))
+        .await
+        .unwrap();
     assert_eq!(m.name, "Addon de teste");
     assert!(manifest_body.contains(&base));
 
@@ -104,20 +112,35 @@ async fn full_protocol_flow_and_cache() {
     assert!(a.supports("subtitles", "movie", "tt1"));
 
     // Catálogo
-    let metas = addon::catalog(&client, &cache, &a, "movie", "top", "").await.unwrap();
+    let metas = addon::catalog(&client, &cache, &a, "movie", "top", "")
+        .await
+        .unwrap();
     assert_eq!(metas.len(), 1);
 
     // Meta e fontes
-    let meta = addon::meta(&client, &cache, &a, "movie", "tt1").await.unwrap();
+    let meta = addon::meta(&client, &cache, &a, "movie", "tt1")
+        .await
+        .unwrap();
     assert_eq!(meta.unwrap()["name"], "Filme A");
-    let streams = addon::streams(&client, &cache, &a, "movie", "tt1").await.unwrap();
+    let streams = addon::streams(&client, &cache, &a, "movie", "tt1")
+        .await
+        .unwrap();
     assert_eq!(streams.len(), 2);
-    let subs = addon::subtitles(&client, &cache, &a, "movie", "tt1").await.unwrap();
+    let subs = addon::subtitles(&client, &cache, &a, "movie", "tt1")
+        .await
+        .unwrap();
     assert_eq!(subs[0]["lang"], "por");
 
     // Segunda chamada ao catálogo vem do cache: o servidor não recebe nova requisição
-    let _ = addon::catalog(&client, &cache, &a, "movie", "top", "").await.unwrap();
-    let count = hits.lock().unwrap().get("/catalog/movie/top.json").copied().unwrap_or(0);
+    let _ = addon::catalog(&client, &cache, &a, "movie", "top", "")
+        .await
+        .unwrap();
+    let count = hits
+        .lock()
+        .unwrap()
+        .get("/catalog/movie/top.json")
+        .copied()
+        .unwrap_or(0);
     assert_eq!(count, 1, "o cache deveria evitar a segunda requisição");
 }
 
@@ -127,7 +150,9 @@ async fn oversized_responses_are_rejected() {
     routes.insert("/big".to_string(), "x".repeat(5_000));
     let (base, _hits) = spawn_addon(routes).await;
     let client = addon::client();
-    let err = addon::read_capped(&client, &format!("{base}/big"), 1_000).await.unwrap_err();
+    let err = addon::read_capped(&client, &format!("{base}/big"), 1_000)
+        .await
+        .unwrap_err();
     assert!(err.contains("grande demais"));
 }
 
@@ -135,20 +160,33 @@ async fn oversized_responses_are_rejected() {
 async fn http_errors_are_reported() {
     let (base, _hits) = spawn_addon(HashMap::new()).await;
     let client = addon::client();
-    let err = addon::read_capped(&client, &format!("{base}/nao-existe"), 1_000).await.unwrap_err();
+    let err = addon::read_capped(&client, &format!("{base}/nao-existe"), 1_000)
+        .await
+        .unwrap_err();
     assert!(err.contains("404"));
 }
 
-#[test]
-fn subtitle_urls_must_be_public() {
-    assert!(addon::is_safe_url("https://subs.example.com/pt.srt"));
-    assert!(addon::is_safe_url("http://93.184.216.34/pt.srt"));
-    assert!(!addon::is_safe_url("http://localhost:8080/x"));
-    assert!(!addon::is_safe_url("http://127.0.0.1/x"));
-    assert!(!addon::is_safe_url("http://192.168.0.10/x"));
-    assert!(!addon::is_safe_url("http://10.0.0.5/x"));
-    assert!(!addon::is_safe_url("http://169.254.169.254/latest/meta-data"));
-    assert!(!addon::is_safe_url("http://[::1]/x"));
-    assert!(!addon::is_safe_url("file:///etc/passwd"));
-    assert!(!addon::is_safe_url("ftp://example.com/x"));
+#[tokio::test]
+async fn subtitle_urls_must_be_public() {
+    // IPs públicos literais não dependem de DNS, então o teste roda offline.
+    assert!(addon::is_safe_url("http://93.184.216.34/pt.srt").await);
+    assert!(addon::is_safe_url("https://93.184.216.34:8443/pt.srt").await);
+    assert!(!addon::is_safe_url("http://localhost:8080/x").await);
+    assert!(!addon::is_safe_url("http://127.0.0.1/x").await);
+    assert!(!addon::is_safe_url("http://192.168.0.10/x").await);
+    assert!(!addon::is_safe_url("http://10.0.0.5/x").await);
+    assert!(!addon::is_safe_url("http://169.254.169.254/latest/meta-data").await);
+    assert!(!addon::is_safe_url("http://[::1]/x").await);
+    assert!(!addon::is_safe_url("file:///etc/passwd").await);
+    assert!(!addon::is_safe_url("ftp://93.184.216.34/x").await);
+}
+
+#[tokio::test]
+async fn ipv4_mapped_ipv6_cannot_reach_private_hosts() {
+    // Endereços IPv6 que embutem IPv4 privado/loopback precisam ser recusados.
+    assert!(!addon::is_safe_url("http://[::ffff:127.0.0.1]/x").await);
+    assert!(!addon::is_safe_url("http://[::ffff:192.168.0.1]/x").await);
+    assert!(!addon::is_safe_url("http://[::ffff:10.0.0.1]/x").await);
+    assert!(!addon::is_safe_url("http://[::ffff:169.254.169.254]/x").await);
+    assert!(!addon::is_safe_url("http://[::]/x").await);
 }

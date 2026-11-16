@@ -17,5 +17,8 @@ pub fn save(path: &Path, list: &[Installed]) -> io::Result<()> {
         std::fs::create_dir_all(dir)?;
     }
     let bytes = serde_json::to_vec_pretty(list).map_err(io::Error::other)?;
-    std::fs::write(path, bytes)
+    // Grava em um arquivo temporário e troca de uma vez: uma falha no meio não corrompe a lista.
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, path)
 }

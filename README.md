@@ -89,7 +89,7 @@ cargo tauri android build --apk
 
 Na TV, a navegação é feita pelo controle remoto: as setas movem o foco e OK ativa o item. Para fechar o player, foque o botão ✕ e pressione OK.
 
-Limitação conhecida: o botão Voltar do controle ainda não fecha o player; ele apenas volta na navegação do WebView.
+No Android, o botão Voltar fecha o player antes de sair do app. Na TV, o foco inicial vai para o conteúdo ao trocar de seção pelo menu.
 
 ## Builds na nuvem
 
@@ -98,13 +98,16 @@ O workflow `.github/workflows/build.yml` gera, a cada push na `main`:
 - Windows (`.msi` / `.exe`), macOS (`.dmg` / `.app`), Linux (`.deb` / `.AppImage`)
 - Android (`.apk`), que serve para celular e Android TV
 
-Os arquivos aparecem como artefatos na aba **Actions** do GitHub.
+Os arquivos aparecem como artefatos na aba **Actions** do GitHub e, quando todos os testes passam, são publicados em **Releases** (as 10 publicações mais recentes são mantidas). O APK traz as arquiteturas arm64, armv7, x86 e x86_64. Antes de compilar, o workflow verifica formatação, Clippy (com avisos tratados como erro) e vulnerabilidades nas dependências.
+
+Para assinar o APK de release, é preciso adicionar a chave de assinatura como segredo do repositório; isso não é feito automaticamente.
 
 ## Limitações conhecidas
 
 - **Formatos de vídeo:** o player é o do próprio sistema (WebView). MP4 e WebM funcionam em todas as plataformas; MKV depende do codec e pode não tocar no Android ou no macOS.
 - **HTTP sem criptografia:** o Android bloqueia `http://` por padrão. Fontes de addon com `http://` podem não tocar no celular.
-- **Legendas:** só português (SRT ou VTT), baixadas pelo backend e convertidas para VTT.
+- **Legendas:** só português (SRT ou VTT), baixadas pelo backend e convertidas para VTT. O backend só baixa de endereços públicos e recusa redirecionamentos para a rede interna.
+- **Catálogos:** o botão "Carregar mais" depende de o addon aceitar o parâmetro `skip`. Addons que ignoram esse parâmetro simplesmente não mostram novos itens.
 - **Validação de DNS:** a checagem de URL bloqueia endereços privados escritos diretamente, mas não impede um nome de domínio que resolva para uma rede interna.
 - **Fontes em torrent ou magnet:** não são reproduzidas por este app. Aparecem na lista marcadas como não suportadas.
 

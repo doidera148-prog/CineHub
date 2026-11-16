@@ -22,17 +22,29 @@
 
   <main>
     <header class="topbar">
-      <input id="q" type="search" placeholder="Pesquisar filmes e séries…">
+      <input id="q" type="search" placeholder="Pesquisar filmes e séries…" autocomplete="off" aria-label="Pesquisar">
     </header>
     <section id="view"></section>
   </main>
 
   <div id="player" class="hidden">
     <div class="player-box">
-      <button id="close-player" class="close" title="Fechar (Esc)">✕</button>
+      <button id="close-player" class="close" title="Fechar (Esc)" aria-label="Fechar player">✕</button>
       <video id="video" class="video-js vjs-big-play-centered" controls preload="auto" playsinline></video>
     </div>
   </div>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <dialog id="confirm" aria-labelledby="confirm-msg">
+    <form method="dialog" class="dialog-box">
+      <p id="confirm-msg"></p>
+      <div class="dialog-actions">
+        <button value="cancel" class="chip">Cancelar</button>
+        <button id="confirm-ok" value="ok" class="danger">Confirmar</button>
+      </div>
+    </form>
+  </dialog>
 
   <script src="/vendor/video.min.js"></script>
   <script src="/app.js"></script>

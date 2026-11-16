@@ -1,6 +1,7 @@
 //! Comandos chamados pela interface web com `invoke`.
 
 use futures::future::join_all;
+use futures::stream::{self, StreamExt};
 use serde_json::{json, Value};
 use tauri::State;
 
@@ -31,18 +32,26 @@ pub async fn install_addon(state: State<'_, AppState>, url: String) -> Result<Va
         manifest,
     };
 
-    let mut list = state.addons.write().await;
-    list.retain(|a| a.transport_url != installed.transport_url && a.manifest.id != installed.manifest.id);
-    list.push(installed.clone());
-    store::save(&state.store_path, &list).map_err(|e| e.to_string())?;
+    let snapshot = {
+        let mut list = state.addons.write().await;
+        list.retain(|a| {
+            a.transport_url != installed.transport_url && a.manifest.id != installed.manifest.id
+        });
+        list.push(installed.clone());
+        list.clone()
+    };
+    store::save(&state.store_path, &snapshot).map_err(|e| e.to_string())?;
     Ok(json!({ "ok": true, "name": installed.manifest.name }))
 }
 
 #[tauri::command]
 pub async fn remove_addon(state: State<'_, AppState>, url: String) -> Result<Value, String> {
-    let mut list = state.addons.write().await;
-    list.retain(|a| a.transport_url != url);
-    store::save(&state.store_path, &list).map_err(|e| e.to_string())?;
+    let snapshot = {
+        let mut list = state.addons.write().await;
+        list.retain(|a| a.transport_url != url);
+        list.clone()
+    };
+    store::save(&state.store_path, &snapshot).map_err(|e| e.to_string())?;
     Ok(json!({ "ok": true }))
 }
 
@@ -83,19 +92,28 @@ pub async fn search(state: State<'_, AppState>, q: String) -> Result<Value, Stri
     Ok(json!({ "rows": rows }))
 }
 
-async fn run_catalogs(state: &AppState, jobs: Vec<(Installed, CatalogDef)>, extra: String) -> Vec<Value> {
-    join_all(jobs.into_iter().map(|(a, c)| {
+/// Máximo de catálogos consultados ao mesmo tempo.
+const MAX_PARALLEL: usize = 6;
+
+async fn run_catalogs(
+    state: &AppState,
+    jobs: Vec<(Installed, CatalogDef)>,
+    extra: String,
+) -> Vec<Value> {
+    stream::iter(jobs.into_iter().map(|(a, c)| {
         let http = state.http.clone();
         let cache = state.cache.clone();
         let extra = extra.clone();
         async move {
-            let (metas, error) = match addon::catalog(&http, &cache, &a, &c.kind, &c.id, &extra).await {
-                Ok(m) => (m, None),
-                Err(e) => (Vec::new(), Some(format!("{}: {e}", a.manifest.name))),
-            };
+            let (metas, error) =
+                match addon::catalog(&http, &cache, &a, &c.kind, &c.id, &extra).await {
+                    Ok(m) => (m, None),
+                    Err(e) => (Vec::new(), Some(format!("{}: {e}", a.manifest.name))),
+                };
             json!({
                 "title": c.name.clone().unwrap_or_else(|| c.id.clone()),
                 "addon": a.manifest.name,
+                "transportUrl": a.transport_url,
                 "type": c.kind,
                 "catalogId": c.id,
                 "metas": metas,
@@ -103,10 +121,38 @@ async fn run_catalogs(state: &AppState, jobs: Vec<(Installed, CatalogDef)>, extr
             })
         }
     }))
+    .buffered(MAX_PARALLEL)
+    .collect()
     .await
 }
 
-/// Metadados: consulta em paralelo os addons com o recurso "meta" e usa o primeiro com dados.
+/// Próxima página de um catálogo (paginação com `skip`), usada no botão "Carregar mais".
+#[tauri::command]
+pub async fn catalog_page(
+    state: State<'_, AppState>,
+    transport_url: String,
+    kind: String,
+    catalog_id: String,
+    skip: u32,
+) -> Result<Value, String> {
+    let addons = state.addons.read().await;
+    let a = addons
+        .iter()
+        .find(|a| a.transport_url == transport_url)
+        .ok_or("addon não está instalado")?
+        .clone();
+    drop(addons);
+    let extra = if skip > 0 {
+        format!("skip={skip}")
+    } else {
+        String::new()
+    };
+    let metas = addon::catalog(&state.http, &state.cache, &a, &kind, &catalog_id, &extra).await?;
+    Ok(json!({ "metas": metas }))
+}
+
+/// Metadados: consulta em paralelo os addons com o recurso "meta" e mescla as respostas.
+/// O primeiro addon tem prioridade; campos vazios são preenchidos com os dos demais.
 #[tauri::command]
 pub async fn meta(state: State<'_, AppState>, kind: String, id: String) -> Result<Value, String> {
     let addons: Vec<Installed> = state.addons.read().await.clone();
@@ -122,18 +168,51 @@ pub async fn meta(state: State<'_, AppState>, kind: String, id: String) -> Resul
                 (a.manifest.name.clone(), result)
             }
         });
+
+    let mut merged: Option<Value> = None;
+    let mut first_name = String::new();
     for (name, result) in join_all(jobs).await {
-        if let Ok(Some(m)) = result {
-            return Ok(json!({ "meta": m, "addon": name }));
+        let Ok(Some(m)) = result else { continue };
+        match merged.as_mut() {
+            None => {
+                first_name = name;
+                merged = Some(m);
+            }
+            Some(base) => merge_missing(base, &m),
         }
     }
-    Ok(json!({ "meta": null }))
+    match merged {
+        Some(m) => Ok(json!({ "meta": m, "addon": first_name })),
+        None => Ok(json!({ "meta": null })),
+    }
+}
+
+/// Copia para `base` os campos que estão vazios nele e presentes em `extra`.
+fn merge_missing(base: &mut Value, extra: &Value) {
+    let (Some(b), Some(e)) = (base.as_object_mut(), extra.as_object()) else {
+        return;
+    };
+    for (k, v) in e {
+        let empty = match b.get(k) {
+            None | Some(Value::Null) => true,
+            Some(Value::String(s)) => s.is_empty(),
+            Some(Value::Array(a)) => a.is_empty(),
+            _ => false,
+        };
+        if empty && !v.is_null() {
+            b.insert(k.clone(), v.clone());
+        }
+    }
 }
 
 /// Fontes: junta as fontes de todos os addons com o recurso "stream", e as legendas
 /// de addons com o recurso "subtitles". Cada fonte recebe um aviso quando o app não consegue tocá-la.
 #[tauri::command]
-pub async fn streams(state: State<'_, AppState>, kind: String, id: String) -> Result<Value, String> {
+pub async fn streams(
+    state: State<'_, AppState>,
+    kind: String,
+    id: String,
+) -> Result<Value, String> {
     let addons: Vec<Installed> = state.addons.read().await.clone();
 
     let stream_jobs = addons
@@ -144,7 +223,9 @@ pub async fn streams(state: State<'_, AppState>, kind: String, id: String) -> Re
             let cache = state.cache.clone();
             let (kind, id, a) = (kind.clone(), id.clone(), a.clone());
             async move {
-                let list = addon::streams(&http, &cache, &a, &kind, &id).await.unwrap_or_default();
+                let list = addon::streams(&http, &cache, &a, &kind, &id)
+                    .await
+                    .unwrap_or_default();
                 list.into_iter()
                     .map(|mut s| {
                         annotate(&mut s, &a.manifest.name);
@@ -162,7 +243,11 @@ pub async fn streams(state: State<'_, AppState>, kind: String, id: String) -> Re
             let http = state.http.clone();
             let cache = state.cache.clone();
             let (kind, id, a) = (kind.clone(), id.clone(), a.clone());
-            async move { addon::subtitles(&http, &cache, &a, &kind, &id).await.unwrap_or_default() }
+            async move {
+                addon::subtitles(&http, &cache, &a, &kind, &id)
+                    .await
+                    .unwrap_or_default()
+            }
         });
     let subtitles: Vec<Value> = join_all(sub_jobs)
         .await
@@ -177,38 +262,65 @@ pub async fn streams(state: State<'_, AppState>, kind: String, id: String) -> Re
 /// Marca o que o app consegue fazer com cada fonte e adiciona o nome do addon.
 fn annotate(s: &mut Value, addon_name: &str) {
     let hints = s.get("behaviorHints").cloned().unwrap_or(Value::Null);
-    let needs_headers = hints.get("proxyHeaders").map_or(false, |v| !v.is_null());
-    let not_web_ready = hints.get("notWebReady").and_then(Value::as_bool).unwrap_or(false);
-    let url = s.get("url").and_then(Value::as_str).unwrap_or("").to_string();
-    let has_info_hash = s.get("infoHash").map_or(false, |v| !v.is_null());
+    let needs_headers = hints.get("proxyHeaders").is_some_and(|v| !v.is_null());
+    let not_web_ready = hints
+        .get("notWebReady")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let url = s
+        .get("url")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let external = s
+        .get("externalUrl")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let yt_id = s.get("ytId").and_then(Value::as_str).map(str::to_string);
+    let has_info_hash = s.get("infoHash").is_some_and(|v| !v.is_null());
 
-    let note: Option<&str> = if url.is_empty() {
-        if has_info_hash {
-            Some("fonte não suportada neste app")
+    // Trailer do YouTube: vira link externo, aberto no navegador.
+    let external = external.or_else(|| {
+        yt_id
+            .as_ref()
+            .filter(|id| {
+                id.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            })
+            .map(|id| format!("https://www.youtube.com/watch?v={id}"))
+    });
+
+    let note: Option<&str> = if !url.is_empty() {
+        if needs_headers {
+            Some("exige cabeçalhos especiais; pode não tocar")
+        } else if not_web_ready || url.to_lowercase().contains(".mkv") {
+            Some("formato pode não tocar no player")
         } else {
-            Some("sem link reproduzível")
+            None
         }
-    } else if needs_headers {
-        Some("exige cabeçalhos especiais; pode não tocar")
-    } else if not_web_ready || url.to_lowercase().contains(".mkv") {
-        Some("formato pode não tocar no player")
+    } else if external.is_some() {
+        Some("abre no navegador")
+    } else if has_info_hash {
+        Some("fonte não suportada neste app")
     } else {
-        None
+        Some("sem link reproduzível")
     };
 
     if let Some(o) = s.as_object_mut() {
         o.insert("addonName".into(), json!(addon_name));
         o.insert("note".into(), note.map(Value::from).unwrap_or(Value::Null));
+        o.insert(
+            "externalUrl".into(),
+            external.map(Value::from).unwrap_or(Value::Null),
+        );
     }
 }
 
-/// Legenda: baixa o arquivo (só URLs públicas, com limite de tamanho) e devolve em VTT.
+/// Legenda: baixa o arquivo (só URLs públicas, validando cada redirecionamento,
+/// com limite de tamanho) e devolve em VTT.
 #[tauri::command]
 pub async fn subtitle(state: State<'_, AppState>, url: String) -> Result<String, String> {
-    if !addon::is_safe_url(&url) {
-        return Err("URL de legenda bloqueada".into());
-    }
-    let bytes = addon::read_capped(&state.http, &url, MAX_SUBTITLE).await?;
+    let bytes = addon::fetch_public_capped(&state.sub_http, &url, MAX_SUBTITLE).await?;
     Ok(srt_to_vtt(&String::from_utf8_lossy(&bytes)))
 }
 
@@ -219,7 +331,13 @@ fn srt_to_vtt(text: &str) -> String {
     }
     let body = text
         .lines()
-        .map(|l| if l.contains("-->") { l.replace(',', ".") } else { l.to_string() })
+        .map(|l| {
+            if l.contains("-->") {
+                l.replace(',', ".")
+            } else {
+                l.to_string()
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n");
     format!("WEBVTT\n\n{body}\n")
@@ -250,8 +368,24 @@ mod tests {
             normalize_url("stremio://addon.example/manifest.json").unwrap(),
             "https://addon.example/manifest.json"
         );
-        assert_eq!(normalize_url("https://a.example/").unwrap(), "https://a.example/manifest.json");
+        assert_eq!(
+            normalize_url("https://a.example/").unwrap(),
+            "https://a.example/manifest.json"
+        );
         assert!(normalize_url("ftp://x").is_err());
+    }
+
+    #[test]
+    fn literal_checks_cover_mapped_ipv6() {
+        assert!(!addon::literal_host_is_public(
+            "http://[::ffff:127.0.0.1]/x"
+        ));
+        assert!(!addon::literal_host_is_public(
+            "http://[::ffff:192.168.0.1]/x"
+        ));
+        assert!(!addon::literal_host_is_public("http://localhost/x"));
+        assert!(!addon::literal_host_is_public("http://127.0.0.1/x"));
+        assert!(addon::literal_host_is_public("http://93.184.216.34/x"));
     }
 
     #[test]

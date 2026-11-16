@@ -17,6 +17,8 @@ use addon::Installed;
 
 pub struct AppState {
     pub http: reqwest::Client,
+    /// Cliente para legendas: não segue redirecionamentos automáticos (validados à parte).
+    pub sub_http: reqwest::Client,
     pub cache: Arc<addon::Cache>,
     pub addons: RwLock<Vec<Installed>>,
     pub store_path: PathBuf,
@@ -24,6 +26,39 @@ pub struct AppState {
 
 /// Addon de metadados oficial do Stremio, instalado na primeira execução.
 const DEFAULT_ADDON: &str = "https://v3-cinemeta.strem.io/manifest.json";
+
+/// Instala o Cinemeta com novas tentativas (espera crescente), pois a rede pode não estar pronta
+/// logo ao abrir o app.
+async fn install_default_addon(handle: tauri::AppHandle) {
+    let state = handle.state::<AppState>();
+    let mut delay = std::time::Duration::from_secs(2);
+    for attempt in 1..=5 {
+        match addon::fetch_manifest(&state.http, DEFAULT_ADDON).await {
+            Ok(manifest) => {
+                let snapshot = {
+                    let mut list = state.addons.write().await;
+                    if list.iter().any(|a| a.transport_url == DEFAULT_ADDON) {
+                        return;
+                    }
+                    list.push(Installed {
+                        transport_url: DEFAULT_ADDON.into(),
+                        manifest,
+                    });
+                    list.clone()
+                };
+                if let Err(e) = store::save(&state.store_path, &snapshot) {
+                    eprintln!("aviso: não consegui salvar os addons: {e}");
+                }
+                return;
+            }
+            Err(e) => {
+                eprintln!("Cinemeta: tentativa {attempt} falhou ({e}).");
+                tokio::time::sleep(delay).await;
+                delay *= 2;
+            }
+        }
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -34,9 +69,9 @@ pub fn run() {
             let installed = store::load(&store_path);
             let needs_default = installed.is_empty();
 
-            let http = addon::client();
             app.manage(AppState {
-                http,
+                http: addon::client(),
+                sub_http: addon::client_no_redirect(),
                 cache: Arc::new(addon::Cache::default()),
                 addons: RwLock::new(installed),
                 store_path,
@@ -44,22 +79,7 @@ pub fn run() {
 
             if needs_default {
                 let handle = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    let state = handle.state::<AppState>();
-                    match addon::fetch_manifest(&state.http, DEFAULT_ADDON).await {
-                        Ok(manifest) => {
-                            let mut list = state.addons.write().await;
-                            list.push(Installed {
-                                transport_url: DEFAULT_ADDON.into(),
-                                manifest,
-                            });
-                            if let Err(e) = store::save(&state.store_path, &list) {
-                                eprintln!("aviso: não consegui salvar os addons: {e}");
-                            }
-                        }
-                        Err(e) => eprintln!("Não consegui instalar o Cinemeta agora ({e})."),
-                    }
-                });
+                tauri::async_runtime::spawn(install_default_addon(handle));
             }
             Ok(())
         })
@@ -69,6 +89,7 @@ pub fn run() {
             commands::remove_addon,
             commands::home,
             commands::search,
+            commands::catalog_page,
             commands::meta,
             commands::streams,
             commands::subtitle,

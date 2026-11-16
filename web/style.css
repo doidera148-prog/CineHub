@@ -153,6 +153,57 @@ h1 { margin: 0 0 16px; }
 .card:focus-visible .poster { transform: scale(1.04); }
 .poster { transition: transform 0.15s ease; }
 
+/* Carregamento: cartazes em brilho enquanto a página busca os dados */
+.poster.skel, .skel-hero {
+  background: linear-gradient(90deg, #1d2030 25%, #292c40 50%, #1d2030 75%) #1d2030;
+  background-size: 200% 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+.skel-hero { min-height: 300px; border-radius: 14px; }
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+/* Botão "Carregar mais" ao fim de um trilho */
+.row > .more { margin: 10px 0 0; }
+
+/* Aviso rápido (toast) */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  max-width: min(560px, 90vw);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--text);
+  padding: 12px 18px;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 60;
+}
+
+/* Diálogo de confirmação */
+dialog {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0;
+  max-width: min(420px, 92vw);
+}
+dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+.dialog-box { padding: 20px; margin: 0; }
+.dialog-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+
+button:disabled { opacity: 0.5; cursor: default; }
+
+@media (prefers-reduced-motion: reduce) {
+  .poster.skel, .skel-hero { animation: none; }
+  .poster { transition: none; }
+}
+
 /* Telas grandes (TV): textos e cartazes maiores, legíveis a 3 metros */
 html { font-size: 16px; }
 body { font-size: 1rem; }
