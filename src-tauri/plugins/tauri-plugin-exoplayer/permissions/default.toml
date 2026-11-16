@@ -1,0 +1,3 @@
+[default]
+description = "Permite abrir o player nativo do Android"
+permissions = ["allow-play"]

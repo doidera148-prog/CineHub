@@ -5,6 +5,7 @@
 
 pub mod addon;
 pub mod commands;
+pub mod player;
 pub mod store;
 pub mod torrent;
 
@@ -70,6 +71,7 @@ async fn install_default_addon(handle: tauri::AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_exoplayer::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             let store_path = data_dir.join("addons.json");
@@ -121,6 +123,7 @@ pub fn run() {
             commands::subtitle,
             commands::torrent_open,
             commands::save_export,
+            player::player_play,
         ])
         .run(tauri::generate_context!())
         .expect("erro ao iniciar o CineHub");

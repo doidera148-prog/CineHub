@@ -622,21 +622,110 @@ async function loadStreams(kind, id, label, meta) {
 
 // ---------- Player (Video.js, com HLS embutido) ----------
 
+// Codecs e contêineres que o WebView do aparelho aceita. canPlayType responde
+// '', 'maybe' ou 'probably'; o resultado é guardado como booleano.
+const CODEC_TESTS = {
+  h264: 'video/mp4; codecs="avc1.640028"',
+  hevc: 'video/mp4; codecs="hvc1.1.6.L120.B0"',
+  vp9: 'video/webm; codecs="vp09.00.41.08"',
+  av1: 'video/mp4; codecs="av01.0.08M.08"',
+  mkv: 'video/x-matroska',
+  ts: 'video/mp2t',
+};
+const playbackSupport = {};
+(function probeContainers() {
+  const probe = document.createElement('video');
+  for (const [k, type] of Object.entries(CODEC_TESTS)) {
+    playbackSupport[k] = { supported: probe.canPlayType(type) !== '', hardware: null };
+  }
+})();
+
+// Pergunta ao sistema se a decodificação de cada codec é eficiente (geralmente, por hardware).
+// É uma estimativa do WebView: o app não consegue forçar o hardware, só saber se ele existe.
+async function probeHardwareDecode() {
+  if (!navigator.mediaCapabilities?.decodingInfo) return;
+  for (const k of ['h264', 'hevc', 'vp9', 'av1']) {
+    try {
+      const r = await navigator.mediaCapabilities.decodingInfo({
+        type: 'file',
+        video: { contentType: CODEC_TESTS[k], width: 1920, height: 1080, bitrate: 8000000, framerate: 30 },
+      });
+      playbackSupport[k] = { supported: r.supported, hardware: r.powerEfficient };
+    } catch {
+      playbackSupport[k] = { supported: playbackSupport[k].supported, hardware: null };
+    }
+  }
+}
+probeHardwareDecode();
+
+// Tipo do arquivo a partir da URL ou do tipo informado pela fonte.
+function formatOf(src, mime) {
+  if (mime) return mime;
+  const path = String(src || '').split('?')[0].toLowerCase();
+  if (/\.mkv$/.test(path)) return 'video/x-matroska';
+  if (/\.ts$/.test(path)) return 'video/mp2t';
+  if (/\.(avi|mpe?g)$/.test(path)) return 'video/x-msvideo';
+  if (/\.m3u8$/.test(path)) return 'application/x-mpegURL';
+  return '';
+}
+
+// Mensagem que explica o erro de reprodução, com base no código do MediaError.
+function describePlaybackError(err, src, mime) {
+  const code = err?.code;
+  const format = formatOf(src, mime);
+  if (code === 2) return 'Falha de rede ao baixar o vídeo. Verifique a conexão e tente de novo.';
+  if (code === 3) {
+    const hw = playbackSupport.hevc?.hardware === false ? ' Este aparelho não decodifica H.265 por hardware.' : '';
+    return `O aparelho não conseguiu decodificar este vídeo (codec sem suporte ou arquivo danificado).${hw} Tente outra fonte.`;
+  }
+  if (code === 4) {
+    if (format === 'video/x-matroska') return 'O player do aparelho não toca MKV. Escolha uma fonte MP4 ou WebM.';
+    if (format === 'video/mp2t') return 'O player do aparelho não toca MPEG-TS. Escolha uma fonte MP4 ou WebM.';
+    if (format === 'video/x-msvideo' || format === 'video/mpeg') return 'O player do aparelho não toca AVI/MPEG. Escolha uma fonte MP4 ou WebM.';
+    return 'Formato ou codec não suportado por este aparelho. Tente outra fonte.';
+  }
+  return 'Não foi possível tocar esta fonte. Tente outra.';
+}
+
 const vjsPlayer = videojs(video, { controls: true, fluid: true, preload: 'auto', playsinline: true });
 let current = null; // { id, label, meta } do que está tocando agora
 let playSeq = 0; // muda a cada fonte; legendas de fontes antigas são descartadas
 let blobUrls = [];
 let lastSave = 0;
 
+// Player nativo: ExoPlayer no Android, libmpv no desktop. Legendas ainda vão pelo player web.
+// Se o nativo não estiver disponível (ex.: build sem a feature `mpv`), cai no player do navegador.
+const IS_ANDROID = /Android/i.test(navigator.userAgent);
+
+async function playNative(stream, label, id, meta) {
+  const saved = store.get('progress', {})[id];
+  const startMs = saved && saved.t > 5 ? saved.t * 1000 : 0;
+  current = { id, label, meta, src: stream.url, mime: '' };
+  document.title = `${label} · CineHub`;
+  try {
+    const command = IS_ANDROID ? 'plugin:exoplayer|play' : 'player_play';
+    const res = await invoke(command, { url: stream.url, startMs });
+    saveProgress(true, { t: (res?.positionMs || 0) / 1000, duration: (res?.durationMs || 0) / 1000 });
+    return true;
+  } catch (e) {
+    console.warn('player nativo indisponível, usando o do navegador:', e);
+    return false;
+  } finally {
+    current = null;
+    document.title = 'CineHub';
+  }
+}
+
 async function play(stream, label, id, meta, subs) {
   if (isTorrentStream(stream)) {
     await openTorrentSource(stream, label, id, meta, subs);
     return;
   }
+  if (!pickSubtitles(stream, subs).length && (await playNative(stream, label, id, meta))) return;
 
   saveProgress(true);
   const seq = ++playSeq;
-  current = { id, label, meta };
+  current = { id, label, meta, src: stream.url, mime: stream.mimeType || '' };
 
   const src = { src: stream.url };
   if (/\.m3u8(\?|$)/i.test(stream.url)) src.type = 'application/x-mpegURL';
@@ -707,24 +796,26 @@ async function addSubtitle(url, seq) {
 }
 
 // Progresso: salva no máximo a cada 5 s (e sempre ao pausar ou fechar), guardando os 50 mais recentes.
-function saveProgress(force) {
+// `pos` (em segundos) é usado pelo player nativo; sem ele, lê o player web.
+function saveProgress(force, pos) {
   if (!current) return;
   const now = Date.now();
   if (!force && now - lastSave < 5000) return;
-  const t = vjsPlayer.currentTime() || 0;
+  const t = pos ? pos.t : vjsPlayer.currentTime() || 0;
   if (t < 5) return;
   lastSave = now;
 
-  const duration = vjsPlayer.duration() || 0;
+  const duration = pos ? pos.duration : vjsPlayer.duration() || 0;
   const all = store.get('progress', {});
+  const meta = current.meta || {};
   all[current.id] = {
     t: Math.floor(t),
     duration: Math.floor(duration),
     label: current.label,
-    seriesId: current.meta.seriesId || current.meta.id,
-    type: current.meta.type,
-    name: current.meta.name,
-    poster: current.meta.poster || '',
+    seriesId: meta.seriesId || meta.id || current.id,
+    type: meta.type,
+    name: meta.name || current.label,
+    poster: meta.poster || '',
     updated: now,
   };
   const kept = Object.entries(all)
@@ -742,16 +833,28 @@ vjsPlayer.on('ended', () => {
   store.set('progress', all);
 });
 vjsPlayer.on('error', () => {
-  if (current) toast('Não foi possível tocar esta fonte. Tente outra.');
+  if (!current) return;
+  const err = vjsPlayer.error();
+  console.warn('[player] erro', err?.code, err?.message, current.src);
+  toast(describePlaybackError(err, current.src, current.mime));
 });
 
 function closePlayer(fromHistory = false) {
   if (player.classList.contains('hidden')) return;
-  saveProgress(true);
-  vjsPlayer.pause();
-  clearTextTracks();
-  current = null;
+  // Esconde primeiro: se salvar o progresso falhar, o usuário ainda consegue sair do vídeo.
   player.classList.add('hidden');
+  try {
+    saveProgress(true);
+  } catch (e) {
+    console.warn('progresso não salvo:', e);
+  }
+  try {
+    vjsPlayer.pause();
+    clearTextTracks();
+  } catch (e) {
+    console.warn('falha ao limpar o player:', e);
+  }
+  current = null;
   keepScreenOn(false);
   document.title = 'CineHub';
   if (!fromHistory && history.state?.player) history.back();
