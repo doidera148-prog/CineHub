@@ -16,12 +16,17 @@ use axum::{
 };
 use librqbit::{AddTorrent, AddTorrentOptions, ManagedTorrentHandle, Session};
 use serde::Serialize;
-use tokio::{io::AsyncSeekExt, sync::{OnceCell, RwLock}};
+use tauri::State;
+use tokio::{
+    io::{AsyncReadExt, AsyncSeekExt},
+    sync::{OnceCell, RwLock},
+};
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
+use crate::AppState;
+
 const MAX_TORRENT_BYTES: usize = 8 * 1024 * 1024;
-const VIDEO_EXTENSIONS: &[&str] = &["mp4", "m4v", "mkv", "webm", "mov", "avi", "mpeg", "mpg", "ts"];
 
 #[derive(Clone)]
 struct StreamFile {
@@ -88,7 +93,9 @@ impl TorrentEngine {
             .map_err(|e| format!("listener do servidor de mídia: {e}"))?;
         let router = Router::new()
             .route("/stream/{token}", get(stream_file))
-            .with_state(HttpState { files: self.files.clone() });
+            .with_state(HttpState {
+                files: self.files.clone(),
+            });
         axum::serve(listener, router)
             .await
             .map_err(|e| format!("servidor de mídia parou: {e}"))
@@ -134,7 +141,10 @@ impl TorrentEngine {
         }
         let session = self.session().await?;
         let handle = session
-            .add_torrent(AddTorrent::from_bytes(bytes), Some(AddTorrentOptions::default()))
+            .add_torrent(
+                AddTorrent::from_bytes(bytes),
+                Some(AddTorrentOptions::default()),
+            )
             .await
             .map_err(|e| format!("não foi possível abrir o arquivo .torrent: {e:#}"))?
             .into_handle()
@@ -167,21 +177,30 @@ impl TorrentEngine {
                 .iter()
                 .find(|(candidate, _, _, mime)| *candidate == index && mime.is_some())
                 .cloned()
-                .ok_or_else(|| "o índice informado não corresponde a um arquivo de vídeo".to_string())?
+                .ok_or_else(|| {
+                    "o índice informado não corresponde a um arquivo de vídeo".to_string()
+                })?
         } else {
             available
                 .iter()
                 .filter(|(_, _, _, mime)| mime.is_some())
                 .max_by_key(|(_, _, size, _)| *size)
                 .cloned()
-                .ok_or_else(|| "este torrent não contém um formato de vídeo compatível".to_string())?
+                .ok_or_else(|| {
+                    "este torrent não contém um formato de vídeo compatível".to_string()
+                })?
         };
         let (file_index, file_name, size, mime) = chosen;
         let mime = mime.expect("arquivo de vídeo validado");
         let token = Uuid::new_v4().simple().to_string();
         self.files.write().await.insert(
             token.clone(),
-            StreamFile { torrent: handle.clone(), file_index, size, mime_type: mime },
+            StreamFile {
+                torrent: handle.clone(),
+                file_index,
+                size,
+                mime_type: mime,
+            },
         );
 
         Ok(TorrentPlayback {
@@ -192,6 +211,24 @@ impl TorrentEngine {
             size_bytes: size,
         })
     }
+}
+
+#[tauri::command]
+pub async fn add_magnet(
+    state: State<'_, AppState>,
+    magnet: String,
+    file_index: Option<usize>,
+) -> Result<TorrentPlayback, String> {
+    state.torrent.add_magnet(magnet, file_index).await
+}
+
+#[tauri::command]
+pub async fn add_torrent_file(
+    state: State<'_, AppState>,
+    bytes: Vec<u8>,
+    file_index: Option<usize>,
+) -> Result<TorrentPlayback, String> {
+    state.torrent.add_torrent_file(bytes, file_index).await
 }
 
 async fn stream_file(
@@ -218,14 +255,30 @@ async fn stream_file(
 
     let mut stream = match file.torrent.stream(file.file_index).await {
         Ok(stream) => stream,
-        Err(e) => return response_error(StatusCode::SERVICE_UNAVAILABLE, &format!("stream torrent: {e:#}")),
+        Err(e) => {
+            return response_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                &format!("stream torrent: {e:#}"),
+            )
+        }
     };
     if let Err(e) = stream.seek(std::io::SeekFrom::Start(start)).await {
-        return response_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("seek torrent: {e}"));
+        return response_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("seek torrent: {e}"),
+        );
     }
-    let length = end.saturating_sub(start).saturating_add(1);
+    let length = if file.size == 0 {
+        0
+    } else {
+        end.saturating_sub(start).saturating_add(1)
+    };
     let body = Body::from_stream(ReaderStream::new(stream.take(length)));
-    let status = if partial { StatusCode::PARTIAL_CONTENT } else { StatusCode::OK };
+    let status = if partial {
+        StatusCode::PARTIAL_CONTENT
+    } else {
+        StatusCode::OK
+    };
     let mut builder = Response::builder()
         .status(status)
         .header(header::CONTENT_TYPE, file.mime_type)
@@ -233,29 +286,47 @@ async fn stream_file(
         .header(header::ACCEPT_RANGES, "bytes")
         .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
     if partial {
-        builder = builder.header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{}", file.size));
+        builder = builder.header(
+            header::CONTENT_RANGE,
+            format!("bytes {start}-{end}/{}", file.size),
+        );
     }
     builder.body(body).unwrap_or_else(|_| Response::new(Body::empty()))
 }
 
-fn parse_range(value: Option<&axum::http::HeaderValue>, size: u64) -> Result<(u64, u64, bool), ()> {
+fn parse_range(
+    value: Option<&axum::http::HeaderValue>,
+    size: u64,
+) -> Result<(u64, u64, bool), ()> {
     if size == 0 {
         return Ok((0, 0, false));
     }
-    let Some(value) = value else { return Ok((0, size - 1, false)); };
+    let Some(value) = value else {
+        return Ok((0, size - 1, false));
+    };
     let value = value.to_str().map_err(|_| ())?;
     let range = value.strip_prefix("bytes=").ok_or(())?;
-    if range.contains(',') { return Err(()); }
+    if range.contains(',') {
+        return Err(());
+    }
     let (start, end) = range.split_once('-').ok_or(())?;
     if start.is_empty() {
         let suffix: u64 = end.parse().map_err(|_| ())?;
-        if suffix == 0 { return Err(()); }
+        if suffix == 0 {
+            return Err(());
+        }
         let start = size.saturating_sub(suffix);
         return Ok((start, size - 1, true));
     }
     let start: u64 = start.parse().map_err(|_| ())?;
-    let end = if end.is_empty() { size - 1 } else { end.parse().map_err(|_| ())? };
-    if start >= size || end < start { return Err(()); }
+    let end = if end.is_empty() {
+        size - 1
+    } else {
+        end.parse().map_err(|_| ())?
+    };
+    if start >= size || end < start {
+        return Err(());
+    }
     Ok((start, end.min(size - 1), true))
 }
 
