@@ -66,6 +66,11 @@ function askConfirm(msg, okLabel) {
   });
 }
 
+// Só http(s) sai do app: outros esquemas são ignorados.
+function isWebUrl(u) {
+  return typeof u === 'string' && /^https?:\/\//i.test(u);
+}
+
 function isTorrentStream(stream) {
   const url = String(stream?.url ?? '').trim();
   return url.startsWith('magnet:?') || Boolean(stream?.infoHash) || Boolean(stream?.hash);
@@ -174,11 +179,104 @@ async function runSearch(q) {
 
 function libraryPage() {
   const favs = getFavs();
-  setView(`<h1>Biblioteca</h1>${
+  setView(`<h1>Biblioteca</h1>
+    <div class="dataactions">
+      <button id="export-data" class="chip">Exportar dados</button>
+      <button id="import-data" class="chip">Importar dados</button>
+      <input id="import-file" type="file" accept="application/json,.json" hidden>
+    </div>
+    <p class="muted small">Biblioteca e progresso ficam neste aparelho. Exporte um arquivo para levá-los a outro.</p>${
     favs.length
       ? `<div class="grid">${favs.map(cardHtml).join('')}</div>`
       : '<p class="muted">Sua biblioteca está vazia. Abra um título e clique em “Adicionar à biblioteca”.</p>'
   }`);
+  $('#export-data').onclick = exportData;
+  $('#import-data').onclick = () => $('#import-file').click();
+  $('#import-file').onchange = (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    importData(file);
+  };
+}
+
+// Exporta biblioteca e progresso em um arquivo JSON.
+function exportData() {
+  const payload = {
+    app: 'CineHub',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    favs: getFavs(),
+    progress: store.get('progress', {}),
+  };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'cinehub-dados.json';
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
+const MAX_FAVS = 500;
+const str = (v) => (typeof v === 'string' ? v : '');
+const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+
+function cleanFav(f) {
+  return { id: str(f.id), type: str(f.type), name: str(f.name), poster: str(f.poster), releaseInfo: str(f.releaseInfo) };
+}
+
+function cleanProgress(p) {
+  return {
+    t: num(p.t),
+    duration: num(p.duration),
+    label: str(p.label),
+    seriesId: str(p.seriesId),
+    type: str(p.type),
+    name: str(p.name),
+    poster: str(p.poster),
+    updated: num(p.updated),
+  };
+}
+
+// Importa um backup: junta favoritos sem repetir e, no progresso, fica o registro mais recente.
+async function importData(file) {
+  if (!file) return;
+  if (file.size > MAX_IMPORT_BYTES) {
+    toast('Arquivo grande demais para importar.');
+    return;
+  }
+  try {
+    const data = JSON.parse(await file.text());
+    if (data?.app !== 'CineHub' || typeof data.version !== 'number') throw new Error('o arquivo não é um backup do CineHub');
+
+    const favs = getFavs();
+    const ids = new Set(favs.map((f) => f.id));
+    for (const f of Array.isArray(data.favs) ? data.favs : []) {
+      if (f && typeof f.id === 'string' && f.id && !ids.has(f.id)) {
+        favs.push(cleanFav(f));
+        ids.add(f.id);
+      }
+    }
+    store.set('favs', favs.slice(0, MAX_FAVS));
+
+    const progress = store.get('progress', {});
+    for (const [key, p] of Object.entries(data.progress && typeof data.progress === 'object' ? data.progress : {})) {
+      if (!p || typeof p !== 'object') continue;
+      const incoming = cleanProgress(p);
+      if (!progress[key] || incoming.updated > num(progress[key].updated)) progress[key] = incoming;
+    }
+    const kept = Object.entries(progress)
+      .sort((a, b) => num(b[1].updated) - num(a[1].updated))
+      .slice(0, MAX_PROGRESS);
+    store.set('progress', Object.fromEntries(kept));
+
+    toast('Dados importados.');
+    libraryPage();
+  } catch (err) {
+    toast(`Não consegui importar: ${err.message}`);
+  }
 }
 
 async function addonsPage() {
@@ -467,7 +565,7 @@ async function loadStreams(kind, id, label, meta) {
         }
         await play(s, label, id, meta, subtitles || []);
       };
-    } else if (s.externalUrl) {
+    } else if (isWebUrl(s.externalUrl)) {
       b.onclick = () => window.open(s.externalUrl, '_blank', 'noopener');
     }
     box.append(b);
@@ -663,7 +761,12 @@ async function route() {
   const path = location.hash.replace(/^#\/?/, '').split('?')[0];
   const [section, kind, id] = path.split('/');
   const active = section === 'detail' ? '' : section || 'home';
-  document.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === active));
+  document.querySelectorAll('[data-nav]').forEach((a) => {
+    const on = a.dataset.nav === active;
+    a.classList.toggle('active', on);
+    if (on) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  });
 
   try {
     if (section === 'detail') await detailPage(kind, decodeURIComponent(id || ''), alive);

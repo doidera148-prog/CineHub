@@ -22,3 +22,33 @@ pub fn save(path: &Path, list: &[Installed]) -> io::Result<()> {
     std::fs::write(&tmp, bytes)?;
     std::fs::rename(&tmp, path)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn save_is_atomic_and_leaves_no_temp_file() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("cinehub-store-{}-{nanos}", std::process::id()));
+        let path = dir.join("addons.json");
+
+        save(&path, &[]).expect("grava a lista");
+        assert!(path.exists());
+        assert!(
+            !dir.join("addons.json.tmp").exists(),
+            "arquivo temporário não foi removido"
+        );
+        assert!(load(&path).is_empty());
+
+        // Um arquivo corrompido não derruba o app: a lista volta vazia.
+        std::fs::write(&path, b"{ isso nao e json").unwrap();
+        assert!(load(&path).is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

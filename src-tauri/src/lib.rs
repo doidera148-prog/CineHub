@@ -24,6 +24,8 @@ pub struct AppState {
     pub addons: RwLock<Vec<Installed>>,
     pub store_path: PathBuf,
     pub torrent: Arc<torrent::TorrentEngine>,
+    /// Garante que as gravações de addons.json aconteçam uma de cada vez.
+    pub save_lock: tokio::sync::Mutex<()>,
 }
 
 /// Addon de metadados oficial do Stremio, instalado na primeira execução.
@@ -37,6 +39,7 @@ async fn install_default_addon(handle: tauri::AppHandle) {
     for attempt in 1..=5 {
         match addon::fetch_manifest(&state.http, DEFAULT_ADDON).await {
             Ok(manifest) => {
+                let _save = state.save_lock.lock().await;
                 let snapshot = {
                     let mut list = state.addons.write().await;
                     if list.iter().any(|a| a.transport_url == DEFAULT_ADDON) {
@@ -89,6 +92,7 @@ pub fn run() {
                 addons: RwLock::new(installed),
                 store_path,
                 torrent,
+                save_lock: tokio::sync::Mutex::new(()),
             });
 
             if needs_default {

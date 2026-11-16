@@ -246,6 +246,9 @@ button:disabled { opacity: 0.5; cursor: default; }
   .episodes { grid-template-columns: 1fr; }
 }
 
+/* Exportar e importar dados da biblioteca */
+.dataactions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+
 /* Telas grandes (TV): textos e cartazes maiores, legíveis à distância. */
 html { font-size: 16px; }
 body { font-size: 1rem; }

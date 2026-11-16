@@ -1,5 +1,7 @@
 //! Comandos chamados pela interface web com `invoke`.
 
+use std::{future::Future, time::Duration};
+
 use futures::future::join_all;
 use futures::stream::{self, StreamExt};
 use serde_json::{json, Value};
@@ -12,6 +14,16 @@ use crate::{
 
 /// Tamanho máximo de uma legenda baixada (2 MiB).
 const MAX_SUBTITLE: usize = 2 * 1024 * 1024;
+
+/// Tempo máximo para um addon responder. Um addon lento não segura a tela indefinidamente.
+const ADDON_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Aplica o tempo máximo a uma chamada a addon.
+async fn bounded<T>(fut: impl Future<Output = Result<T, String>>) -> Result<T, String> {
+    tokio::time::timeout(ADDON_TIMEOUT, fut)
+        .await
+        .unwrap_or_else(|_| Err("o addon demorou demais para responder".into()))
+}
 
 #[tauri::command]
 pub async fn list_addons(state: State<'_, AppState>) -> Result<Value, String> {
@@ -26,12 +38,21 @@ pub async fn list_addons(state: State<'_, AppState>) -> Result<Value, String> {
 #[tauri::command]
 pub async fn install_addon(state: State<'_, AppState>, url: String) -> Result<Value, String> {
     let url = normalize_url(&url)?;
+    // Só endereços públicos: um addon não pode apontar o app para a rede interna.
+    if !addon::is_safe_url(&url).await {
+        return Err(
+            "endereço não permitido: informe um addon em endereço público (não local nem da rede interna)"
+                .into(),
+        );
+    }
     let manifest = addon::fetch_manifest(&state.http, &url).await?;
     let installed = Installed {
         transport_url: url,
         manifest,
     };
 
+    // Uma gravação por vez, para que a última a salvar sempre tenha a lista mais recente.
+    let _save = state.save_lock.lock().await;
     let snapshot = {
         let mut list = state.addons.write().await;
         list.retain(|a| {
@@ -46,6 +67,7 @@ pub async fn install_addon(state: State<'_, AppState>, url: String) -> Result<Va
 
 #[tauri::command]
 pub async fn remove_addon(state: State<'_, AppState>, url: String) -> Result<Value, String> {
+    let _save = state.save_lock.lock().await;
     let snapshot = {
         let mut list = state.addons.write().await;
         list.retain(|a| a.transport_url != url);
@@ -106,7 +128,7 @@ async fn run_catalogs(
         let extra = extra.clone();
         async move {
             let (metas, error) =
-                match addon::catalog(&http, &cache, &a, &c.kind, &c.id, &extra).await {
+                match bounded(addon::catalog(&http, &cache, &a, &c.kind, &c.id, &extra)).await {
                     Ok(m) => (m, None),
                     Err(e) => (Vec::new(), Some(format!("{}: {e}", a.manifest.name))),
                 };
@@ -147,7 +169,15 @@ pub async fn catalog_page(
     } else {
         String::new()
     };
-    let metas = addon::catalog(&state.http, &state.cache, &a, &kind, &catalog_id, &extra).await?;
+    let metas = bounded(addon::catalog(
+        &state.http,
+        &state.cache,
+        &a,
+        &kind,
+        &catalog_id,
+        &extra,
+    ))
+    .await?;
     Ok(json!({ "metas": metas }))
 }
 
@@ -164,7 +194,7 @@ pub async fn meta(state: State<'_, AppState>, kind: String, id: String) -> Resul
             let cache = state.cache.clone();
             let (kind, id, a) = (kind.clone(), id.clone(), a.clone());
             async move {
-                let result = addon::meta(&http, &cache, &a, &kind, &id).await;
+                let result = bounded(addon::meta(&http, &cache, &a, &kind, &id)).await;
                 (a.manifest.name.clone(), result)
             }
         });
@@ -223,7 +253,7 @@ pub async fn streams(
             let cache = state.cache.clone();
             let (kind, id, a) = (kind.clone(), id.clone(), a.clone());
             async move {
-                let list = addon::streams(&http, &cache, &a, &kind, &id)
+                let list = bounded(addon::streams(&http, &cache, &a, &kind, &id))
                     .await
                     .unwrap_or_default();
                 list.into_iter()
@@ -244,7 +274,7 @@ pub async fn streams(
             let cache = state.cache.clone();
             let (kind, id, a) = (kind.clone(), id.clone(), a.clone());
             async move {
-                addon::subtitles(&http, &cache, &a, &kind, &id)
+                bounded(addon::subtitles(&http, &cache, &a, &kind, &id))
                     .await
                     .unwrap_or_default()
             }
@@ -283,15 +313,18 @@ fn annotate(s: &mut Value, addon_name: &str) {
         .and_then(Value::as_str)
         .is_some_and(|u| u.starts_with("magnet:?"));
 
-    let external = external.or_else(|| {
-        yt_id
-            .as_ref()
-            .filter(|id| {
-                id.chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-            })
-            .map(|id| format!("https://www.youtube.com/watch?v={id}"))
-    });
+    // Só links web: qualquer outro esquema (javascript:, file:, intent:…) é descartado.
+    let external = external
+        .filter(|u| u.starts_with("https://") || u.starts_with("http://"))
+        .or_else(|| {
+            yt_id
+                .as_ref()
+                .filter(|id| {
+                    id.chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                })
+                .map(|id| format!("https://www.youtube.com/watch?v={id}"))
+        });
 
     let note: Option<&str> = if !url.is_empty() {
         if needs_headers {
@@ -428,5 +461,37 @@ mod tests {
         let vtt = srt_to_vtt("1\n00:00:01,000 --> 00:00:02,500\nOlá\n");
         assert!(vtt.starts_with("WEBVTT"));
         assert!(vtt.contains("00:00:01.000 --> 00:00:02.500"));
+    }
+
+    #[test]
+    fn external_links_must_be_web_urls() {
+        let mut bad = json!({ "externalUrl": "javascript:alert(1)" });
+        annotate(&mut bad, "A");
+        assert!(bad["externalUrl"].is_null());
+
+        let mut good = json!({ "externalUrl": "https://x.example/a" });
+        annotate(&mut good, "A");
+        assert_eq!(good["externalUrl"], "https://x.example/a");
+    }
+
+    #[test]
+    fn youtube_trailers_become_links_only_for_valid_ids() {
+        let mut ok = json!({ "ytId": "abc-_1" });
+        annotate(&mut ok, "A");
+        assert_eq!(ok["externalUrl"], "https://www.youtube.com/watch?v=abc-_1");
+
+        let mut bad = json!({ "ytId": "a/b" });
+        annotate(&mut bad, "A");
+        assert!(bad["externalUrl"].is_null());
+    }
+
+    #[test]
+    fn merge_fills_only_empty_fields() {
+        let mut base = json!({ "name": "A", "poster": "", "genres": [] });
+        let extra = json!({ "name": "B", "poster": "p.jpg", "genres": ["x"] });
+        merge_missing(&mut base, &extra);
+        assert_eq!(base["name"], "A");
+        assert_eq!(base["poster"], "p.jpg");
+        assert_eq!(base["genres"][0], "x");
     }
 }

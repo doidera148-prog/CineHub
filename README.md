@@ -59,6 +59,15 @@ Testes do backend:
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
+Teste de fumaça da interface (abre cada rota num Chromium, em celular e desktop, com o backend simulado):
+
+```bash
+cd tests/web
+npm ci
+npx playwright install --with-deps chromium
+npm test
+```
+
 ## Android
 
 Requer Android Studio (ou SDK + NDK), Java 17 e as variáveis `ANDROID_HOME` e `NDK_HOME`.
@@ -121,7 +130,7 @@ Depois, em **Settings → Secrets and variables → Actions**, crie os segredos:
 
 ### Instalar no celular
 
-1. Baixe o APK da release mais recente no celular.
+1. Baixe da release mais recente o APK da sua arquitetura. A maioria dos celulares atuais usa `arm64-v8a` (é o caso do Moto G8 Power Lite); `armeabi-v7a` é para aparelhos mais antigos de 32 bits.
 2. Permita a instalação de fontes desconhecidas para o navegador ou gerenciador de arquivos usado.
 3. Se já houver uma versão instalada com outra assinatura, desinstale-a primeiro.
 
@@ -132,7 +141,8 @@ Depois, em **Settings → Secrets and variables → Actions**, crie os segredos:
 - **Legendas:** só português (SRT ou VTT), baixadas pelo backend e convertidas para VTT. O backend só baixa de endereços públicos e recusa redirecionamentos para a rede interna.
 - **Catálogos:** o botão "Carregar mais" depende de o addon aceitar o parâmetro `skip`. Addons que ignoram esse parâmetro simplesmente não mostram novos itens.
 - **Validação de DNS:** a checagem de URL bloqueia endereços privados escritos diretamente, mas não impede um nome de domínio que resolva para uma rede interna.
-- **Fontes em torrent ou magnet:** não são reproduzidas por este app. Aparecem na lista marcadas como não suportadas.
+- **Torrent e magnet:** o app inclui um motor BitTorrent local (librqbit) que reproduz fontes `magnet:` e arquivos `.torrent`, servidos por um endereço local (`127.0.0.1`). Quem usa é responsável pelo conteúdo que abre; a legalidade depende do conteúdo e do país.
+- **Dados da biblioteca:** biblioteca e progresso ficam no aparelho. Use **Exportar dados** na aba Biblioteca para levá-los a outro aparelho; o arquivo tem os mesmos dados para importar depois.
 
 ## Licença
 

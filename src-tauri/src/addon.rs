@@ -120,10 +120,25 @@ impl Installed {
     }
 }
 
+/// Máximo de redirecionamentos seguidos ao falar com um addon.
+const ADDON_MAX_REDIRECTS: usize = 5;
+
+/// Cliente para os addons. Segue redirecionamentos, mas só até um limite e só para
+/// endereços que não sejam locais ou privados (checagem dos literais, sem rede).
 pub fn client() -> Client {
+    let policy = reqwest::redirect::Policy::custom(|attempt| {
+        if attempt.previous().len() >= ADDON_MAX_REDIRECTS {
+            attempt.error("redirecionamentos demais")
+        } else if !literal_host_is_public(attempt.url().as_str()) {
+            attempt.error("redirecionamento para endereço não permitido")
+        } else {
+            attempt.follow()
+        }
+    });
     Client::builder()
         .timeout(Duration::from_secs(20))
         .user_agent("CineHub/0.2")
+        .redirect(policy)
         .build()
         .expect("não foi possível criar o cliente HTTP")
 }

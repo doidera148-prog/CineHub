@@ -39,11 +39,30 @@ jobs:
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
       - name: Clippy (avisos viram erro)
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - name: Sintaxe do JavaScript
+        run: node --check web/app.js && node --check tests/web/smoke.mjs
       - name: Auditoria de dependências
         uses: rustsec/audit-check@v2
         continue-on-error: true
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  web-smoke:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Instalar dependências do teste
+        working-directory: tests/web
+        run: npm ci
+      - name: Instalar Chromium do Playwright
+        working-directory: tests/web
+        run: npx playwright install --with-deps chromium
+      - name: Teste de fumaça da interface
+        working-directory: tests/web
+        run: npm test
 
   desktop:
     strategy:
@@ -120,7 +139,7 @@ jobs:
         run: python3 android-tv/patch_manifest.py gen/android/app/src/main/AndroidManifest.xml
       - name: Gerar APK
         working-directory: src-tauri
-        run: cargo tauri android build --apk --target aarch64 --target armv7 --target i686 --target x86_64
+        run: cargo tauri android build --apk --split-per-abi
       - name: Assinar APK
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}

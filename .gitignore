@@ -3,3 +3,4 @@ data/
 src-tauri/target/
 src-tauri/gen/
 node_modules/
+tests/web/node_modules/

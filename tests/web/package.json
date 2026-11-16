@@ -1,0 +1,11 @@
+{
+  "name": "cinehub-web-tests",
+  "private": true,
+  "description": "Testes de fumaça da interface web do CineHub (rodam no navegador, com o backend simulado)",
+  "scripts": {
+    "test": "node smoke.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.47.2"
+  }
+}

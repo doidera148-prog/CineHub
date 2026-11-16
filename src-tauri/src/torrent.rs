@@ -264,13 +264,12 @@ async fn stream_file(
             format!("bytes {start}-{end}/{}", file.size),
         );
     }
-    builder.body(body).unwrap_or_else(|_| Response::new(Body::empty()))
+    builder
+        .body(body)
+        .unwrap_or_else(|_| Response::new(Body::empty()))
 }
 
-fn parse_range(
-    value: Option<&axum::http::HeaderValue>,
-    size: u64,
-) -> Result<(u64, u64, bool), ()> {
+fn parse_range(value: Option<&axum::http::HeaderValue>, size: u64) -> Result<(u64, u64, bool), ()> {
     if size == 0 {
         return Ok((0, 0, false));
     }
