@@ -4,7 +4,10 @@ import android.app.Activity
 import android.app.Dialog
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.net.Uri
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -21,6 +24,8 @@ import app.tauri.plugin.Plugin
 class PlayArgs {
     lateinit var url: String
     var startMs: Long = 0
+    /** Legenda VTT como data: URI (opcional). */
+    var subtitle: String? = null
 }
 
 /**
@@ -85,7 +90,19 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         dialog.setOnDismissListener { answer() }
         dialog.show()
 
-        player.setMediaItem(MediaItem.fromUri(args.url))
+        val item = MediaItem.Builder().setUri(args.url)
+        args.subtitle?.let { uri ->
+            item.setSubtitleConfigurations(
+                listOf(
+                    MediaItem.SubtitleConfiguration.Builder(Uri.parse(uri))
+                        .setMimeType(MimeTypes.TEXT_VTT)
+                        .setLanguage("pt")
+                        .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+                        .build()
+                )
+            )
+        }
+        player.setMediaItem(item.build())
         if (args.startMs > 0) player.seekTo(args.startMs)
         player.prepare()
         player.playWhenReady = true

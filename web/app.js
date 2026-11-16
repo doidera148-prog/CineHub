@@ -693,18 +693,36 @@ let playSeq = 0; // muda a cada fonte; legendas de fontes antigas são descartad
 let blobUrls = [];
 let lastSave = 0;
 
-// Player nativo: ExoPlayer no Android, libmpv no desktop. Legendas ainda vão pelo player web.
+// Player nativo: ExoPlayer no Android, libmpv no desktop. Se o nativo falhar, usa o player web.
 // Se o nativo não estiver disponível (ex.: build sem a feature `mpv`), cai no player do navegador.
 const IS_ANDROID = /Android/i.test(navigator.userAgent);
 
-async function playNative(stream, label, id, meta) {
+// Legenda em português como data: URI (VTT), para o ExoPlayer carregar sem arquivo local.
+async function subtitleDataUri(stream, subs) {
+  const sub = pickSubtitles(stream, subs)[0];
+  if (!sub) return null;
+  try {
+    const vtt = await call('subtitle', { url: sub.url });
+    const bytes = new TextEncoder().encode(vtt);
+    let binary = '';
+    for (const b of bytes) binary += String.fromCharCode(b);
+    return 'data:text/vtt;base64,' + btoa(binary);
+  } catch (e) {
+    console.warn('legenda indisponível para o player nativo:', e);
+    return null;
+  }
+}
+
+async function playNative(stream, label, id, meta, subs) {
   const saved = store.get('progress', {})[id];
   const startMs = saved && saved.t > 5 ? saved.t * 1000 : 0;
   current = { id, label, meta, src: stream.url, mime: '' };
   document.title = `${label} · CineHub`;
   try {
     const command = IS_ANDROID ? 'plugin:exoplayer|play' : 'player_play';
-    const res = await invoke(command, { url: stream.url, startMs });
+    const args = { url: stream.url, startMs };
+    if (IS_ANDROID) args.subtitle = await subtitleDataUri(stream, subs);
+    const res = await invoke(command, args);
     saveProgress(true, { t: (res?.positionMs || 0) / 1000, duration: (res?.durationMs || 0) / 1000 });
     return true;
   } catch (e) {
@@ -721,7 +739,7 @@ async function play(stream, label, id, meta, subs) {
     await openTorrentSource(stream, label, id, meta, subs);
     return;
   }
-  if (!pickSubtitles(stream, subs).length && (await playNative(stream, label, id, meta))) return;
+  if (await playNative(stream, label, id, meta, subs)) return;
 
   saveProgress(true);
   const seq = ++playSeq;
