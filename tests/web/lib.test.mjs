@@ -126,3 +126,29 @@ test('rótulo do tipo: filme, série e anime', () => {
   assert.equal(L.typeLabel('anime'), 'Anime');
   assert.equal(L.typeLabel('tv'), '');
 });
+
+test('filtro de fontes por qualidade, idioma e addon', () => {
+  const list = [
+    { name: 'Torrentio', title: 'Filme 1080p dublado', addonName: 'Torrentio' },
+    { name: 'Torrentio', title: 'Filme 720p english', addonName: 'Torrentio' },
+    { name: 'Outro', title: 'Filme 4K', addonName: 'Outro' },
+  ];
+  assert.equal(L.qualityLabel('x 1080p'), '1080p');
+  assert.equal(L.qualityLabel('x 4K HDR'), '4K');
+  assert.equal(L.qualityLabel('x'), 'Outras');
+  assert.equal(L.filterStreams(list, { quality: ['1080p'], lang: [], addon: [] }).length, 1);
+  assert.equal(L.filterStreams(list, { quality: [], lang: ['en'], addon: [] })[0].title, 'Filme 720p english');
+  assert.equal(L.filterStreams(list, { quality: [], lang: [], addon: ['Outro'] }).length, 1);
+  assert.equal(L.filterStreams(list, { quality: [], lang: [], addon: [] }).length, 3);
+});
+
+test('ordenação das fontes: maior qualidade e português primeiro', () => {
+  const list = [
+    { title: 'a 720p' },
+    { title: 'b 4K' },
+    { title: 'c 1080p dublado' },
+  ];
+  assert.equal(L.sortStreamsBy(list, 'quality').map((s) => s.title).join('|'), 'b 4K|c 1080p dublado|a 720p');
+  assert.equal(L.sortStreamsBy(list, 'pt').map((s) => s.title).join('|'), 'c 1080p dublado|a 720p|b 4K');
+  assert.equal(L.sortStreamsBy(list, 'default'), list);
+});

@@ -112,8 +112,39 @@
     return TYPE_LABELS[str(type)] || '';
   }
 
+  // Barra de fontes (filtro e ordenação), adaptada da barra do dxbi.plugin.js (dx.bi, GPL-3.0-or-later).
+  function qualityLabel(text) {
+    const t = String(text || '').toLowerCase();
+    if (/2160p|4k|uhd/.test(t)) return '4K';
+    if (/1080p/.test(t)) return '1080p';
+    if (/720p/.test(t)) return '720p';
+    return 'Outras';
+  }
+  function streamText(s) {
+    return `${s.name || ''} ${s.title || ''}`;
+  }
+  // Filtros: cada grupo é uma lista de valores escolhidos; lista vazia não filtra.
+  function filterStreams(list, f) {
+    return list.filter((s) => {
+      const text = streamText(s);
+      if (f.quality && f.quality.length && !f.quality.includes(qualityLabel(text))) return false;
+      if (f.lang && f.lang.length && !f.lang.includes(torrentLanguage(text))) return false;
+      if (f.addon && f.addon.length && !f.addon.includes(str(s.addonName))) return false;
+      return true;
+    });
+  }
+  // Ordenação: 'default' mantém a ordem de sortStreams; as outras são estáveis.
+  function sortStreamsBy(list, mode) {
+    if (mode === 'quality') return [...list].sort((a, b) => qualityScore(streamText(b)) - qualityScore(streamText(a)));
+    if (mode === 'pt') return [...list].sort((a, b) => Number(isPortuguese(streamText(b))) - Number(isPortuguese(streamText(a))));
+    return list;
+  }
+
   root.CineHubLib = {
     str,
+    qualityLabel,
+    filterStreams,
+    sortStreamsBy,
     isSeriesLike,
     typeLabel,
     num,

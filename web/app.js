@@ -55,7 +55,10 @@ const store = {
   },
 };
 
-const setView = (html) => (view.innerHTML = html);
+const setView = (html) => {
+  view.classList.remove('detail-with-panel');
+  view.innerHTML = html;
+};
 const showError = (err) => setView(`<p class="muted">Erro: ${esc(err.message || err)}</p>`);
 const skeleton = (n = 6) => `<div class="strip" aria-hidden="true">${'<div class="card"><div class="poster skel"></div></div>'.repeat(n)}</div>`;
 const sectionOf = () => location.hash.replace(/^#\/?/, '').split('?')[0].split('/')[0] || 'home';
@@ -144,7 +147,15 @@ function askConfirm(msg, okLabel) {
 }
 
 // Funções puras (URLs seguras, ordenação de fontes, próximo episódio) vêm de lib.js, testadas com node.
-const { isWebUrl, cssUrl, str, num, cleanFav, cleanProgress, progressPercent, sortStreams, nextEpisode, torrentLanguage, isSeriesLike, typeLabel } = window.CineHubLib;
+const { isWebUrl, cssUrl, str, num, cleanFav, cleanProgress, progressPercent, sortStreams, nextEpisode, torrentLanguage, isSeriesLike, typeLabel, qualityLabel, filterStreams, sortStreamsBy } = window.CineHubLib;
+
+const STREAM_LANG = { pt: 'Português', en: 'Inglês', other: 'Outros' };
+const STREAM_SORTS = [
+  ['default', 'Ordem padrão'],
+  ['quality', 'Maior qualidade'],
+  ['pt', 'Português primeiro'],
+];
+const streamText = (s) => `${s.name || ''} ${s.title || ''}`;
 
 // Abre um link externo no navegador do aparelho (window.open não funciona no WebView do Android).
 async function openExternal(url) {
@@ -733,8 +744,12 @@ async function detailPage(kind, id, alive) {
     paintFav();
   };
 
+  // Filmes: as fontes ficam num painel ao lado da imagem, em telas largas (como no dxbi).
   if (isSeriesLike(meta.type || kind)) renderSeries(meta);
-  else loadStreams(meta.type || kind, meta.id, meta.name, meta);
+  else {
+    view.classList.add('detail-with-panel');
+    loadStreams(meta.type || kind, meta.id, meta.name, meta);
+  }
 }
 
 // ---------- Componentes ----------
@@ -992,40 +1007,254 @@ async function loadStreams(kind, id, label, meta) {
   title.textContent = 'Fontes';
   box.append(title);
 
-  for (const s of streams) {
-    const playable = Boolean(s.url || s.externalUrl || s.infoHash || s.hash || String(s.url || '').startsWith('magnet:?'));
-    const b = document.createElement('button');
-    b.className = 'stream' + (playable ? '' : ' disabled');
-    b.disabled = !playable;
-    const details = [s.addonName, s.note].filter(Boolean).join(' · ');
-    b.innerHTML = `
-      <strong>${esc(s.name || s.addonName)}</strong>
-      <span>${esc((s.title || '').replace(/\n/g, ' · '))}</span>
-      <em class="muted small">${esc(details)}</em>`;
-    if (playable && (isTorrentStream(s) || s.url)) {
-      b.onclick = async () => {
-        if (isTorrentStream(s)) {
-          await openTorrentSource(s, label, id, meta, subtitles || []);
-          return;
-        }
-        await play(s, label, id, meta, subtitles || []);
-      };
-    } else if (isWebUrl(s.externalUrl)) {
-      b.onclick = () => openExternal(s.externalUrl);
+  // Barra de filtro e ordenação (só aparece com 3 ou mais fontes, como no dxbi).
+  const ui = { sort: 'default', quality: [], lang: [], addon: [] };
+  const bar = document.createElement('div');
+  bar.className = 'stream-bar';
+  const list = document.createElement('div');
+  list.className = 'stream-list';
+  box.append(bar, list);
+  const primary = document.createElement('button');
+  primary.className = 'primary-play';
+  primary.textContent = '▶ Assistir';
+  primary.onclick = () => list.querySelector('.stream:not(.disabled)')?.click();
+  box.prepend(primary);
+
+  const groups = {
+    quality: { label: 'Qualidade', values: [...new Set(streams.map((s) => qualityLabel(streamText(s))))], name: (v) => v },
+    lang: { label: 'Idioma', values: [...new Set(streams.map((s) => torrentLanguage(streamText(s))))], name: (v) => STREAM_LANG[v] || v },
+    addon: { label: 'Addon', values: [...new Set(streams.map((s) => str(s.addonName)).filter(Boolean))], name: (v) => v },
+  };
+  const paintBar = () => {
+    const total = streams.length;
+    const shown = sortStreamsBy(filterStreams(streams, ui), ui.sort).length;
+    const chips = Object.entries(groups)
+      .filter(([, g]) => g.values.length > 1)
+      .map(([key, g]) => `<div class="stream-group"><span class="small muted">${esc(g.label)}</span>${g.values
+        .map((v) => `<button type="button" class="chip small${ui[key].includes(v) ? ' on' : ''}" data-group="${key}" data-value="${esc(v)}" aria-pressed="${ui[key].includes(v)}">${esc(g.name(v))}</button>`)
+        .join('')}</div>`)
+      .join('');
+    const anyFilter = ui.quality.length || ui.lang.length || ui.addon.length || ui.sort !== 'default';
+    bar.innerHTML = `
+      <div class="stream-tools">
+        <label class="small muted">Ordenar
+          <select id="stream-sort">${STREAM_SORTS.map(([v, l]) => `<option value="${v}"${ui.sort === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>
+        </label>
+        <span class="small muted">${shown === total ? `${total} fontes` : `${shown} de ${total}`}</span>
+        ${anyFilter ? '<button type="button" class="chip small" data-reset="1">Limpar</button>' : ''}
+      </div>
+      ${chips}`;
+    bar.hidden = total < 3;
+    paintList(sortStreamsBy(filterStreams(streams, ui), ui.sort));
+  };
+  bar.addEventListener('change', (e) => {
+    if (e.target.id === 'stream-sort') {
+      ui.sort = e.target.value;
+      paintBar();
     }
-    box.append(b);
-  }
-  // Botão de destaque: assiste à melhor fonte (a primeira reproduzível, já ordenada).
-  const best = box.querySelector('.stream:not(.disabled)');
-  if (best) {
-    const primary = document.createElement('button');
-    primary.className = 'primary-play';
-    primary.textContent = '▶ Assistir';
-    primary.onclick = () => best.click();
-    box.prepend(primary);
-  }
+  });
+  bar.addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    if (btn.dataset.reset) {
+      Object.assign(ui, { sort: 'default', quality: [], lang: [], addon: [] });
+    } else if (btn.dataset.group) {
+      const set = new Set(ui[btn.dataset.group]);
+      set.has(btn.dataset.value) ? set.delete(btn.dataset.value) : set.add(btn.dataset.value);
+      ui[btn.dataset.group] = [...set];
+    } else return;
+    paintBar();
+  });
+
+  const paintList = (shown) => {
+    list.innerHTML = '';
+    if (!shown.length) {
+      list.innerHTML = '<p class="muted small">Nenhuma fonte com estes filtros.</p>';
+      primary.hidden = true;
+      return;
+    }
+    primary.hidden = !shown.some((s) => isPlayable(s));
+    for (const s of shown) {
+      const playable = isPlayable(s);
+      const b = document.createElement('button');
+      b.className = 'stream' + (playable ? '' : ' disabled');
+      b.disabled = !playable;
+      const details = [s.addonName, s.note].filter(Boolean).join(' · ');
+      b.innerHTML = `
+        <strong>${esc(s.name || s.addonName)}</strong>
+        <span>${esc((s.title || '').replace(/\n/g, ' · '))}</span>
+        <em class="muted small">${esc(details)}</em>`;
+      if (playable && (isTorrentStream(s) || s.url)) {
+        b.onclick = async () => {
+          if (isTorrentStream(s)) {
+            await openTorrentSource(s, label, id, meta, subtitles || []);
+            return;
+          }
+          await play(s, label, id, meta, subtitles || []);
+        };
+      } else if (isWebUrl(s.externalUrl)) {
+        b.onclick = () => openExternal(s.externalUrl);
+      }
+      list.append(b);
+    }
+  };
+  const isPlayable = (s) => Boolean(s.url || s.externalUrl || s.infoHash || s.hash || String(s.url || '').startsWith('magnet:?'));
+
+  paintBar();
   showErrors();
 }
+
+// ---------- Cartão de prévia ----------
+// Ao passar o mouse (ou focar com o controle remoto) sobre um título, abre um cartão com fundo,
+// nota, dados e botões. Adaptado do cartão de prévia do dxbi.plugin.js (dx.bi, GPL-3.0-or-later),
+// sem o efeito de empurrar os vizinhos. Fecha ao sair do cartão e da prévia.
+const preview = { el: null, card: null, openTimer: null, closeTimer: null, token: 0 };
+const previewMeta = new Map();
+
+function cardTarget(card) {
+  const m = /^#\/detail\/([^/]+)\/(.+)$/.exec(card.getAttribute('href') || '');
+  return m ? { kind: decodeURIComponent(m[1]), id: decodeURIComponent(m[2]) } : null;
+}
+
+function loadPreviewMeta(kind, id) {
+  const key = `${kind}:${id}`;
+  if (!previewMeta.has(key)) {
+    previewMeta.set(key, call('meta', { kind, id }).then((r) => r.meta || null).catch(() => null));
+  }
+  return previewMeta.get(key);
+}
+
+function ensurePreviewEl() {
+  if (preview.el) return preview.el;
+  const el = document.createElement('div');
+  el.className = 'preview-card';
+  el.setAttribute('role', 'dialog');
+  el.setAttribute('aria-label', 'Prévia do título');
+  el.addEventListener('pointerenter', () => clearTimeout(preview.closeTimer));
+  el.addEventListener('pointerleave', (e) => {
+    if (e.pointerType !== 'touch') schedulePreviewClose();
+  });
+  el.addEventListener('focusout', (e) => {
+    const next = e.relatedTarget;
+    if (!el.contains(next) && !(preview.card && preview.card.contains(next))) schedulePreviewClose();
+  });
+  document.body.append(el);
+  preview.el = el;
+  return el;
+}
+
+function schedulePreviewClose(delay = 180) {
+  clearTimeout(preview.openTimer);
+  clearTimeout(preview.closeTimer);
+  preview.closeTimer = setTimeout(closePreview, delay);
+}
+
+function closePreview() {
+  clearTimeout(preview.openTimer);
+  clearTimeout(preview.closeTimer);
+  preview.token++;
+  preview.card = null;
+  if (preview.el) preview.el.classList.remove('is-open');
+}
+
+// Fica sobre o cartaz; se não couber em cima, vai para baixo, sem sair da tela.
+function positionPreview(el, card) {
+  const r = card.getBoundingClientRect();
+  const width = Math.min(340, window.innerWidth - 24);
+  const left = Math.max(12, Math.min(r.left + r.width / 2 - width / 2, window.innerWidth - width - 12));
+  const height = el.offsetHeight || 260;
+  let top = r.top - height - 10;
+  if (top < 72) top = r.bottom + 10;
+  top = Math.max(12, Math.min(top, window.innerHeight - height - 12));
+  el.style.width = `${width}px`;
+  el.style.left = `${Math.round(left)}px`;
+  el.style.top = `${Math.round(top)}px`;
+}
+
+function paintPreview(el, card, target, meta) {
+  const titleEl = card.querySelector('.title');
+  const name = meta.name || (titleEl ? titleEl.textContent : '');
+  const poster = card.querySelector('.poster-img')?.getAttribute('src') || '';
+  const bg = isWebUrl(meta.background) ? meta.background : isWebUrl(meta.poster) ? meta.poster : poster;
+  const year = meta.releaseInfo || card.querySelector('.card .small, .small')?.textContent || '';
+  const facts = [
+    meta.imdbRating ? `<span class="rating">IMDb ${esc(meta.imdbRating)}</span>` : '',
+    year ? `<span>${esc(year)}</span>` : '',
+    meta.runtime ? `<span>${esc(meta.runtime)}</span>` : '',
+    typeLabel(target.kind) ? `<span>${esc(typeLabel(target.kind))}</span>` : '',
+  ].filter(Boolean).join('');
+  const genres = (meta.genres || []).slice(0, 3);
+  const href = `#/detail/${esc(target.kind)}/${encodeURIComponent(target.id)}`;
+  el.innerHTML = `
+    <div class="preview-media" style="background-image: ${cssUrl(bg)}">
+      <div class="preview-name">${esc(name)}</div>
+    </div>
+    <div class="preview-body">
+      <div class="preview-facts">${facts}</div>
+      ${meta.description ? `<p class="preview-desc">${esc(meta.description)}</p>` : ''}
+      ${genres.length ? `<div class="preview-genres">${genres.map((g) => `<span>${esc(g)}</span>`).join('')}</div>` : ''}
+      <div class="preview-actions">
+        <a class="btn-link btn-light" href="${href}">▶ Assistir</a>
+        <a class="btn-link btn-grey" href="${href}">ⓘ Mais informações</a>
+      </div>
+    </div>`;
+}
+
+async function openPreview(card) {
+  const target = cardTarget(card);
+  if (!target) return;
+  const token = ++preview.token;
+  preview.card = card;
+  const el = ensurePreviewEl();
+  paintPreview(el, card, target, {});
+  positionPreview(el, card);
+  el.classList.add('is-open');
+  const meta = (await loadPreviewMeta(target.kind, target.id)) || {};
+  if (token !== preview.token || !card.isConnected) return;
+  paintPreview(el, card, target, meta);
+  positionPreview(el, card);
+}
+
+view.addEventListener('pointerover', (e) => {
+  if (e.pointerType === 'touch') return;
+  const card = e.target.closest('.card');
+  if (!card) return;
+  clearTimeout(preview.closeTimer);
+  if (card === preview.card) return;
+  clearTimeout(preview.openTimer);
+  preview.openTimer = setTimeout(() => openPreview(card), 450);
+});
+view.addEventListener('pointerout', (e) => {
+  if (e.pointerType === 'touch') return;
+  const card = e.target.closest('.card');
+  if (!card) return;
+  if (e.relatedTarget && (card.contains(e.relatedTarget) || preview.el?.contains(e.relatedTarget))) return;
+  clearTimeout(preview.openTimer);
+  if (preview.card === card) schedulePreviewClose();
+});
+// Controle remoto e teclado: o cartão abre ao focar o título.
+view.addEventListener('focusin', (e) => {
+  const card = e.target.closest('.card');
+  if (!card || card === preview.card) return;
+  clearTimeout(preview.closeTimer);
+  clearTimeout(preview.openTimer);
+  preview.openTimer = setTimeout(() => openPreview(card), 250);
+});
+view.addEventListener('focusout', (e) => {
+  const card = e.target.closest('.card');
+  if (!card) return;
+  const next = e.relatedTarget;
+  if (next && (card.contains(next) || preview.el?.contains(next))) return;
+  schedulePreviewClose();
+});
+// Rolagem (inclusive a dos trilhos, que o controle remoto usa): o cartão acompanha o título.
+view.addEventListener('scroll', () => {
+  if (preview.card && preview.el?.classList.contains('is-open')) positionPreview(preview.el, preview.card);
+}, { capture: true, passive: true });
+window.addEventListener('scroll', () => {
+  if (preview.card && preview.el?.classList.contains('is-open')) positionPreview(preview.el, preview.card);
+}, { passive: true });
+window.addEventListener('hashchange', closePreview);
 
 // ---------- Player (Video.js, com HLS embutido) ----------
 
