@@ -13,4 +13,6 @@ tests/web/node_modules/
 *.p12
 *.b64
 *.corrupt
+# Extensão FFmpeg do Media3 baixada do release no CI (binário, não versionar)
+src-tauri/plugins/tauri-plugin-exoplayer/android/libs/
 src-tauri/resources/mpv-2.dll

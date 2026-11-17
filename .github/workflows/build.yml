@@ -144,6 +144,16 @@ jobs:
           yes | "$SDKMANAGER" --licenses > /dev/null || true
           "$SDKMANAGER" "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;27.0.12077973"
           echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+      - name: Extensão FFmpeg do Media3 (opcional, do release ffmpeg-ext-1.4.1)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p src-tauri/plugins/tauri-plugin-exoplayer/android/libs
+          gh release download ffmpeg-ext-1.4.1 --pattern 'media3-decoder-ffmpeg-1.4.1.aar' \
+            --dir src-tauri/plugins/tauri-plugin-exoplayer/android/libs \
+            || echo "Extensão FFmpeg ainda não publicada: o APK sai sem ela."
+          ls src-tauri/plugins/tauri-plugin-exoplayer/android/libs
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android

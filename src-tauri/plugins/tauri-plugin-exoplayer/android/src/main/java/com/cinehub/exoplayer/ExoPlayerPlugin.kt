@@ -49,7 +49,11 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
 
     private fun openPlayer(invoke: Invoke, args: PlayArgs) {
         // Decodificador por hardware quando existir; se falhar, cai para o de software.
-        val renderers = DefaultRenderersFactory(act).setEnableDecoderFallback(true)
+        // EXTENSION_RENDERER_MODE_ON: se a extensão FFmpeg do Media3 estiver no APK (áudio AC3/E-AC3/DTS/
+        // TrueHD/Opus etc.), ela entra como reserva para o que o aparelho não decodifica; sem ela, nada muda.
+        val renderers = DefaultRenderersFactory(act)
+            .setEnableDecoderFallback(true)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
         val player = ExoPlayer.Builder(act, renderers).build()
         // Títulos com várias faixas de áudio (ex.: dublado e original): prefere português.
         player.trackSelectionParameters = player.trackSelectionParameters

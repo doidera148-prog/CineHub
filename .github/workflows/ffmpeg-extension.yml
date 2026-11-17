@@ -1,0 +1,79 @@
+# Compila a extensão FFmpeg do Media3 (áudio AC3/E-AC3/DTS/TrueHD/Opus etc. para o ExoPlayer)
+# e publica o AAR num release. O build Android do CineHub baixa esse AAR se ele existir.
+#
+# Rodar: Actions → "ffmpeg-extension" → Run workflow (ou alterar as versões abaixo).
+# Versões fixadas: Media3 1.4.1 (mesma do app), FFmpeg release/6.0 e NDK r26b, que são as
+# recomendadas e testadas pelo próprio README do Media3 (decoder_ffmpeg).
+name: ffmpeg-extension
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  MEDIA3_TAG: "1.4.1"
+  FFMPEG_BRANCH: "release/6.0"
+  NDK_VERSION: "26.1.10909125"
+  CMAKE_VERSION: "3.22.1"
+  # Nível da API do build nativo: igual ao minSdk do plugin (24).
+  NATIVE_API_LEVEL: "24"
+  RELEASE_TAG: "ffmpeg-ext-1.4.1"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    permissions:
+      contents: write # para publicar o release com o AAR
+    steps:
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Android SDK, NDK e CMake
+        run: |
+          SDKMANAGER=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -1)
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-34" "build-tools;34.0.0" \
+            "ndk;$NDK_VERSION" "cmake;$CMAKE_VERSION"
+          echo "NDK_PATH=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+      - name: Código do Media3 e do FFmpeg
+        run: |
+          git clone --depth 1 --branch "$MEDIA3_TAG" https://github.com/androidx/media "$RUNNER_TEMP/media3"
+          git clone --depth 1 --branch "$FFMPEG_BRANCH" https://github.com/FFmpeg/FFmpeg "$RUNNER_TEMP/ffmpeg"
+          ln -s "$RUNNER_TEMP/ffmpeg" "$RUNNER_TEMP/media3/libraries/decoder_ffmpeg/src/main/jni/ffmpeg"
+      - name: Compilar o FFmpeg (bibliotecas nativas)
+        working-directory: ${{ runner.temp }}/media3/libraries/decoder_ffmpeg/src/main/jni
+        run: |
+          # Decodificadores de áudio incluídos (só os necessários, para manter o APK menor).
+          ./build_ffmpeg.sh \
+            "$RUNNER_TEMP/media3/libraries/decoder_ffmpeg/src/main" \
+            "$NDK_PATH" "linux-x86_64" "$NATIVE_API_LEVEL" \
+            aac ac3 eac3 dca truehd mlp opus vorbis flac alac mp3 \
+            pcm_mulaw pcm_alaw amrnb amrwb
+      - name: Compilar o AAR
+        working-directory: ${{ runner.temp }}/media3
+        run: |
+          ./gradlew :lib-decoder-ffmpeg:assembleRelease --no-daemon
+          AAR=$(find libraries/decoder_ffmpeg -name "*.aar" -path "*release*" | head -1)
+          test -n "$AAR"
+          cp "$AAR" "$RUNNER_TEMP/media3-decoder-ffmpeg-$MEDIA3_TAG.aar"
+          ls -l "$RUNNER_TEMP/media3-decoder-ffmpeg-$MEDIA3_TAG.aar"
+      - name: Publicar release com o AAR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          AAR="$RUNNER_TEMP/media3-decoder-ffmpeg-$MEDIA3_TAG.aar"
+          # Aviso de licença junto do binário (a extensão é compilada com FFmpeg em configuração LGPL).
+          NOTE="$RUNNER_TEMP/LICENSE-ffmpeg-extension.txt"
+          printf '%s\n' \
+            "Extensão FFmpeg do AndroidX Media3 $MEDIA3_TAG (Apache-2.0)," \
+            "com FFmpeg $FFMPEG_BRANCH compilado sem --enable-gpl (LGPL-2.1+)." \
+            "Código: https://github.com/androidx/media e https://github.com/FFmpeg/FFmpeg" > "$NOTE"
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || \
+            gh release create "$RELEASE_TAG" --title "Extensão FFmpeg $MEDIA3_TAG" \
+              --notes "AAR da extensão FFmpeg do Media3 para o ExoPlayer do CineHub. Gerado pelo workflow ffmpeg-extension." \
+              --prerelease
+          gh release upload "$RELEASE_TAG" "$AAR" "$NOTE" --clobber
