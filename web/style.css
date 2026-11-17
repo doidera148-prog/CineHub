@@ -303,12 +303,66 @@ h2 { font-size: 1.25rem; }
   min-height: 26rem;
   display: flex;
   align-items: flex-end;
-  padding: 0 var(--gutter) 6vw;
-  background: var(--poster) center 20% / cover no-repeat;
+  padding: 0;
+  background: none;
   overflow: hidden;
   isolation: isolate;
   animation: dx-fade 0.8s var(--ease) both;
 }
+/* Cada destaque é um slide empilhado; só o ativo aparece e recebe foco (visibility). */
+.billboard-slide {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  padding: 0 var(--gutter) 6vw;
+  background: var(--poster) center 20% / cover no-repeat;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 1s var(--ease), visibility 0s linear 1s;
+}
+.billboard-slide.is-active {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 1s var(--ease), visibility 0s;
+}
+.billboard-dots {
+  position: absolute;
+  z-index: 3;
+  right: var(--gutter);
+  bottom: calc(6vw + 4.75rem);
+  display: flex;
+  gap: 0.4rem;
+}
+.billboard-dot {
+  position: relative;
+  width: 1.6rem;
+  height: 16px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.billboard-dot:hover { background: transparent; }
+.billboard-dot::before,
+.billboard-dot::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 3px;
+  margin-top: -1.5px;
+  border-radius: 3px;
+}
+.billboard-dot::before { background: rgba(255, 255, 255, 0.28); }
+.billboard-dot.is-active { width: 3.2rem; }
+.billboard-dot.is-active::after {
+  background: #fff;
+  transform-origin: left;
+  animation: dx-progress 9s linear both;
+}
+@keyframes dx-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .billboard::after {
   content: "";
   position: absolute;
@@ -411,6 +465,33 @@ h2 { font-size: 1.25rem; }
 }
 
 /* ---------- Trilhos ---------- */
+/* Setas de paginação dos trilhos: aparecem ao passar o mouse sobre o trilho. */
+.strip-wrap { position: relative; }
+.row-arrow {
+  position: absolute;
+  top: 0;
+  bottom: 2.6rem;
+  z-index: 6;
+  width: 3.25rem;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: #fff;
+  font-size: 2.25rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.25s;
+}
+.row-arrow.prev, .row-arrow.prev:hover { left: 0; background: linear-gradient(90deg, rgba(11, 11, 13, 0.85), transparent); }
+.row-arrow.next, .row-arrow.next:hover { right: 0; background: linear-gradient(270deg, rgba(11, 11, 13, 0.85), transparent); }
+.strip-wrap:hover .row-arrow,
+.row-arrow:focus-visible { opacity: 1; }
+.row-arrow[hidden] { display: none; }
 .row { margin: 1.75rem 0 0.5rem; position: relative; }
 .row h2 { font-size: 1.2rem; margin: 0 0 0.75rem; font-weight: 700; }
 .row h2 .muted { font-weight: 400; font-size: 0.85rem; }

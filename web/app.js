@@ -284,31 +284,76 @@ async function homePage(alive) {
   renderBillboard(rows);
 }
 
-// Destaque no topo da tela inicial: o primeiro título com imagem disponível nos catálogos.
+// Destaque no topo da tela inicial: até 6 títulos com imagem, em rodízio (como o destaque do dxbi).
+// Troca a cada 9 s; pausa com o mouse ou o foco dentro dele, e quando a aba está oculta.
+const BILLBOARD_INTERVAL_MS = 9000;
+let billboardTimer = null;
+
 function renderBillboard(rows) {
   const box = $('#billboard');
+  clearInterval(billboardTimer);
   if (!box) return;
-  const m = rows.flatMap((r) => r.metas || []).find((x) => isWebUrl(x.background) || isWebUrl(x.poster));
-  if (!m) {
+  const seen = new Set();
+  const items = rows
+    .flatMap((r) => r.metas || [])
+    .filter((x) => (isWebUrl(x.background) || isWebUrl(x.poster)) && !seen.has(`${x.type}:${x.id}`) && seen.add(`${x.type}:${x.id}`))
+    .slice(0, 6);
+  if (!items.length) {
     box.remove();
     return;
   }
-  const bg = isWebUrl(m.background) ? m.background : m.poster;
-  const kindLabel = typeLabel(m.type) || 'Filme';
-  const info = [m.releaseInfo, kindLabel].filter(Boolean).join(' · ');
-  const href = `#/detail/${esc(m.type)}/${encodeURIComponent(m.id)}`;
+  const slideHtml = (m, i) => {
+    const bg = isWebUrl(m.background) ? m.background : m.poster;
+    const kindLabel = typeLabel(m.type) || 'Filme';
+    const info = [m.releaseInfo, kindLabel].filter(Boolean).join(' · ');
+    const href = `#/detail/${esc(m.type)}/${encodeURIComponent(m.id)}`;
+    return `
+      <div class="billboard-slide${i === 0 ? ' is-active' : ''}" data-i="${i}" style="background-image: ${cssUrl(bg)}">
+        <div class="billboard-info">
+          <h2>${esc(m.name)}</h2>
+          <p class="meta-line">${esc(info)}</p>
+          ${m.description ? `<p>${esc(m.description)}</p>` : ''}
+          <div class="actions">
+            <a class="btn-link btn-light" href="${href}">▶ Assistir</a>
+            <a class="btn-link btn-grey" href="${href}">ⓘ Mais informações</a>
+          </div>
+        </div>
+      </div>`;
+  };
   box.className = 'billboard';
-  box.style.backgroundImage = cssUrl(bg);
+  box.setAttribute('aria-roledescription', 'destaques');
+  box.setAttribute('aria-label', 'Destaques');
   box.innerHTML = `
-    <div class="billboard-info">
-      <h2>${esc(m.name)}</h2>
-      <p class="meta-line">${esc(info)}</p>
-      ${m.description ? `<p>${esc(m.description)}</p>` : ''}
-      <div class="actions">
-        <a class="btn-link btn-light" href="${href}">▶ Assistir</a>
-        <a class="btn-link btn-grey" href="${href}">ⓘ Mais informações</a>
-      </div>
+    ${items.map(slideHtml).join('')}
+    <div class="billboard-dots" role="group" aria-label="Escolher destaque">
+      ${items.map((m, i) => `<button class="billboard-dot${i === 0 ? ' is-active' : ''}" type="button" data-i="${i}" aria-label="${esc(m.name)}"></button>`).join('')}
     </div>`;
+
+  const slides = [...box.querySelectorAll('.billboard-slide')];
+  const dots = [...box.querySelectorAll('.billboard-dot')];
+  let index = 0;
+  const show = (i) => {
+    index = (i + slides.length) % slides.length;
+    slides.forEach((el, k) => el.classList.toggle('is-active', k === index));
+    dots.forEach((el, k) => {
+      el.classList.toggle('is-active', k === index);
+      el.setAttribute('aria-current', k === index ? 'true' : 'false');
+    });
+  };
+  box.addEventListener('click', (e) => {
+    const dot = e.target.closest('.billboard-dot');
+    if (dot) show(Number(dot.dataset.i));
+  });
+  if (slides.length < 2) return;
+  billboardTimer = setInterval(() => {
+    if (!box.isConnected) {
+      clearInterval(billboardTimer);
+      return;
+    }
+    const paused = document.hidden || box.matches(':hover') || box.contains(document.activeElement);
+    const onHome = location.hash === '' || location.hash === '#' || location.hash === '#/';
+    if (!paused && onHome) show(index + 1);
+  }, BILLBOARD_INTERVAL_MS);
 }
 
 async function catalogPage(kind, title, alive) {
@@ -711,9 +756,33 @@ function rowEl(row, pageable) {
   const sec = document.createElement('section');
   sec.className = 'row';
   sec.innerHTML = `<h2>${esc(row.title)} <span class="muted small">· ${esc(row.addon)}</span></h2>`;
+  const wrap = document.createElement('div');
+  wrap.className = 'strip-wrap';
   const strip = document.createElement('div');
   strip.className = 'strip';
-  sec.append(strip);
+  wrap.append(strip);
+  sec.append(wrap);
+  // Setas de paginação: só com o mouse (tabindex -1), o controle remoto anda pelos cartazes.
+  const arrow = (dir) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = `row-arrow ${dir}`;
+    b.tabIndex = -1;
+    b.setAttribute('aria-label', dir === 'prev' ? 'Anterior' : 'Próximo');
+    b.textContent = dir === 'prev' ? '‹' : '›';
+    b.onclick = () => strip.scrollBy({ left: (dir === 'prev' ? -1 : 1) * strip.clientWidth * 0.85, behavior: 'smooth' });
+    return b;
+  };
+  const prev = arrow('prev');
+  const next = arrow('next');
+  wrap.append(prev, next);
+  const updateArrows = () => {
+    const max = strip.scrollWidth - strip.clientWidth;
+    prev.hidden = max <= 0 || strip.scrollLeft <= 4;
+    next.hidden = max <= 0 || strip.scrollLeft >= max - 4;
+  };
+  strip.addEventListener('scroll', updateArrows, { passive: true });
+  if (typeof ResizeObserver === 'function') new ResizeObserver(updateArrows).observe(strip);
 
   const metas = row.metas || [];
   if (!metas.length) {
@@ -731,6 +800,7 @@ function rowEl(row, pageable) {
       strip.insertAdjacentHTML('beforeend', cardHtml(m));
       added++;
     }
+    updateArrows();
     return added;
   };
   append(metas);
