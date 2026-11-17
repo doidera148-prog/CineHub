@@ -153,7 +153,16 @@ jobs:
           gh release download ffmpeg-ext-1.4.1 --pattern 'media3-decoder-ffmpeg-1.4.1.aar' \
             --dir src-tauri/plugins/tauri-plugin-exoplayer/android/libs \
             || echo "Extensão FFmpeg ainda não publicada: o APK sai sem ela."
-          ls src-tauri/plugins/tauri-plugin-exoplayer/android/libs
+          # Desempacota o AAR: classes.jar (Java/Kotlin) em libs/ e bibliotecas nativas em jniLibs/.
+          EXT=src-tauri/plugins/tauri-plugin-exoplayer/android
+          AAR="$EXT/libs/media3-decoder-ffmpeg-1.4.1.aar"
+          if [ -f "$AAR" ]; then
+            unzip -o -q "$AAR" classes.jar 'jni/*' -d "$RUNNER_TEMP/ffmpeg-aar"
+            mv "$RUNNER_TEMP/ffmpeg-aar/classes.jar" "$EXT/libs/media3-decoder-ffmpeg-1.4.1-classes.jar"
+            mkdir -p "$EXT/src/main/jniLibs"
+            cp -r "$RUNNER_TEMP/ffmpeg-aar/jni/." "$EXT/src/main/jniLibs/"
+            ls -R "$EXT/libs" "$EXT/src/main/jniLibs"
+          fi
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android

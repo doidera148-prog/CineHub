@@ -21,18 +21,14 @@ android {
 }
 
 // Extensão FFmpeg do Media3 (áudio que o aparelho não decodifica). Não está no Maven: é compilada
-// pelo workflow "ffmpeg-extension" e publicada como release "ffmpeg-ext-1.4.1"; o job Android a baixa
-// para libs/. Sem o arquivo, o app compila normalmente e usa só os decodificadores do aparelho.
-val ffmpegExtension = file("libs/media3-decoder-ffmpeg-1.4.1.aar")
-if (ffmpegExtension.exists()) {
-    repositories {
-        flatDir { dirs("libs") }
-    }
-}
+// pelo workflow "ffmpeg-extension" e publicada no release "ffmpeg-ext-1.4.1". O job Android baixa o AAR
+// e o desempacota aqui: classes.jar em libs/ e as bibliotecas nativas em src/main/jniLibs/.
+// Sem esses arquivos, o app compila normalmente e usa só os decodificadores do aparelho.
+val ffmpegClasses = file("libs/media3-decoder-ffmpeg-1.4.1-classes.jar")
 
 dependencies {
-    if (ffmpegExtension.exists()) {
-        implementation(mapOf("name" to "media3-decoder-ffmpeg-1.4.1", "ext" to "aar"))
+    if (ffmpegClasses.exists()) {
+        implementation(files(ffmpegClasses))
     }
     api(project(":tauri-android"))
     implementation("androidx.core:core-ktx:1.13.1")
