@@ -91,6 +91,20 @@ async function check(viewport, label) {
   const sub = await page.evaluate(() => localStorage.getItem('subLang'));
   if (sub !== '"off"') failures.push(`[${label}] preferência de legenda não foi guardada (${sub})`);
 
+  // Desktop: "/" foca a pesquisa e o botão recolhe o menu lateral.
+  if (label === 'desktop') {
+    await page.goto(`${base}/#/movies`);
+    await page.waitForTimeout(300);
+    await page.locator('body').click({ position: { x: 2, y: 2 } });
+    await page.keyboard.press('/');
+    const id = await page.evaluate(() => document.activeElement?.id);
+    if (id !== 'q') failures.push(`[desktop] atalho "/" não focou a pesquisa (foco: ${id})`);
+    await page.click('#toggle-sidebar');
+    const collapsed = await page.evaluate(() => document.body.classList.contains('nav-collapsed'));
+    if (!collapsed) failures.push('[desktop] menu lateral não recolheu');
+    await page.click('#toggle-sidebar');
+  }
+
   await page.goto(`${base}/#/movies`);
   await page.waitForTimeout(400);
   const focused = await page.evaluate(() => document.activeElement?.tagName);

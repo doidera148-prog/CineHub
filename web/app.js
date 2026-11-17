@@ -254,13 +254,34 @@ function libraryPage() {
         <option value="off"${subPref() === 'off' ? ' selected' : ''}>Sem legenda</option>
       </select>
     </label>
+    <label class="prefrow small">Tema
+      <select id="theme-pref">
+        <option value="system"${themePref() === 'system' ? ' selected' : ''}>Automático (do aparelho)</option>
+        <option value="dark"${themePref() === 'dark' ? ' selected' : ''}>Escuro</option>
+        <option value="light"${themePref() === 'light' ? ' selected' : ''}>Claro</option>
+      </select>
+    </label>
     <p class="muted small">Biblioteca e progresso ficam neste aparelho. Exporte um arquivo para levá-los a outro.</p>${
     favs.length
-      ? `<div class="grid">${favs.map(cardHtml).join('')}</div>`
+      ? `<div class="grid">${favs
+          .map((f) => `<div class="favcell">${cardHtml(f)}<button class="chip small" data-remove="${esc(f.id)}">Remover</button></div>`)
+          .join('')}</div>`
       : '<p class="muted">Sua biblioteca está vazia. Abra um título e clique em “Adicionar à biblioteca”.</p>'
   }`);
   $('#export-data').onclick = exportData;
   $('#sub-lang').onchange = (e) => store.set('subLang', e.target.value);
+  $('#theme-pref').onchange = (e) => {
+    store.set('theme', e.target.value);
+    applyTheme(e.target.value);
+  };
+  view.querySelectorAll('[data-remove]').forEach((b) => {
+    b.onclick = async () => {
+      const ok = await askConfirm('Remover este título da biblioteca?', 'Remover');
+      if (!ok) return;
+      store.set('favs', getFavs().filter((f) => f.id !== b.dataset.remove));
+      libraryPage();
+    };
+  });
   $('#import-data').onclick = () => $('#import-file').click();
   $('#import-file').onchange = (e) => {
     const file = e.target.files[0];
@@ -310,6 +331,18 @@ async function exportData() {
     toast(`Não consegui exportar: ${err.message}`);
   }
 }
+
+// Tema: automático segue o aparelho; claro e escuro são escolhas fixas (guardadas neste aparelho).
+function themePref() {
+  const v = store.get('theme', 'system');
+  return v === 'light' || v === 'dark' ? v : 'system';
+}
+function applyTheme(pref) {
+  const root = document.documentElement;
+  if (pref === 'light' || pref === 'dark') root.dataset.theme = pref;
+  else delete root.dataset.theme;
+}
+applyTheme(themePref());
 
 // Idioma das legendas (preferência guardada neste aparelho).
 const SUB_LANGS = { pt: /^(por|pt)/i, en: /^(eng|en)/i, off: null };
@@ -555,8 +588,8 @@ function progressFor(id) {
 }
 
 function cardHtml(m) {
-  const img = cssUrl(m.poster);
-  const poster = img ? `background-image: ${img}` : '';
+  // Cartaz como <img> com carregamento preguiçoso (só baixa o que aparece na tela).
+  const art = isWebUrl(m.poster) ? `<img class="poster-img" src="${esc(m.poster)}" alt="" loading="lazy" decoding="async">` : '';
   const label = [m.name, m.releaseInfo].filter(Boolean).join(', ');
   const p = progressFor(m.id);
   const pct = progressPercent(p);
@@ -564,7 +597,7 @@ function cardHtml(m) {
   const seen = p?.watched ? '<span class="seen">✓ Assistido</span>' : '';
   return `
     <a class="card" href="#/detail/${esc(m.type)}/${encodeURIComponent(m.id)}" aria-label="${esc(label)}">
-      <div class="poster" style="${esc(poster)}">${img ? '' : esc(m.name)}${bar}${seen}</div>
+      <div class="poster">${art || esc(m.name)}${bar}${seen}</div>
       <div class="title">${esc(m.name)}</div>
       <div class="muted small">${esc(m.releaseInfo || '')}</div>
     </a>`;
@@ -692,6 +725,15 @@ async function loadStreams(kind, id, label, meta) {
       b.onclick = () => openExternal(s.externalUrl);
     }
     box.append(b);
+  }
+  // Botão de destaque: assiste à melhor fonte (a primeira reproduzível, já ordenada).
+  const best = box.querySelector('.stream:not(.disabled)');
+  if (best) {
+    const primary = document.createElement('button');
+    primary.className = 'primary-play';
+    primary.textContent = '▶ Assistir';
+    primary.onclick = () => best.click();
+    box.prepend(primary);
   }
   showErrors();
 }
@@ -831,6 +873,7 @@ async function playNative(stream, label, id, meta, subs) {
 }
 
 async function play(stream, label, id, meta, subs) {
+  hideNext();
   if (isTorrentStream(stream)) {
     await openTorrentSource(stream, label, id, meta, subs);
     return;
@@ -948,8 +991,52 @@ function saveProgress(force, pos) {
 
 vjsPlayer.on('timeupdate', () => saveProgress(false));
 vjsPlayer.on('pause', () => saveProgress(true));
-// Terminou: marca como assistido (sai de "Continuar assistindo" e vira o selo nos cartazes).
-vjsPlayer.on('ended', () => markWatched(current?.id));
+// Terminou: marca como assistido (sai de "Continuar assistindo" e vira o selo nos cartazes)
+// e oferece o próximo episódio, quando há.
+vjsPlayer.on('ended', () => {
+  markWatched(current?.id);
+  offerNext();
+});
+
+// Próximo episódio: o botão aparece no player e busca/toca a melhor fonte dele.
+let nextUp = null; // { ep, meta } do próximo episódio oferecido
+function offerNext() {
+  const btn = $('#next-ep');
+  const next = current ? nextEpisode(current.meta?.videos, current.id) : null;
+  nextUp = next ? { ep: next, meta: current.meta } : null;
+  if (!nextUp) {
+    btn.classList.add('hidden');
+    return;
+  }
+  btn.textContent = `Próximo: ${next.episode ?? ''}. ${next.title || next.name || 'Episódio'} ▶`;
+  btn.classList.remove('hidden');
+}
+function hideNext() {
+  nextUp = null;
+  $('#next-ep').classList.add('hidden');
+}
+$('#next-ep').onclick = () => playNextEpisode();
+
+async function playNextEpisode() {
+  if (!nextUp) return;
+  const { ep, meta } = nextUp;
+  hideNext();
+  const label = `${meta.name} · T${ep.season ?? 0}E${ep.episode ?? ''}`;
+  try {
+    const { streams = [], subtitles = [] } = await withBusy(
+      'Buscando fontes do próximo episódio',
+      call('streams', { kind: 'series', id: ep.id }),
+    );
+    const pick = sortStreams(Array.isArray(streams) ? streams : []).find((s) => s.url || s.externalUrl || s.infoHash || s.hash);
+    if (!pick) {
+      toast('Sem fontes para o próximo episódio.');
+      return;
+    }
+    await play(pick, label, ep.id, { ...meta, type: 'series', seriesId: meta.id, name: label }, subtitles);
+  } catch (err) {
+    toast(`Não consegui abrir o próximo episódio: ${describeError(err)}`);
+  }
+}
 function markWatched(id) {
   if (!id) return;
   const all = store.get('progress', {});
@@ -983,6 +1070,7 @@ function closePlayer(fromHistory = false) {
     console.warn('falha ao limpar o player:', e);
   }
   current = null;
+  hideNext();
   $('#player-title').textContent = '';
   keepScreenOn(false);
   document.title = 'CineHub';

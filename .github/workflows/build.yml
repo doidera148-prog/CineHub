@@ -48,6 +48,12 @@ jobs:
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
       - name: Clippy (avisos viram erro)
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - name: Licenças e fontes das dependências (cargo-deny)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        continue-on-error: true
+        with:
+          manifest-path: src-tauri/Cargo.toml
+          command: check licenses sources
       - name: Sintaxe do JavaScript
         run: node --check web/app.js && node --check tests/web/smoke.mjs
       - name: Auditoria de dependências

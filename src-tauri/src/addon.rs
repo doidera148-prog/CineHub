@@ -185,9 +185,17 @@ const CACHE_MAX_ENTRIES: usize = 500;
 /// Limite do cache pelo tamanho das respostas originais (o valor já decodificado ocupa mais).
 const CACHE_MAX_BYTES: usize = 8 * 1024 * 1024;
 
+/// Recurso que o addon respondeu 404 (ou equivalente): não é pedido de novo por um tempo.
+const MISS_TTL: Duration = Duration::from_secs(60);
+/// Tentativas em erros passageiros (conexão ou 5xx) e a pausa entre elas.
+const ATTEMPTS: u32 = 2;
+const RETRY_DELAY: Duration = Duration::from_millis(400);
+
 struct CacheEntry {
-    /// Quando foi gravada: define a validade (TTL).
+    /// Quando foi gravada: junto com `ttl`, define a validade.
     stored: Instant,
+    /// Validade: o `max-age` do addon, limitado por CACHE_TTL.
+    ttl: Duration,
     /// Último uso (contador): define quem sai primeiro quando o cache enche (LRU).
     used: u64,
     value: Value,
@@ -197,6 +205,7 @@ struct CacheEntry {
 #[derive(Default)]
 struct CacheInner {
     map: HashMap<String, CacheEntry>,
+    misses: HashMap<String, Instant>,
     bytes: usize,
     tick: u64,
 }
@@ -214,14 +223,33 @@ impl Cache {
         inner.tick += 1;
         let tick = inner.tick;
         let entry = inner.map.get_mut(key)?;
-        if entry.stored.elapsed() >= CACHE_TTL {
+        if entry.stored.elapsed() >= entry.ttl {
             return None;
         }
         entry.used = tick;
         Some(entry.value.clone())
     }
 
-    fn put(&self, key: String, value: Value, size: usize) {
+    /// Lembra que o recurso não existe, para não pedir de novo logo em seguida.
+    fn note_miss(&self, key: String) {
+        let Ok(mut inner) = self.inner.lock() else {
+            return;
+        };
+        if inner.misses.len() >= CACHE_MAX_ENTRIES {
+            inner.misses.clear();
+        }
+        inner.misses.insert(key, Instant::now());
+    }
+
+    fn recently_missing(&self, key: &str) -> bool {
+        self.inner
+            .lock()
+            .ok()
+            .and_then(|i| i.misses.get(key).map(|t| t.elapsed() < MISS_TTL))
+            .unwrap_or(false)
+    }
+
+    fn put(&self, key: String, value: Value, size: usize, ttl: Duration) {
         let Ok(mut inner) = self.inner.lock() else {
             return;
         };
@@ -251,6 +279,7 @@ impl Cache {
             key,
             CacheEntry {
                 stored: Instant::now(),
+                ttl,
                 used,
                 value,
                 size,
@@ -269,15 +298,111 @@ pub async fn fetch_manifest(client: &Client, url: &str) -> Result<Manifest, Stri
     serde_json::from_slice(&body).map_err(|e| format!("manifest inválido: {e}"))
 }
 
-/// Lê um recurso JSON de addon usando o cache.
+/// Falha ao buscar um recurso, classificada para decidir entre tentar de novo, guardar o 404 ou só relatar.
+enum Failure {
+    /// Conexão ou 5xx: pode melhorar numa nova tentativa.
+    Transient(String),
+    /// 4xx: o recurso não existe para este addon.
+    NotFound(String),
+    /// Outros erros (corpo grande demais, status inesperado).
+    Other(String),
+}
+
+impl Failure {
+    fn message(self) -> String {
+        match self {
+            Failure::Transient(m) | Failure::NotFound(m) | Failure::Other(m) => m,
+        }
+    }
+}
+
+/// Corpo de um recurso e até quanto tempo pode ficar no cache (zero = não guardar).
+struct Fetched {
+    body: Vec<u8>,
+    ttl: Duration,
+}
+
+/// Validade pelo `Cache-Control` do addon: `max-age` (limitado por CACHE_TTL);
+/// `no-store` e `no-cache` impedem o cache; sem cabeçalho vale CACHE_TTL.
+fn ttl_for(headers: &reqwest::header::HeaderMap) -> Duration {
+    let Some(cc) = headers
+        .get(reqwest::header::CACHE_CONTROL)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_ascii_lowercase)
+    else {
+        return CACHE_TTL;
+    };
+    if cc.contains("no-store") || cc.contains("no-cache") {
+        return Duration::ZERO;
+    }
+    cc.split(',')
+        .map(str::trim)
+        .find_map(|d| d.strip_prefix("max-age="))
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(|secs| Duration::from_secs(secs).min(CACHE_TTL))
+        .unwrap_or(CACHE_TTL)
+}
+
+async fn fetch_once(client: &Client, url: &str, max: usize) -> Result<Fetched, Failure> {
+    let mut resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| Failure::Transient(format!("falha ao conectar: {e}")))?;
+    let status = resp.status();
+    if status.is_server_error() {
+        return Err(Failure::Transient(format!("HTTP {status}")));
+    }
+    if status.is_client_error() {
+        return Err(Failure::NotFound(format!("HTTP {status}")));
+    }
+    let ttl = ttl_for(resp.headers());
+    let body = read_body(&mut resp, max).await.map_err(Failure::Other)?;
+    Ok(Fetched { body, ttl })
+}
+
+/// Busca com novas tentativas só para erros passageiros.
+async fn fetch_retrying(client: &Client, url: &str, max: usize) -> Result<Fetched, Failure> {
+    let mut last = None;
+    for attempt in 0..ATTEMPTS {
+        if attempt > 0 {
+            tokio::time::sleep(RETRY_DELAY).await;
+        }
+        match fetch_once(client, url, max).await {
+            Ok(f) => return Ok(f),
+            Err(Failure::Transient(m)) => last = Some(Failure::Transient(m)),
+            Err(other) => return Err(other),
+        }
+    }
+    Err(last.unwrap_or_else(|| Failure::Transient("sem resposta".into())))
+}
+
+/// Lê um recurso JSON de addon usando o cache (respeitando Cache-Control e os 404 recentes).
 async fn fetch_value(client: &Client, cache: &Cache, url: &str) -> Result<Value, String> {
     if let Some(v) = cache.get(url) {
         return Ok(v);
     }
-    let body = read_capped(client, url, MAX_BODY).await?;
+    if cache.recently_missing(url) {
+        return Err("o addon não tem este recurso (tentativa recente)".into());
+    }
+    let fetched = match fetch_retrying(client, url, MAX_BODY).await {
+        Ok(f) => f,
+        Err(Failure::NotFound(m)) => {
+            cache.note_miss(url.to_string());
+            return Err(m);
+        }
+        Err(f) => return Err(f.message()),
+    };
     let value: Value =
-        serde_json::from_slice(&body).map_err(|e| format!("resposta inválida: {e}"))?;
-    cache.put(url.to_string(), value.clone(), body.len());
+        serde_json::from_slice(&fetched.body).map_err(|e| format!("resposta inválida: {e}"))?;
+    if !fetched.ttl.is_zero() {
+        cache.put(
+            url.to_string(),
+            value.clone(),
+            fetched.body.len(),
+            fetched.ttl,
+        );
+    }
     Ok(value)
 }
 
@@ -353,12 +478,10 @@ pub async fn subtitles(
 
 /// Baixa um recurso até `max` bytes. Respostas maiores são recusadas.
 pub async fn read_capped(client: &Client, url: &str, max: usize) -> Result<Vec<u8>, String> {
-    let mut resp = client
-        .get(url)
-        .send()
+    fetch_retrying(client, url, max)
         .await
-        .map_err(|e| format!("falha ao conectar: {e}"))?;
-    read_body(&mut resp, max).await
+        .map(|f| f.body)
+        .map_err(Failure::message)
 }
 
 /// Limite de redirecionamentos seguidos ao baixar uma legenda.
@@ -569,15 +692,39 @@ mod tests {
     fn cache_evicts_least_recently_used_first() {
         let cache = Cache::default();
         for i in 0..CACHE_MAX_ENTRIES {
-            cache.put(format!("k{i}"), Value::Null, 1);
+            cache.put(format!("k{i}"), Value::Null, 1, CACHE_TTL);
         }
         // Usa k0: ele passa a ser o mais recente, então quem sai é k1.
         assert!(cache.get("k0").is_some());
-        cache.put("novo".into(), Value::Null, 1);
+        cache.put("novo".into(), Value::Null, 1, CACHE_TTL);
         assert_eq!(cache.len(), CACHE_MAX_ENTRIES);
         assert!(cache.get("k0").is_some());
         assert!(cache.get("k1").is_none());
         assert!(cache.get("novo").is_some());
+    }
+
+    #[test]
+    fn cache_control_sets_how_long_a_response_is_kept() {
+        use reqwest::header::{HeaderMap, HeaderValue, CACHE_CONTROL};
+        let mut h = HeaderMap::new();
+        assert_eq!(ttl_for(&h), CACHE_TTL);
+        h.insert(
+            CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=120"),
+        );
+        assert_eq!(ttl_for(&h), Duration::from_secs(120));
+        h.insert(CACHE_CONTROL, HeaderValue::from_static("max-age=99999"));
+        assert_eq!(ttl_for(&h), CACHE_TTL);
+        h.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+        assert_eq!(ttl_for(&h), Duration::ZERO);
+    }
+
+    #[test]
+    fn missing_resources_are_remembered_briefly() {
+        let cache = Cache::default();
+        assert!(!cache.recently_missing("https://a/x.json"));
+        cache.note_miss("https://a/x.json".into());
+        assert!(cache.recently_missing("https://a/x.json"));
     }
 
     #[test]
