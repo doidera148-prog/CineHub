@@ -37,6 +37,27 @@ fn embed_handle(app: &tauri::AppHandle) -> Option<i64> {
     }
 }
 
+/// Pede para fechar o vídeo embutido (Windows): envia WM_CLOSE para a janela do mpv.
+pub fn request_close() {
+    #[cfg(all(windows, feature = "mpv"))]
+    win::request_close();
+}
+
+/// Esc global durante o vídeo (desktop). No Android não existe atalho global.
+#[cfg(not(target_os = "android"))]
+fn set_escape_shortcut(app: &tauri::AppHandle, on: bool) {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    let shortcuts = app.global_shortcut();
+    let _ = if on {
+        shortcuts.register("Escape")
+    } else {
+        shortcuts.unregister("Escape")
+    };
+}
+
+#[cfg(target_os = "android")]
+fn set_escape_shortcut(_app: &tauri::AppHandle, _on: bool) {}
+
 #[tauri::command]
 pub async fn player_play(
     app: tauri::AppHandle,
@@ -48,9 +69,10 @@ pub async fn player_play(
     }
     let start = start_ms.unwrap_or(0).max(0);
     let wid = embed_handle(&app);
-    tauri::async_runtime::spawn_blocking(move || imp::play(&url, start, wid))
-        .await
-        .map_err(|e| e.to_string())?
+    set_escape_shortcut(&app, true);
+    let result = tauri::async_runtime::spawn_blocking(move || imp::play(&url, start, wid)).await;
+    set_escape_shortcut(&app, false);
+    result.map_err(|e| e.to_string())?
 }
 
 #[cfg(feature = "mpv")]
@@ -159,14 +181,30 @@ mod win {
         ) -> Bool;
         fn SetFocus(hwnd: Hwnd) -> Hwnd;
         fn SetForegroundWindow(hwnd: Hwnd) -> Bool;
+        fn PostMessageW(hwnd: Hwnd, msg: u32, wparam: usize, lparam: isize) -> Bool;
     }
 
+    const WM_CLOSE: u32 = 0x0010;
     const SW_HIDE: i32 = 0;
     const SW_SHOW: i32 = 5;
     const HWND_TOP: Hwnd = std::ptr::null_mut();
     const SWP_NOSIZE: u32 = 0x0001;
     const SWP_NOMOVE: u32 = 0x0002;
     const SWP_SHOWWINDOW: u32 = 0x0040;
+
+    /// HWND do vídeo embutido enquanto ele toca (0 = nenhum).
+    pub static VIDEO: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+    /// Fecha o vídeo embutido: WM_CLOSE para a janela do mpv, que encerra a reprodução.
+    pub fn request_close() {
+        let video = VIDEO.load(std::sync::atomic::Ordering::SeqCst);
+        if video != 0 {
+            // SAFETY: video é o HWND da janela do mpv registrado em take_over; PostMessageW só enfileira a mensagem.
+            unsafe {
+                PostMessageW(video as usize as Hwnd, WM_CLOSE, 0, 0);
+            }
+        }
+    }
 
     unsafe extern "system" fn collect(hwnd: Hwnd, lparam: isize) -> Bool {
         // SAFETY: lparam aponta para o Vec criado em `take_over`, que vive até o retorno de EnumChildWindows.
@@ -179,6 +217,7 @@ mod win {
     /// Devolve os handles escondidos, para `restore`.
     pub fn take_over(parent: i64, video: i64) -> Vec<usize> {
         let video = video as usize as Hwnd;
+        VIDEO.store(video as usize as isize, std::sync::atomic::Ordering::SeqCst);
         let mut children: Vec<usize> = Vec::new();
         // SAFETY: parent é o HWND da janela principal; collect só lê o ponteiro passado.
         unsafe {
@@ -222,6 +261,7 @@ mod win {
 
     /// Mostra de novo os controles web escondidos por `take_over`.
     pub fn restore(hidden: &[usize]) {
+        VIDEO.store(0, std::sync::atomic::Ordering::SeqCst);
         for handle in hidden {
             // SAFETY: handles escondidos por take_over; podem já ter sido destruídos, o que só faz ShowWindow falhar.
             unsafe {

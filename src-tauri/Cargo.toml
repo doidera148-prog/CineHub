@@ -47,3 +47,7 @@ codegen-units = 1
 strip = "symbols"
 opt-level = "s"
 
+
+# Atalho global (Esc durante o vídeo): só desktop.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+tauri-plugin-global-shortcut = "2"
