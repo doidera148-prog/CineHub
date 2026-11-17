@@ -6,6 +6,7 @@
 pub mod addon;
 pub mod commands;
 pub mod diag;
+pub mod kodi;
 pub mod player;
 pub mod store;
 pub mod torrent;
@@ -156,6 +157,9 @@ pub fn run() {
             commands::torrent_open,
             commands::save_export,
             commands::write_export,
+            kodi::kodi_addons,
+            kodi::kodi_browse,
+            kodi::kodi_play,
             diag::log_event,
             diag::diagnostics_text,
             diag::save_diagnostics,

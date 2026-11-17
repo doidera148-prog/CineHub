@@ -41,6 +41,12 @@
   --chip: #262838;
   --poster: #222;
 }
+/* Cor do anel de foco: branca no tema escuro, escura no claro (o branco sumia sobre o fundo claro). */
+:root { --focus: #ffffff; }
+:root[data-theme="light"] { --focus: #1b1d28; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) { --focus: #1b1d28; }
+}
 
 * { box-sizing: border-box; }
 
@@ -152,6 +158,11 @@ h1 { margin: 0 0 16px; }
 .seasons { display: flex; gap: 8px; flex-wrap: wrap; margin: 20px 0; }
 .episodes { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
 .ep { background: var(--panel); color: var(--text); text-align: left; }
+.ep-row { display: flex; gap: 6px; align-items: stretch; }
+.ep-row .ep { flex: 1; min-width: 0; }
+.ep.seen { color: var(--muted); }
+.ep-row .watch { flex: none; min-width: 44px; justify-content: center; }
+.ep-row .watch[aria-pressed="true"] { background: var(--accent); color: #ffffff; }
 
 #streams { margin-top: 20px; display: grid; gap: 8px; }
 #streams h3 { margin: 0 0 4px; }
@@ -229,10 +240,26 @@ h1 { margin: 0 0 16px; }
 /* Foco visível para controle remoto e teclado */
 :focus { outline: none; }
 :focus-visible {
-  outline: 3px solid #ffffff;
+  outline: 3px solid var(--focus);
   outline-offset: 3px;
   box-shadow: 0 0 0 6px rgba(139, 92, 246, 0.45);
 }
+/* Link de "pular para o conteúdo": escondido até receber foco (teclado ou controle remoto). */
+.skip-link {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: 100;
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #ffffff;
+  font-weight: 600;
+  text-decoration: none;
+  transform: translateY(-200%);
+  transition: transform 0.15s ease;
+}
+.skip-link:focus-visible { transform: translateY(0); }
 .card:focus-visible .poster { transform: scale(1.04); }
 .poster { transition: transform 0.15s ease; }
 

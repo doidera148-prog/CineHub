@@ -205,9 +205,19 @@ let searchSeq = 0;
 function searchPage(q) {
   setView(`
     <h1>Pesquisar</h1>
-    <form id="sf" role="search"><input id="sq" type="search" value="${esc(q)}" placeholder="Digite um título…" autocomplete="off" aria-label="Pesquisar título"></form>
+    <form id="sf" role="search"><input id="sq" type="search" value="${esc(q)}" placeholder="Digite um título…" autocomplete="off" aria-label="Pesquisar título" aria-controls="rows"></form>
+    <p id="search-status" class="muted small" role="status" aria-live="polite"></p>
     <div id="rows"></div>`);
   const input = $('#sq');
+  // Esc limpa o campo (útil também com controle remoto, que não tem botão de limpar).
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && input.value) {
+      e.preventDefault();
+      input.value = '';
+      clearTimeout(debounceTimer);
+      setSearch('');
+    }
+  });
   $('#sf').onsubmit = (e) => {
     e.preventDefault();
     clearTimeout(debounceTimer);
@@ -241,14 +251,29 @@ async function runSearch(q) {
   if (!box) return;
   if (!q) {
     box.innerHTML = '<p class="muted">Digite um título para pesquisar.</p>';
+    const status = $('#search-status');
+    if (status) status.textContent = '';
     return;
   }
   box.innerHTML = skeleton(4);
+  box.setAttribute('aria-busy', 'true');
+  const status = $('#search-status');
+  if (status) status.textContent = 'Pesquisando…';
   try {
     const { rows } = await call('search', { q });
-    if (stillHere()) renderRows(rows, 'Nenhum resultado. Verifique se há addons de catálogo com busca instalados.', { pageable: false });
+    if (stillHere()) {
+      renderRows(rows, 'Nenhum resultado. Verifique se há addons de catálogo com busca instalados.', { pageable: false });
+      // Quantidade anunciada para quem usa leitor de tela (o texto também fica visível).
+      const total = rows.reduce((n, r) => n + (r.metas || []).length, 0);
+      if (status) status.textContent = total ? `${total} resultado${total === 1 ? '' : 's'}` : 'Nenhum resultado';
+    }
   } catch (e) {
-    if (stillHere()) box.innerHTML = `<p class="muted">Erro: ${esc(e.message)}</p>`;
+    if (stillHere()) {
+      box.innerHTML = `<p class="muted">Erro: ${esc(e.message)}</p>`;
+      if (status) status.textContent = 'Erro na pesquisa';
+    }
+  } finally {
+    if (stillHere()) box.removeAttribute('aria-busy');
   }
 }
 
@@ -520,6 +545,7 @@ async function detailPage(kind, id, alive) {
     return;
   }
 
+  document.title = `${meta.name || 'Título'} · CineHub`;
   const bg = meta.background || meta.poster || '';
   const info = [meta.releaseInfo, (meta.genres || []).join(', ')].filter(Boolean).join(' · ');
   setView(`
@@ -661,36 +687,65 @@ function addonHtml(a) {
     </div>`;
 }
 
+// Temporada e episódio vêm do addon e não são confiáveis: viram número antes de qualquer uso,
+// e os textos passam por esc(). Sem número válido, o episódio aparece sem prefixo.
+const { seasonOf: seasonNo, episodeOf: episodeNo } = window.CineHubLib;
+
 function renderSeries(meta) {
-  const videos = (meta.videos || []).filter((v) => v.id);
-  const seasons = [...new Set(videos.map((v) => v.season ?? 0))].sort((a, b) => a - b);
+  const videos = (meta.videos || []).filter((v) => v && v.id);
+  const seasons = [...new Set(videos.map(seasonNo))].sort((a, b) => a - b);
   let season = seasons.find((s) => s > 0) ?? seasons[0];
   const body = $('#body');
 
   const draw = () => {
     const eps = videos
-      .filter((v) => (v.season ?? 0) === season)
-      .sort((a, b) => (a.episode ?? 0) - (b.episode ?? 0));
+      .filter((v) => seasonNo(v) === season)
+      .sort((a, b) => (episodeNo(a) ?? 0) - (episodeNo(b) ?? 0));
+    const seasonName = (s) => (s === 0 ? 'Especiais' : `Temporada ${s}`);
 
     body.innerHTML = `
-      <div class="seasons">${seasons
-        .map((s) => `<button class="chip ${s === season ? 'on' : ''}" data-s="${s}">${s === 0 ? 'Especiais' : 'Temporada ' + s}</button>`)
+      <div class="seasons" role="group" aria-label="Temporadas">${seasons
+        .map((s) => {
+          const on = s === season;
+          return `<button class="chip ${on ? 'on' : ''}" type="button" data-s="${s}" aria-pressed="${on}">${esc(seasonName(s))}</button>`;
+        })
         .join('')}</div>
+      <p class="muted small">${eps.length} ${eps.length === 1 ? 'episódio' : 'episódios'}</p>
       <div class="episodes">${eps
-        .map((e) => `<button class="ep" data-id="${esc(e.id)}">${e.episode ?? ''}. ${esc(e.title || e.name || 'Episódio ' + (e.episode ?? ''))}</button>`)
+        .map((e) => {
+          const no = episodeNo(e);
+          const prefix = no == null ? '' : `${no}. `;
+          const title = e.title || e.name || `Episódio ${no ?? ''}`.trim();
+          // Episódio já assistido ganha um ✓ (texto, não só cor, para ser lido também por leitor de tela).
+          const seen = progressFor(e.id)?.watched === true;
+          const mark = seen ? '✓ ' : '';
+          const toggle = seen ? 'Desmarcar' : 'Marcar';
+          return `<div class="ep-row">
+            <button class="ep${seen ? ' seen' : ''}" type="button" data-id="${esc(e.id)}">${mark}${esc(prefix + title)}</button>
+            <button class="chip watch" type="button" data-watch="${esc(e.id)}" aria-pressed="${seen}" aria-label="${toggle} como assistido: ${esc(title)}" title="${toggle} como assistido">${seen ? '✓' : '○'}</button>
+          </div>`;
+        })
         .join('')}</div>
       <div id="streams"></div>`;
 
-    body.querySelectorAll('.chip').forEach((b) => {
+    body.querySelectorAll('.seasons .chip').forEach((b) => {
       b.onclick = () => {
-        season = Number(b.dataset.s);
+        season = CineHubLib.num(b.dataset.s);
+        draw();
+      };
+    });
+    body.querySelectorAll('.watch').forEach((b) => {
+      b.onclick = () => {
+        const id = b.dataset.watch;
+        setWatched(id, progressFor(id)?.watched !== true);
         draw();
       };
     });
     body.querySelectorAll('.ep').forEach((b) => {
       b.onclick = () => {
         const ep = eps.find((e) => e.id === b.dataset.id);
-        const label = `${meta.name} · T${season}E${ep?.episode ?? ''}`;
+        const no = ep ? episodeNo(ep) : null;
+        const label = `${meta.name} · T${season}E${no ?? ''}`;
         loadStreams('series', b.dataset.id, label, { ...meta, type: 'series', seriesId: meta.id, poster: meta.poster, name: label });
       };
     });
@@ -1081,9 +1136,14 @@ async function playNextEpisode() {
   }
 }
 function markWatched(id) {
+  setWatched(id, true);
+}
+
+// Marca ou desmarca um título/episódio como assistido, sem apagar o tempo já salvo.
+function setWatched(id, on) {
   if (!id) return;
   const all = store.get('progress', {});
-  all[id] = { ...(all[id] || { t: 0, duration: 0, label: '', seriesId: id, type: '', name: '', poster: '' }), watched: true, updated: Date.now() };
+  all[id] = { ...(all[id] || { t: 0, duration: 0, label: '', seriesId: id, type: '', name: '', poster: '' }), watched: on === true, updated: Date.now() };
   const kept = Object.entries(all)
     .sort((a, b) => num(b[1]?.updated) - num(a[1]?.updated))
     .slice(0, MAX_PROGRESS);
@@ -1181,6 +1241,16 @@ function toggleFav(meta) {
 
 // ---------- Roteamento ----------
 
+// Título da aba por seção (o título de um detalhe ou de um player é definido na própria página).
+const PAGE_TITLES = {
+  home: 'Início',
+  movies: 'Filmes',
+  series: 'Séries',
+  search: 'Pesquisar',
+  library: 'Biblioteca',
+  addons: 'Addons',
+};
+
 const NAV = {
   home: (alive) => homePage(alive),
   movies: (alive) => catalogPage('movie', 'Filmes', alive),
@@ -1199,6 +1269,9 @@ async function route() {
   const path = location.hash.replace(/^#\/?/, '').split('?')[0];
   const [section, kind, id] = path.split('/');
   const active = section === 'detail' ? '' : section || 'home';
+  if (player.classList.contains('hidden') && section !== 'detail') {
+    document.title = PAGE_TITLES[active] ? `${PAGE_TITLES[active]} · CineHub` : 'CineHub';
+  }
   document.querySelectorAll('[data-nav]').forEach((a) => {
     const on = a.dataset.nav === active;
     a.classList.toggle('active', on);

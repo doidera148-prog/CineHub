@@ -78,9 +78,22 @@
     return i < 0 || i + 1 >= eps.length ? null : eps[i + 1];
   }
 
+  // Temporada e episódio vindos do addon: sempre número. Texto malicioso vira 0 ou null,
+  // então nunca chega ao HTML como conteúdo.
+  function seasonOf(v) {
+    return num(v && v.season);
+  }
+
+  function episodeOf(v) {
+    const n = Number(v && v.episode);
+    return Number.isFinite(n) ? n : null;
+  }
+
   root.CineHubLib = {
     str,
     num,
+    seasonOf,
+    episodeOf,
     isWebUrl,
     cssUrl,
     cleanFav,

@@ -76,3 +76,14 @@ test('próximo episódio segue a ordem de temporada e episódio', () => {
   assert.equal(L.nextEpisode(videos, 'b:2:1'), null);
   assert.equal(L.nextEpisode(videos, 'inexistente'), null);
 });
+
+test('temporada e episódio vindos do addon viram número (regressão de XSS)', () => {
+  const malicioso = '<img src=x onerror=alert(1)>';
+  assert.equal(L.seasonOf({ season: malicioso }), 0);
+  assert.equal(L.seasonOf({ season: '2' }), 2);
+  assert.equal(L.seasonOf({}), 0);
+  assert.equal(L.episodeOf({ episode: malicioso }), null);
+  assert.equal(L.episodeOf({ episode: '7' }), 7);
+  assert.equal(L.episodeOf({ episode: NaN }), null);
+  assert.equal(L.episodeOf(undefined), null);
+});

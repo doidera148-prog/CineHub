@@ -1,40 +1,4 @@
-<!doctype html>
-<html lang="pt-BR">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>CineHub</title>
-  <!-- Favicon vazio: o app não tem ícone de aba e o navegador não precisa pedir favicon.ico. -->
-  <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="./vendor/video-js.min.css">
-  <link rel="stylesheet" href="./style.css">
-</head>
-<body>
-  <aside class="sidebar">
-    <div class="logo">CineHub</div>
-    <button id="toggle-sidebar" class="chip sidebar-toggle" aria-expanded="true" aria-controls="nav-main" title="Recolher menu">☰</button>
-    <nav id="nav-main">
-      <a href="#/" data-nav="home"><span class="ico" aria-hidden="true">⌂</span><span class="lbl">Início</span></a>
-      <a href="#/movies" data-nav="movies"><span class="ico" aria-hidden="true">▣</span><span class="lbl">Filmes</span></a>
-      <a href="#/series" data-nav="series"><span class="ico" aria-hidden="true">▤</span><span class="lbl">Séries</span></a>
-      <a href="#/search" data-nav="search"><span class="ico" aria-hidden="true">⌕</span><span class="lbl">Pesquisar</span></a>
-      <a href="#/library" data-nav="library"><span class="ico" aria-hidden="true">★</span><span class="lbl">Biblioteca</span></a>
-      <a href="#/addons" data-nav="addons"><span class="ico" aria-hidden="true">⚙</span><span class="lbl">Addons</span></a>
-    </nav>
-  </aside>
-
-  <main>
-    <header class="topbar">
-      <input id="q" type="search" placeholder="Pesquisar filmes e séries… (tecla /)" autocomplete="off" aria-label="Pesquisar">
-    </header>
-    <section id="view"></section>
-  </main>
-
-  <div id="offline" class="offline hidden" role="alert">Sem conexão com a internet. Algumas fontes podem não carregar.</div>
-
-  <div id="player" class="hidden">
-    <div class="player-box">
-      <button id="close-player" class="close" title="Fechar (Esc)" aria-label="Fechar player">✕</button>
+      <button id="close-player" class="close" type="button" title="Fechar (Esc)" aria-label="Fechar player">✕</button>
       <div id="player-title" class="player-title" aria-hidden="true"></div>
       <button id="next-ep" class="chip next-ep hidden" type="button"></button>
       <video id="video" class="video-js vjs-big-play-centered" controls preload="auto" playsinline></video>
@@ -58,5 +22,7 @@
   <script src="./lib.js"></script>
   <script src="./app.js"></script>
   <script src="./torrent-playback.js"></script>
+  <script src="./kodi.js"></script>
+  <script src="./remote-navigation.js"></script>
 </body>
 </html>
