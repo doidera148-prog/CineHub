@@ -50,8 +50,12 @@ async function check(viewport, label) {
     if (await page.evaluate(() => document.activeElement?.id) !== 'q') failures.push('[desktop] atalho / não focou busca');
   }
   if (label === 'celular') {
-    await page.goto(`${base}/#/movies`); await page.waitForTimeout(250);
-    if (await page.evaluate(() => document.activeElement?.tagName) !== 'BODY') failures.push('[celular] foco inicial não esperado');
+    // Página nova: o teste acima usou teclado, e isso liga o modo controle remoto (foco vai para a lista).
+    const fresh = await browser.newPage({ viewport });
+    await fresh.addInitScript(fixtures);
+    await fresh.goto(`${base}/#/movies`); await fresh.waitForTimeout(250);
+    if (await fresh.evaluate(() => document.activeElement?.tagName) !== 'BODY') failures.push('[celular] foco inicial não esperado');
+    await fresh.close();
   }
   failures.push(...errors.map((e) => `[${label}] ${e}`));
   await page.close();

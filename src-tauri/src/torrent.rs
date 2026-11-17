@@ -285,7 +285,12 @@ fn video_candidates(files: impl IntoIterator<Item = (usize, String, u64)>) -> Ve
                 .map(|(_, ext)| ext.to_ascii_lowercase())
                 .unwrap_or_default();
             let mime = mime_for_extension(&extension)?;
-            (size > 0).then_some(Candidate { index, name, size, mime })
+            (size > 0).then_some(Candidate {
+                index,
+                name,
+                size,
+                mime,
+            })
         })
         .collect()
 }
@@ -298,9 +303,17 @@ fn is_auxiliary_video(name: &str) -> bool {
         .filter(|token| !token.is_empty())
         .map(str::to_string)
         .collect();
-    ["sample", "trailer", "teaser", "extra", "extras", "featurette", "featurettes"]
-        .iter()
-        .any(|word| tokens.iter().any(|token| token == word))
+    [
+        "sample",
+        "trailer",
+        "teaser",
+        "extra",
+        "extras",
+        "featurette",
+        "featurettes",
+    ]
+    .iter()
+    .any(|word| tokens.iter().any(|token| token == word))
         || tokens.windows(2).any(|pair| pair == ["behind", "scenes"])
 }
 
@@ -335,15 +348,27 @@ async fn stream_file(
     };
     let mut stream = match file.torrent.clone().stream(file.file_index).await {
         Ok(stream) => stream,
-        Err(error) => return response_error(StatusCode::SERVICE_UNAVAILABLE, &format!("stream torrent: {error:#}")),
+        Err(error) => {
+            return response_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                &format!("stream torrent: {error:#}"),
+            )
+        }
     };
     if let Err(error) = stream.seek(std::io::SeekFrom::Start(start)).await {
-        return response_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("seek torrent: {error}"));
+        return response_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("seek torrent: {error}"),
+        );
     }
     let length = end - start + 1;
     let body = Body::from_stream(ReaderStream::new(stream.take(length)));
     media_response(
-        if partial { StatusCode::PARTIAL_CONTENT } else { StatusCode::OK },
+        if partial {
+            StatusCode::PARTIAL_CONTENT
+        } else {
+            StatusCode::OK
+        },
         file.mime_type,
         length,
         partial.then_some((start, end, file.size)),
@@ -366,7 +391,11 @@ async fn head_stream_file(
         return range_not_satisfiable(file.size);
     };
     media_response(
-        if partial { StatusCode::PARTIAL_CONTENT } else { StatusCode::OK },
+        if partial {
+            StatusCode::PARTIAL_CONTENT
+        } else {
+            StatusCode::OK
+        },
         file.mime_type,
         end - start + 1,
         partial.then_some((start, end, file.size)),
@@ -389,7 +418,9 @@ fn media_response(
     if let Some((start, end, size)) = range {
         builder = builder.header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{size}"));
     }
-    builder.body(body).unwrap_or_else(|_| Response::new(Body::empty()))
+    builder
+        .body(body)
+        .unwrap_or_else(|_| Response::new(Body::empty()))
 }
 
 fn range_not_satisfiable(size: u64) -> Response<Body> {
@@ -403,20 +434,40 @@ fn range_not_satisfiable(size: u64) -> Response<Body> {
 
 /// Returns start, inclusive end, and whether the client requested a partial response.
 fn parse_range(value: Option<&axum::http::HeaderValue>, size: u64) -> Result<(u64, u64, bool), ()> {
-    if size == 0 { return Err(()); }
-    let Some(value) = value else { return Ok((0, size - 1, false)); };
-    let range = value.to_str().map_err(|_| ())?.strip_prefix("bytes=").ok_or(())?;
-    if range.contains(',') { return Err(()); }
+    if size == 0 {
+        return Err(());
+    }
+    let Some(value) = value else {
+        return Ok((0, size - 1, false));
+    };
+    let range = value
+        .to_str()
+        .map_err(|_| ())?
+        .strip_prefix("bytes=")
+        .ok_or(())?;
+    if range.contains(',') {
+        return Err(());
+    }
     let (start, end) = range.split_once('-').ok_or(())?;
     if start.is_empty() {
         let suffix: u64 = end.parse().map_err(|_| ())?;
-        if suffix == 0 { return Err(()); }
+        if suffix == 0 {
+            return Err(());
+        }
         return Ok((size.saturating_sub(suffix), size - 1, true));
     }
     let start: u64 = start.parse().map_err(|_| ())?;
-    let requested_end = if end.is_empty() { size - 1 } else { end.parse().map_err(|_| ())? };
-    if start >= size || requested_end < start { return Err(()); }
-    let bounded_end = requested_end.min(size - 1).min(start.saturating_add(MAX_RANGE_BYTES - 1));
+    let requested_end = if end.is_empty() {
+        size - 1
+    } else {
+        end.parse().map_err(|_| ())?
+    };
+    if start >= size || requested_end < start {
+        return Err(());
+    }
+    let bounded_end = requested_end
+        .min(size - 1)
+        .min(start.saturating_add(MAX_RANGE_BYTES - 1));
     Ok((start, bounded_end, true))
 }
 
@@ -448,7 +499,12 @@ mod tests {
 
     fn candidate(index: usize, size: u64, name: &str) -> Candidate {
         let extension = name.rsplit_once('.').map(|(_, ext)| ext).unwrap_or("");
-        Candidate { index, name: name.into(), size, mime: mime_for_extension(extension).unwrap_or("video/mp4") }
+        Candidate {
+            index,
+            name: name.into(),
+            size,
+            mime: mime_for_extension(extension).unwrap_or("video/mp4"),
+        }
     }
 
     #[test]
@@ -461,7 +517,10 @@ mod tests {
         let open = axum::http::HeaderValue::from_static("bytes=50-");
         assert_eq!(parse_range(Some(&open), 100), Ok((50, 99, true)));
         let huge = axum::http::HeaderValue::from_static("bytes=0-99999999");
-        assert_eq!(parse_range(Some(&huge), MAX_RANGE_BYTES * 3), Ok((0, MAX_RANGE_BYTES - 1, true)));
+        assert_eq!(
+            parse_range(Some(&huge), MAX_RANGE_BYTES * 3),
+            Ok((0, MAX_RANGE_BYTES - 1, true))
+        );
         let invalid = axum::http::HeaderValue::from_static("bytes=100-");
         assert!(parse_range(Some(&invalid), 100).is_err());
         assert!(parse_range(None, 0).is_err());
@@ -473,7 +532,11 @@ mod tests {
         assert_eq!(mime_for_extension("mkv"), Some("video/x-matroska"));
         assert_eq!(mime_for_extension("m2ts"), Some("video/mp2t"));
         assert_eq!(mime_for_extension("txt"), None);
-        let found = video_candidates(vec![(0, "readme.txt".into(), 20), (1, "empty.mp4".into(), 0), (2, "film.MKV".into(), 30)]);
+        let found = video_candidates(vec![
+            (0, "readme.txt".into(), 20),
+            (1, "empty.mp4".into(), 0),
+            (2, "film.MKV".into(), 30),
+        ]);
         assert_eq!(found.iter().map(|c| c.index).collect::<Vec<_>>(), vec![2]);
     }
 
@@ -481,7 +544,11 @@ mod tests {
     fn trailer_detection_only_checks_video_basename() {
         assert!(is_auxiliary_video("Show/trailer-cut.mp4"));
         assert!(!is_auxiliary_video("Extras/Series.S01E01.mkv"));
-        let files = [candidate(0, 10, "sample.mp4"), candidate(1, 200, "trailer.mp4"), candidate(2, 100, "Movie.mkv")];
+        let files = [
+            candidate(0, 10, "sample.mp4"),
+            candidate(1, 200, "trailer.mp4"),
+            candidate(2, 100, "Movie.mkv"),
+        ];
         assert_eq!(pick_video(&files, None).map(|c| c.index), Ok(2));
     }
 

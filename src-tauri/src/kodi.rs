@@ -10,8 +10,9 @@ use serde_json::{json, Value};
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 
 fn kodi_url(endpoint: &str) -> Result<reqwest::Url, String> {
-    let mut url = reqwest::Url::parse(endpoint.trim())
-        .map_err(|_| "Informe um endereço Kodi válido, por exemplo http://192.168.1.20:8080".to_string())?;
+    let mut url = reqwest::Url::parse(endpoint.trim()).map_err(|_| {
+        "Informe um endereço Kodi válido, por exemplo http://192.168.1.20:8080".to_string()
+    })?;
     if url.scheme() != "http"
         || url.username() != ""
         || url.password().is_some()
@@ -19,7 +20,10 @@ fn kodi_url(endpoint: &str) -> Result<reqwest::Url, String> {
         || url.fragment().is_some()
         || !matches!(url.path(), "" | "/" | "/jsonrpc")
     {
-        return Err("Use o endereço HTTP local do Kodi, sem credenciais, parâmetros ou outros caminhos".into());
+        return Err(
+            "Use o endereço HTTP local do Kodi, sem credenciais, parâmetros ou outros caminhos"
+                .into(),
+        );
     }
 
     // Aceitar apenas IPs locais fornecidos explicitamente pelo usuário evita enviar credenciais
@@ -31,12 +35,8 @@ fn kodi_url(endpoint: &str) -> Result<reqwest::Url, String> {
         .parse()
         .map_err(|_| "Use o IP local do Kodi (nomes de domínio não são aceitos)".to_string())?;
     let local = match ip {
-        IpAddr::V4(ip) => {
-            ip.is_private() || ip.is_loopback() || ip.is_link_local()
-        }
-        IpAddr::V6(ip) => {
-            ip.is_loopback() || ip.is_unique_local() || ip.is_unicast_link_local()
-        }
+        IpAddr::V4(ip) => ip.is_private() || ip.is_loopback() || ip.is_link_local(),
+        IpAddr::V6(ip) => ip.is_loopback() || ip.is_unique_local() || ip.is_unicast_link_local(),
     };
     if !local {
         return Err("Por segurança, a conexão só é permitida a um IP privado/local".into());
@@ -46,7 +46,7 @@ fn kodi_url(endpoint: &str) -> Result<reqwest::Url, String> {
 }
 
 fn validate_directory(directory: &str) -> Result<(), String> {
-    if directory == "" || directory.len() > 4096 || !directory.starts_with("plugin://") {
+    if directory.is_empty() || directory.len() > 4096 || !directory.starts_with("plugin://") {
         return Err("O caminho precisa ser um diretório plugin:// do Kodi".into());
     }
     Ok(())
@@ -81,14 +81,21 @@ async fn rpc(
     if !response.status().is_success() {
         return Err(format!("Kodi respondeu com HTTP {}", response.status()));
     }
-    if response.content_length().is_some_and(|n| n > MAX_RESPONSE_BYTES as u64) {
+    if response
+        .content_length()
+        .is_some_and(|n| n > MAX_RESPONSE_BYTES as u64)
+    {
         return Err("Resposta do Kodi excede 2 MiB".into());
     }
-    let bytes = response.bytes().await.map_err(|e| format!("Resposta Kodi inválida: {e}"))?;
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("Resposta Kodi inválida: {e}"))?;
     if bytes.len() > MAX_RESPONSE_BYTES {
         return Err("Resposta do Kodi excede 2 MiB".into());
     }
-    let body: Value = serde_json::from_slice(&bytes).map_err(|_| "Kodi retornou JSON inválido".to_string())?;
+    let body: Value =
+        serde_json::from_slice(&bytes).map_err(|_| "Kodi retornou JSON inválido".to_string())?;
     if let Some(error) = body.get("error") {
         return Err(error
             .get("message")
@@ -149,7 +156,9 @@ pub async fn kodi_play(
     file: String,
 ) -> Result<Value, String> {
     if file.len() > 8192
-        || !(file.starts_with("plugin://") || file.starts_with("http://") || file.starts_with("https://"))
+        || !(file.starts_with("plugin://")
+            || file.starts_with("http://")
+            || file.starts_with("https://"))
     {
         return Err("O item precisa ser um link plugin://, HTTP ou HTTPS do Kodi".into());
     }
@@ -162,6 +171,10 @@ pub async fn kodi_play(
     )
     .await
 }
+
+// Keep these imports exercised on targets where only one address family is used.
+const _: Option<Ipv4Addr> = None;
+const _: Option<Ipv6Addr> = None;
 
 #[cfg(test)]
 mod tests {
@@ -184,7 +197,3 @@ mod tests {
         assert!(validate_directory("https://example.com").is_err());
     }
 }
-
-// Keep these imports exercised on targets where only one address family is used.
-const _: Option<Ipv4Addr> = None;
-const _: Option<Ipv6Addr> = None;
