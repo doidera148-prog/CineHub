@@ -242,13 +242,42 @@ async function playOpenedTorrent(input, fallbackName) {
 // ---------- Páginas ----------
 
 async function homePage(alive) {
-  setView(`<h1>Início</h1><div id="rows">${skeleton()}${skeleton()}</div>`);
+  setView(`<div id="billboard"></div><div id="rows">${skeleton()}${skeleton()}</div>`);
   // Um tipo que falha não derruba o outro: usa o que respondeu.
   const [m, s] = await Promise.allSettled([call('home', { kind: 'movie' }), call('home', { kind: 'series' })]);
   if (!alive()) return;
   const rowsOf = (r) => (r.status === 'fulfilled' ? r.value.rows : []);
   const cont = continueWatchingRow();
-  renderRows([...(cont ? [cont] : []), ...rowsOf(m), ...rowsOf(s)], 'Nenhum catálogo disponível. Instale addons na aba Addons.');
+  const rows = [...(cont ? [cont] : []), ...rowsOf(m), ...rowsOf(s)];
+  renderRows(rows, 'Nenhum catálogo disponível. Instale addons na aba Addons.');
+  renderBillboard(rows);
+}
+
+// Destaque no topo da tela inicial: o primeiro título com imagem disponível nos catálogos.
+function renderBillboard(rows) {
+  const box = $('#billboard');
+  if (!box) return;
+  const m = rows.flatMap((r) => r.metas || []).find((x) => isWebUrl(x.background) || isWebUrl(x.poster));
+  if (!m) {
+    box.remove();
+    return;
+  }
+  const bg = isWebUrl(m.background) ? m.background : m.poster;
+  const kindLabel = m.type === 'series' ? 'Série' : 'Filme';
+  const info = [m.releaseInfo, kindLabel].filter(Boolean).join(' · ');
+  const href = `#/detail/${esc(m.type)}/${encodeURIComponent(m.id)}`;
+  box.className = 'billboard';
+  box.style.backgroundImage = cssUrl(bg);
+  box.innerHTML = `
+    <div class="billboard-info">
+      <h2>${esc(m.name)}</h2>
+      <p class="meta-line">${esc(info)}</p>
+      ${m.description ? `<p>${esc(m.description)}</p>` : ''}
+      <div class="actions">
+        <a class="btn-link btn-light" href="${href}">▶ Assistir</a>
+        <a class="btn-link btn-grey" href="${href}">ⓘ Mais informações</a>
+      </div>
+    </div>`;
 }
 
 async function catalogPage(kind, title, alive) {
@@ -459,7 +488,7 @@ async function exportDiagnostics() {
 
 // Tema: automático segue o aparelho; claro e escuro são escolhas fixas (guardadas neste aparelho).
 function themePref() {
-  const v = store.get('theme', 'system');
+  const v = store.get('theme', 'dark');
   return v === 'light' || v === 'dark' ? v : 'system';
 }
 function applyTheme(pref) {
@@ -608,11 +637,12 @@ async function detailPage(kind, id, alive) {
   document.title = `${meta.name || 'Título'} · CineHub`;
   const bg = meta.background || meta.poster || '';
   const info = [meta.releaseInfo, (meta.genres || []).join(', ')].filter(Boolean).join(' · ');
+  const rating = meta.imdbRating ? `<span class="rating" title="Nota IMDb">IMDb ${esc(meta.imdbRating)}</span>` : '';
   setView(`
     <div class="hero" style="${esc(heroStyle(bg))}">
       <div class="hero-info">
         <h1>${esc(meta.name)}</h1>
-        <p class="muted">${esc(info)}</p>
+        <p class="muted">${rating}${esc(info)}</p>
         <p>${esc(meta.description || '')}</p>
         <div class="actions"><button id="fav"></button></div>
       </div>
@@ -704,7 +734,7 @@ function rowEl(row, pageable) {
 
 function heroStyle(bg) {
   const img = cssUrl(bg);
-  return `background-image: linear-gradient(90deg, var(--bg) 20%, transparent)${img ? ', ' + img : ''}`;
+  return img ? `background-image: ${img}` : '';
 }
 
 // Progresso guardado para um título (ou para um de seus episódios, em séries).

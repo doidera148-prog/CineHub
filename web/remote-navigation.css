@@ -1,10 +1,10 @@
 /* Controles e player mais confortáveis em todos os formatos de tela. */
 :root { --tap-target: 48px; --player-bg: #050608; }
-button, .torrentfile, .sidebar nav a { min-height: var(--tap-target); }
+button, .torrentfile, #nav-main a { min-height: var(--tap-target); }
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 3px;
-  box-shadow: 0 0 0 6px rgba(139, 92, 246, 0.4);
+  box-shadow: 0 0 0 6px rgba(229, 9, 20, 0.45);
 }
 #player { background: var(--player-bg); }
 #player .player-box { width: min(1440px, 98vw); }
@@ -25,7 +25,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   main { padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
   .sidebar { padding-left: max(10px, env(safe-area-inset-left)); padding-right: max(10px, env(safe-area-inset-right)); }
   .sidebar nav { scroll-snap-type: x mandatory; padding: 2px 2px 6px; }
-  .sidebar nav a { min-height: 48px; display: inline-flex; align-items: center; scroll-snap-align: start; }
+  #nav-main a { min-height: 48px; display: inline-flex; align-items: center; scroll-snap-align: start; }
   .topbar input, #sf input, #af input, #tm { min-height: 48px; font-size: 16px; }
   .addform, .torrentform { display: grid; grid-template-columns: 1fr; }
   .torrentform #tm { min-width: 0; width: 100%; }
@@ -46,7 +46,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   button, a[href], input, select { min-height: 56px; }
   .card { flex-basis: clamp(170px, 13vw, 230px); }
   .poster { height: clamp(255px, 19vw, 345px); }
-  .sidebar nav a { padding-block: 14px; }
+  #nav-main a { padding-block: 14px; }
   .stream, .ep { padding: 16px; font-size: 1.05em; }
   #player .player-box { width: 96vw; }
   #video { max-height: 90vh; }
