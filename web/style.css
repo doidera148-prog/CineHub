@@ -866,11 +866,29 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.7); }
   .card, .card .poster, .card .poster-img, .btn-link, button, #nav-main a::after { transition: none; }
 }
 
-/* Janelas e TVs médias: a busca é mais estreita para o menu caber inteiro ao lado dela. */
+/* Janelas e TVs médias: a busca vira um ícone e abre ao receber foco (setas ou clique),
+   para o menu caber inteiro ao lado dela. */
 @media (min-width: 721px) and (max-width: 1180px) {
   #nav-main { gap: 1.1rem; }
-  .topbar input { width: 10rem; }
-  .topbar input:focus { width: 16rem; }
+  .topbar input {
+    width: 2.6rem;
+    padding: 0;
+    color: transparent;
+    border-color: transparent;
+    background: rgba(255, 255, 255, 0.06) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c4c4cc' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20 20l-4-4'/%3E%3C/svg%3E") center / 1.15rem no-repeat;
+    cursor: pointer;
+  }
+  .topbar input::placeholder { color: transparent; }
+  .topbar input:focus {
+    width: 16rem;
+    padding: 0 0.9rem;
+    color: var(--text);
+    background-color: rgba(0, 0, 0, 0.85);
+    background-image: none;
+    border-color: rgba(255, 255, 255, 0.55);
+    cursor: text;
+  }
+  .topbar input:focus::placeholder { color: var(--muted); }
 }
 
 /* ---------- Celulares: barra em duas linhas e conteúdo em largura total ---------- */

@@ -20,6 +20,9 @@ import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import android.webkit.WebView
+import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 
 @InvokeArg
 class PlayArgs {
@@ -32,6 +35,26 @@ class PlayArgs {
 /** Player Android/Android TV em tela cheia, com controles Media3 acessíveis por toque e D-pad. */
 @TauriPlugin
 class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
+    /**
+     * Botão Voltar: a página decide primeiro (fecha diálogo ou player, volta uma tela, ou pede
+     * "Voltar de novo para sair", em window.__cinehubBack). Só quando ela não trata, o sistema segue.
+     */
+    override fun load(webView: WebView) {
+        super.load(webView)
+        val dispatcher = (act as? ComponentActivity)?.onBackPressedDispatcher ?: return
+        val callback = object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                webView.evaluateJavascript("(window.__cinehubBack && window.__cinehubBack()) ? 1 : 0") { handled ->
+                    if (handled == "1") return@evaluateJavascript
+                    isEnabled = false
+                    dispatcher.onBackPressed()
+                    isEnabled = true
+                }
+            }
+        }
+        dispatcher.addCallback(callback)
+    }
+
     @Command
     fun play(invoke: Invoke) {
         val args = try {

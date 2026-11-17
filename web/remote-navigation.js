@@ -105,6 +105,22 @@
     }
   }, true);
 
+  // Campo de busca na TV: OK abre o teclado da TV (um clique no campo é o que faz o Android mostrá-lo);
+  // Enter (ou Buscar no teclado) tira o foco do campo, e a próxima seta já cai nos resultados.
+  document.addEventListener('keydown', (event) => {
+    const target = document.activeElement;
+    if (!target || target.id !== 'q' || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      target.blur();
+      return;
+    }
+    if (isOk(event)) {
+      event.preventDefault();
+      target.click();
+    }
+  }, true);
+
   document.addEventListener('keydown', (event) => {
     if (!isOk(event) || event.altKey || event.ctrlKey || event.metaKey || document.querySelector('#confirm[open]')) return;
     const target = document.activeElement;
@@ -147,6 +163,32 @@
       if (history.length > 1) history.back(); else location.hash = '#/';
     }
   }, true);
+
+  // Chamado pelo Android (plugin ExoPlayer, ao apertar Voltar) antes de sair do app.
+  // Devolve true quando a página tratou o Voltar; false deixa o sistema fechar o app.
+  let lastBackAt = 0;
+  window.__cinehubBack = () => {
+    const dialog = document.querySelector('dialog[open]');
+    if (dialog) {
+      const cancel = dialog.querySelector('[value="cancel"]');
+      if (cancel) cancel.click();
+      else dialog.close();
+      return true;
+    }
+    if (playerOpen()) {
+      document.querySelector('#close-player')?.click();
+      return true;
+    }
+    if (location.hash && location.hash !== '#/' && location.hash !== '#') {
+      history.back();
+      return true;
+    }
+    const now = Date.now();
+    if (now - lastBackAt < 2500) return false;
+    lastBackAt = now;
+    announce('Pressione Voltar de novo para sair');
+    return true;
+  };
 
   document.addEventListener('focusin', () => { remoteMode = true; });
   document.addEventListener('pointerdown', () => { remoteMode = false; }, true);

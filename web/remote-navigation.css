@@ -54,11 +54,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 /* Televisão (controle remoto, sem mouse nem toque): textos e botões maiores para a distância do sofá.
    pointer: none só bate com aparelho sem ponteiro; celular e tablet usam pointer: coarse. */
 @media (min-width: 721px) and (max-width: 1499px) and (pointer: none) {
-  html { font-size: 18px; }
-  #nav-main a { font-size: 1rem; }
+  html { font-size: 20px; }  /* mesma escala de telas grandes (10 pés): ~1,25x o desktop */
+  #nav-main a { font-size: 0.9rem; }
   .title { font-size: 0.95rem; }
   .row h2 { font-size: 1.35rem; }
-  .card { flex-basis: clamp(180px, 14vw, 230px); }
+  .card { flex-basis: clamp(190px, 15vw, 240px); }
   button, .btn-link, .primary-play { min-height: 52px; }
   .billboard .btn-link { height: 3.4rem; font-size: 1.15rem; }
 }

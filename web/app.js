@@ -118,11 +118,27 @@ function withBusy(text, promise) {
 }
 const TORRENT_BUSY = 'Preparando torrent (pode levar até 1 minuto)';
 
+// Quem abre um diálogo recebe o foco de volta quando ele fecha (o controle remoto não se perde).
+function focusReturner() {
+  const el = document.activeElement;
+  return () => {
+    if (el && el !== document.body && el.isConnected) el.focus({ preventScroll: true });
+  };
+}
+
 function askConfirm(msg, okLabel) {
   return new Promise((resolve) => {
     $('#confirm-msg').textContent = msg;
     $('#confirm-ok').textContent = okLabel;
-    confirmDialog.addEventListener('close', () => resolve(confirmDialog.returnValue === 'ok'), { once: true });
+    const back = focusReturner();
+    confirmDialog.addEventListener(
+      'close',
+      () => {
+        back();
+        resolve(confirmDialog.returnValue === 'ok');
+      },
+      { once: true },
+    );
     confirmDialog.showModal();
   });
 }
@@ -198,6 +214,7 @@ function pickTorrentVideo(result) {
     <ul id="tp-list" class="tp-list"></ul>
     <div class="dialog-actions"><button value="cancel" class="chip">Cancelar</button></div>
   </form>`;
+  const back = focusReturner();
   document.body.append(dlg);
   return new Promise((resolve) => {
     let chosen = null;
@@ -231,7 +248,15 @@ function pickTorrentVideo(result) {
     };
     if (select) select.onchange = fill;
     fill();
-    dlg.addEventListener('close', () => { dlg.remove(); resolve(chosen || result); }, { once: true });
+    dlg.addEventListener(
+      'close',
+      () => {
+        dlg.remove();
+        back();
+        resolve(chosen || result);
+      },
+      { once: true },
+    );
     dlg.showModal();
   });
 }
