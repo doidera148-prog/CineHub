@@ -28,7 +28,7 @@ fn embed_handle(app: &tauri::AppHandle) -> Option<i64> {
         use tauri::Manager;
         let window = app.get_webview_window("main")?;
         let hwnd = window.hwnd().ok()?;
-        return Some(hwnd.0 as isize as i64);
+        Some(hwnd.0 as isize as i64)
     }
     #[cfg(not(windows))]
     {
