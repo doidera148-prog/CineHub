@@ -5,6 +5,7 @@
 
 pub mod addon;
 pub mod commands;
+pub mod diag;
 pub mod player;
 pub mod store;
 pub mod torrent;
@@ -155,6 +156,9 @@ pub fn run() {
             commands::torrent_open,
             commands::save_export,
             commands::write_export,
+            diag::log_event,
+            diag::diagnostics_text,
+            diag::save_diagnostics,
             player::player_play,
         ])
         .run(tauri::generate_context!())

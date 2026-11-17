@@ -24,6 +24,18 @@ async function call(cmd, args) {
   }
 }
 
+// Registro local de diagnóstico: fica no aparelho e só sai se o usuário exportar.
+// Passe só a descrição do erro, nunca títulos ou dados pessoais (o backend também redige endereços).
+function logEvent(level, message) {
+  try {
+    invoke('log_event', { level, message: String(message ?? '').slice(0, 500) }).catch(() => {});
+  } catch {
+    /* sem backend (ex.: pré-visualização): nada a registrar */
+  }
+}
+window.addEventListener('error', (e) => logEvent('ERROR', `erro de script: ${e.message || 'desconhecido'}`));
+window.addEventListener('unhandledrejection', (e) => logEvent('ERROR', `promessa rejeitada: ${describeError(e.reason)}`));
+
 // Armazenamento local protegido: em janelas privadas ou com dados bloqueados, o app segue sem salvar.
 const store = {
   get(key, fallback) {
@@ -154,6 +166,7 @@ async function openTorrentSource(stream, label, id, meta, subs) {
     const fixed = { ...stream, url: result.streamUrl, mimeType: result.mimeType, name: result.name || stream?.name || label };
     await play(fixed, label, id, meta, subs);
   } catch (err) {
+    logEvent('WARN', `abrir torrent falhou: ${err.message || String(err)}`);
     toast(err.message || String(err));
   }
 }
@@ -245,6 +258,7 @@ function libraryPage() {
     <div class="dataactions">
       <button id="export-data" class="chip">Exportar dados</button>
       <button id="import-data" class="chip">Importar dados</button>
+      <button id="export-diag" class="chip">Exportar diagnóstico</button>
       <input id="import-file" type="file" accept="application/json,.json" hidden>
     </div>
     <label class="prefrow small">Idioma das legendas
@@ -269,6 +283,7 @@ function libraryPage() {
       : '<p class="muted">Sua biblioteca está vazia. Abra um título e clique em “Adicionar à biblioteca”.</p>'
   }`);
   $('#export-data').onclick = exportData;
+  $('#export-diag').onclick = exportDiagnostics;
   $('#sub-lang').onchange = (e) => store.set('subLang', e.target.value);
   $('#theme-pref').onchange = (e) => {
     store.set('theme', e.target.value);
@@ -290,7 +305,32 @@ function libraryPage() {
   };
 }
 
-// Exporta biblioteca e progresso: o backend grava o arquivo e informa o caminho.
+// Salva um texto. No desktop abre o "Salvar como"; no Android (sem diálogo) usa a pasta do app.
+async function saveText({ content, defaultName, filterName, ext, label, fallback }) {
+  let path;
+  if (!IS_ANDROID) {
+    try {
+      path = await invoke('plugin:dialog|save', {
+        options: { defaultPath: defaultName, filters: [{ name: filterName, extensions: [ext] }] },
+      });
+    } catch {
+      path = undefined; // diálogo indisponível: usa o salvamento interno abaixo
+    }
+    if (path === null) {
+      toast('Exportação cancelada.');
+      return;
+    }
+    if (path) {
+      await call('write_export', { path, content });
+      toast(`${label} salvo em: ${path}`);
+      return;
+    }
+  }
+  const saved = await fallback();
+  toast(`${label} salvo em: ${saved}`);
+}
+
+// Exporta biblioteca e progresso (backup .json). O backend grava o arquivo e informa o caminho.
 // (Download por blob não funciona no WebView do Android.)
 async function exportData() {
   const payload = {
@@ -302,33 +342,33 @@ async function exportData() {
   };
   const content = JSON.stringify(payload, null, 2);
   try {
-    // Desktop: o usuário escolhe onde salvar. Sem o diálogo (Android), salva na pasta do app.
-    let path;
-    if (!IS_ANDROID) {
-      try {
-        path = await invoke('plugin:dialog|save', {
-          options: {
-            defaultPath: `cinehub-dados-${payload.exportedAt.slice(0, 10)}.json`,
-            filters: [{ name: 'Backup do CineHub', extensions: ['json'] }],
-          },
-        });
-      } catch {
-        path = undefined; // diálogo indisponível: usa o salvamento interno abaixo
-      }
-      if (path === null) {
-        toast('Exportação cancelada.');
-        return;
-      }
-      if (path) {
-        await call('write_export', { path, content });
-        toast(`Backup salvo em: ${path}`);
-        return;
-      }
-    }
-    const saved = await call('save_export', { content });
-    toast(`Backup salvo em: ${saved}`);
+    await saveText({
+      content,
+      defaultName: `cinehub-dados-${payload.exportedAt.slice(0, 10)}.json`,
+      filterName: 'Backup do CineHub',
+      ext: 'json',
+      label: 'Backup',
+      fallback: () => call('save_export', { content }),
+    });
   } catch (err) {
     toast(`Não consegui exportar: ${err.message}`);
+  }
+}
+
+// Exporta o diagnóstico (registro local, já redigido) como .txt para enviar a quem for ajudar.
+async function exportDiagnostics() {
+  try {
+    const content = await call('diagnostics_text');
+    await saveText({
+      content,
+      defaultName: `cinehub-diagnostico-${new Date().toISOString().slice(0, 10)}.txt`,
+      filterName: 'Diagnóstico do CineHub',
+      ext: 'txt',
+      label: 'Diagnóstico',
+      fallback: () => call('save_diagnostics'),
+    });
+  } catch (err) {
+    toast(`Não consegui exportar o diagnóstico: ${err.message}`);
   }
 }
 
@@ -419,6 +459,7 @@ async function addonsPage() {
       toast(`Addon instalado: ${res.name}`);
       addonsPage();
     } catch (err) {
+      logEvent('WARN', `instalar addon falhou: ${err.message}`);
       toast(err.message);
     }
   };
@@ -669,6 +710,7 @@ async function loadStreams(kind, id, label, meta) {
   try {
     result = await call('streams', { kind, id });
   } catch (err) {
+    logEvent('WARN', `buscar fontes falhou: ${err.message}`);
     if (seq === streamsSeq) {
       const box = $('#streams') || $('#body');
       if (box) box.innerHTML = `<p class="muted">Não consegui buscar as fontes: ${esc(err.message)}</p>`;
@@ -865,6 +907,7 @@ async function playNative(stream, label, id, meta, subs) {
     console.warn('player nativo indisponível, usando o do navegador:', e);
     // Guarda o motivo: o aviso do player web (ex.: "não toca MKV") o mostra junto.
     nativeFailure = describeError(e).slice(0, 300);
+    logEvent('WARN', `player nativo indisponível: ${nativeFailure}`);
     return false;
   } finally {
     current = null;
@@ -1051,6 +1094,7 @@ vjsPlayer.on('error', () => {
   const err = vjsPlayer.error();
   console.warn('[player] erro', err?.code, err?.message, current.src);
   const reason = describePlaybackError(err, current.src, current.mime);
+  logEvent('ERROR', `reprodução falhou (código ${err?.code ?? '?'}): ${reason}`);
   toast(nativeFailure ? `${reason} (player nativo: ${nativeFailure})` : reason);
 });
 
@@ -1205,6 +1249,7 @@ topQ.addEventListener('keydown', (e) => {
   }
 });
 
+logEvent('INFO', `app iniciado (${IS_ANDROID ? 'android' : 'desktop'})`);
 window.addEventListener('hashchange', route);
 route();
 

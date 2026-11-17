@@ -456,20 +456,20 @@ pub async fn save_export(app: tauri::AppHandle, content: String) -> Result<Strin
     Ok(path.display().to_string())
 }
 
-/// Grava o backup no caminho escolhido pelo usuário no diálogo "Salvar como" (desktop).
-/// Só aceita arquivos .json de backup: não é um gravador genérico de arquivos.
+/// Grava o backup ou o diagnóstico no caminho escolhido pelo usuário no diálogo "Salvar como" (desktop).
+/// Só aceita arquivos .json (backup) ou .txt (diagnóstico): não é um gravador genérico de arquivos.
 #[tauri::command]
 pub async fn write_export(path: String, content: String) -> Result<(), String> {
     if content.len() > MAX_EXPORT_BYTES {
         return Err("backup grande demais para salvar".into());
     }
     let target = std::path::Path::new(&path);
-    let is_json = target
+    let allowed = target
         .extension()
         .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("json"));
-    if !is_json {
-        return Err("o backup precisa ser salvo como arquivo .json".into());
+        .is_some_and(|e| e.eq_ignore_ascii_case("json") || e.eq_ignore_ascii_case("txt"));
+    if !allowed {
+        return Err("o arquivo precisa ser .json (backup) ou .txt (diagnóstico)".into());
     }
     std::fs::write(target, content).map_err(|e| format!("não foi possível salvar: {e}"))
 }
