@@ -160,4 +160,4 @@ Depois, em **Settings → Secrets and variables → Actions**, crie os segredos:
 
 ## Licença
 
-MIT
+GPL-3.0-or-later. Veja [LICENSE](LICENSE) e [NOTICE.md](NOTICE.md), que trata das versões anteriores (MIT) e das partes derivadas do dxbi-stremio.

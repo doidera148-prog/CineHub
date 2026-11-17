@@ -3,7 +3,7 @@ name = "cinehub"
 version = "0.2.0"
 description = "CineHub: aplicativo de streaming compatível com os addons do Stremio (pt-BR)"
 authors = ["CineHub"]
-license = "MIT"
+license = "GPL-3.0-or-later"
 edition = "2021"
 
 [lib]

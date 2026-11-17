@@ -92,6 +92,12 @@ $('#toggle-sidebar').onclick = () => {
 };
 applySidebar(store.get('sidebarCollapsed', false) === true);
 
+// Barra superior: transparente com gradiente sobre o destaque; sólida depois de rolar a página.
+const topbarEl = document.querySelector('.sidebar');
+const syncTopbar = () => topbarEl && topbarEl.classList.toggle('solid', window.scrollY > 40);
+window.addEventListener('scroll', syncTopbar, { passive: true });
+syncTopbar();
+
 // Indicador persistente de trabalho em andamento (ex.: abrir um torrent leva até 1 minuto).
 // Fica visível até a operação terminar, com o tempo decorrido; não depende de toque, então
 // funciona também com controle remoto de TV.
