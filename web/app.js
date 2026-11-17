@@ -713,6 +713,9 @@ async function subtitleDataUri(stream, subs) {
   }
 }
 
+// Motivo da última falha do player nativo (mostrado se o player web também não tocar).
+let nativeFailure = null;
+
 async function playNative(stream, label, id, meta, subs) {
   const saved = store.get('progress', {})[id];
   const startMs = saved && saved.t > 5 ? saved.t * 1000 : 0;
@@ -727,8 +730,8 @@ async function playNative(stream, label, id, meta, subs) {
     return true;
   } catch (e) {
     console.warn('player nativo indisponível, usando o do navegador:', e);
-    // Mostra o motivo na tela: sem ele, a mensagem do player web (MKV) esconde a falha real.
-    toast(`Player nativo falhou: ${String(e).slice(0, 180)}`);
+    // Guarda o motivo: o aviso do player web (ex.: "não toca MKV") o mostra junto.
+    nativeFailure = String(e).slice(0, 200);
     return false;
   } finally {
     current = null;
@@ -741,6 +744,7 @@ async function play(stream, label, id, meta, subs) {
     await openTorrentSource(stream, label, id, meta, subs);
     return;
   }
+  nativeFailure = null;
   if (await playNative(stream, label, id, meta, subs)) return;
 
   saveProgress(true);
@@ -856,7 +860,8 @@ vjsPlayer.on('error', () => {
   if (!current) return;
   const err = vjsPlayer.error();
   console.warn('[player] erro', err?.code, err?.message, current.src);
-  toast(describePlaybackError(err, current.src, current.mime));
+  const reason = describePlaybackError(err, current.src, current.mime);
+  toast(nativeFailure ? `${reason} (player nativo: ${nativeFailure})` : reason);
 });
 
 function closePlayer(fromHistory = false) {
