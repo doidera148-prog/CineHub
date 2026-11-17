@@ -112,3 +112,17 @@ test('temporada e episódio vindos do addon viram número (regressão de XSS)', 
   assert.equal(L.episodeOf({ episode: NaN }), null);
   assert.equal(L.episodeOf(undefined), null);
 });
+
+test('animes têm episódios como as séries; filmes não', () => {
+  assert.equal(L.isSeriesLike('series'), true);
+  assert.equal(L.isSeriesLike('anime'), true);
+  assert.equal(L.isSeriesLike('movie'), false);
+  assert.equal(L.isSeriesLike(undefined), false);
+});
+
+test('rótulo do tipo: filme, série e anime', () => {
+  assert.equal(L.typeLabel('movie'), 'Filme');
+  assert.equal(L.typeLabel('series'), 'Série');
+  assert.equal(L.typeLabel('anime'), 'Anime');
+  assert.equal(L.typeLabel('tv'), '');
+});

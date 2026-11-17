@@ -128,7 +128,7 @@ function askConfirm(msg, okLabel) {
 }
 
 // Funções puras (URLs seguras, ordenação de fontes, próximo episódio) vêm de lib.js, testadas com node.
-const { isWebUrl, cssUrl, str, num, cleanFav, cleanProgress, progressPercent, sortStreams, nextEpisode, torrentLanguage } = window.CineHubLib;
+const { isWebUrl, cssUrl, str, num, cleanFav, cleanProgress, progressPercent, sortStreams, nextEpisode, torrentLanguage, isSeriesLike, typeLabel } = window.CineHubLib;
 
 // Abre um link externo no navegador do aparelho (window.open não funciona no WebView do Android).
 async function openExternal(url) {
@@ -250,11 +250,11 @@ async function playOpenedTorrent(input, fallbackName) {
 async function homePage(alive) {
   setView(`<div id="billboard"></div><div id="rows">${skeleton()}${skeleton()}</div>`);
   // Um tipo que falha não derruba o outro: usa o que respondeu.
-  const [m, s] = await Promise.allSettled([call('home', { kind: 'movie' }), call('home', { kind: 'series' })]);
+  const [m, s, a] = await Promise.allSettled([call('home', { kind: 'movie' }), call('home', { kind: 'series' }), call('home', { kind: 'anime' })]);
   if (!alive()) return;
   const rowsOf = (r) => (r.status === 'fulfilled' ? r.value.rows : []);
   const cont = continueWatchingRow();
-  const rows = [...(cont ? [cont] : []), ...rowsOf(m), ...rowsOf(s)];
+  const rows = [...(cont ? [cont] : []), ...rowsOf(m), ...rowsOf(s), ...rowsOf(a)];
   renderRows(rows, 'Nenhum catálogo disponível. Instale addons na aba Addons.');
   renderBillboard(rows);
 }
@@ -269,7 +269,7 @@ function renderBillboard(rows) {
     return;
   }
   const bg = isWebUrl(m.background) ? m.background : m.poster;
-  const kindLabel = m.type === 'series' ? 'Série' : 'Filme';
+  const kindLabel = typeLabel(m.type) || 'Filme';
   const info = [m.releaseInfo, kindLabel].filter(Boolean).join(' · ');
   const href = `#/detail/${esc(m.type)}/${encodeURIComponent(m.id)}`;
   box.className = 'billboard';
@@ -663,7 +663,7 @@ async function detailPage(kind, id, alive) {
     paintFav();
   };
 
-  if ((meta.type || kind) === 'series') renderSeries(meta);
+  if (isSeriesLike(meta.type || kind)) renderSeries(meta);
   else loadStreams(meta.type || kind, meta.id, meta.name, meta);
 }
 
@@ -842,7 +842,8 @@ function renderSeries(meta) {
         const ep = eps.find((e) => e.id === b.dataset.id);
         const no = ep ? episodeNo(ep) : null;
         const label = `${meta.name} · T${season}E${no ?? ''}`;
-        loadStreams('series', b.dataset.id, label, { ...meta, type: 'series', seriesId: meta.id, poster: meta.poster, name: label });
+        const epKind = meta.type === 'anime' ? 'anime' : 'series';
+        loadStreams(epKind, b.dataset.id, label, { ...meta, type: epKind, seriesId: meta.id, poster: meta.poster, name: label });
       };
     });
   };
@@ -1214,19 +1215,20 @@ $('#next-ep').onclick = () => playNextEpisode();
 async function playNextEpisode() {
   if (!nextUp) return;
   const { ep, meta } = nextUp;
+  const epKind = meta.type === 'anime' ? 'anime' : 'series';
   hideNext();
   const label = `${meta.name} · T${ep.season ?? 0}E${ep.episode ?? ''}`;
   try {
     const { streams = [], subtitles = [] } = await withBusy(
       'Buscando fontes do próximo episódio',
-      call('streams', { kind: 'series', id: ep.id }),
+      call('streams', { kind: epKind, id: ep.id }),
     );
     const pick = sortStreams(Array.isArray(streams) ? streams : []).find((s) => s.url || s.externalUrl || s.infoHash || s.hash);
     if (!pick) {
       toast('Sem fontes para o próximo episódio.');
       return;
     }
-    await play(pick, label, ep.id, { ...meta, type: 'series', seriesId: meta.id, name: label }, subtitles);
+    await play(pick, label, ep.id, { ...meta, type: epKind, seriesId: meta.id, name: label }, subtitles);
   } catch (err) {
     toast(`Não consegui abrir o próximo episódio: ${describeError(err)}`);
   }
@@ -1342,6 +1344,7 @@ const PAGE_TITLES = {
   home: 'Início',
   movies: 'Filmes',
   series: 'Séries',
+  animes: 'Animes',
   search: 'Pesquisar',
   library: 'Biblioteca',
   addons: 'Addons',
@@ -1351,6 +1354,7 @@ const NAV = {
   home: (alive) => homePage(alive),
   movies: (alive) => catalogPage('movie', 'Filmes', alive),
   series: (alive) => catalogPage('series', 'Séries', alive),
+  animes: (alive) => catalogPage('anime', 'Animes', alive),
   search: () => searchPage(new URLSearchParams(location.hash.split('?')[1] || '').get('q') || ''),
   library: () => libraryPage(),
   addons: () => addonsPage(),

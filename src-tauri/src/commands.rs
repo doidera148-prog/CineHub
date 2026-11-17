@@ -115,7 +115,7 @@ pub async fn search(state: State<'_, AppState>, q: String) -> Result<Value, Stri
     let mut jobs = Vec::new();
     for a in &addons {
         for c in &a.manifest.catalogs {
-            if c.supports_search() && (c.kind == "movie" || c.kind == "series") {
+            if c.supports_search() && matches!(c.kind.as_str(), "movie" | "series" | "anime") {
                 jobs.push((a.clone(), c.clone()));
             }
         }

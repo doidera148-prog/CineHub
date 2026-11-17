@@ -101,8 +101,21 @@
     return Number.isFinite(n) ? n : null;
   }
 
+  // Tipos de conteúdo do Stremio. "anime" tem episódios como as séries: mesma tela de temporadas,
+  // mesmo caminho para fontes e para o próximo episódio. A chave é o tipo que o addon declara.
+  const SERIES_LIKE = ['series', 'anime'];
+  function isSeriesLike(type) {
+    return SERIES_LIKE.includes(str(type));
+  }
+  const TYPE_LABELS = { movie: 'Filme', series: 'Série', anime: 'Anime' };
+  function typeLabel(type) {
+    return TYPE_LABELS[str(type)] || '';
+  }
+
   root.CineHubLib = {
     str,
+    isSeriesLike,
+    typeLabel,
     num,
     seasonOf,
     episodeOf,
