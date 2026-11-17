@@ -2,8 +2,8 @@
 # e publica o AAR num release. O build Android do CineHub baixa esse AAR se ele existir.
 #
 # Rodar: Actions → "ffmpeg-extension" → Run workflow (ou alterar as versões abaixo).
-# Versões fixadas: Media3 1.4.1 (mesma do app), FFmpeg release/6.0 e NDK r26b, que são as
-# recomendadas e testadas pelo próprio README do Media3 (decoder_ffmpeg).
+# Versões fixadas: Media3 1.4.1 (mesma do app), FFmpeg release/6.0. O NDK tem de ser o mesmo que o
+# Gradle usa para linkar (o AGP padrão deste projeto é o 25.1.8937393), e a API nativa igual à do CMake (21).
 name: ffmpeg-extension
 
 on:
@@ -15,10 +15,10 @@ permissions:
 env:
   MEDIA3_TAG: "1.4.1"
   FFMPEG_BRANCH: "release/6.0"
-  NDK_VERSION: "26.1.10909125"
+  NDK_VERSION: "25.1.8937393"
   CMAKE_VERSION: "3.22.1"
-  # Nível da API do build nativo: igual ao minSdk do plugin (24).
-  NATIVE_API_LEVEL: "24"
+  # Nível da API do build nativo: igual ao alvo do CMake do Media3 (21). Usar outro nível quebra o link.
+  NATIVE_API_LEVEL: "21"
   RELEASE_TAG: "ffmpeg-ext-1.4.1"
 
 jobs:
