@@ -12,26 +12,30 @@
 <body>
   <aside class="sidebar">
     <div class="logo">CineHub</div>
-    <nav>
-      <a href="#/" data-nav="home">Início</a>
-      <a href="#/movies" data-nav="movies">Filmes</a>
-      <a href="#/series" data-nav="series">Séries</a>
-      <a href="#/search" data-nav="search">Pesquisar</a>
-      <a href="#/library" data-nav="library">Biblioteca</a>
-      <a href="#/addons" data-nav="addons">Addons</a>
+    <button id="toggle-sidebar" class="chip sidebar-toggle" aria-expanded="true" aria-controls="nav-main" title="Recolher menu">☰</button>
+    <nav id="nav-main">
+      <a href="#/" data-nav="home"><span class="ico" aria-hidden="true">⌂</span><span class="lbl">Início</span></a>
+      <a href="#/movies" data-nav="movies"><span class="ico" aria-hidden="true">▣</span><span class="lbl">Filmes</span></a>
+      <a href="#/series" data-nav="series"><span class="ico" aria-hidden="true">▤</span><span class="lbl">Séries</span></a>
+      <a href="#/search" data-nav="search"><span class="ico" aria-hidden="true">⌕</span><span class="lbl">Pesquisar</span></a>
+      <a href="#/library" data-nav="library"><span class="ico" aria-hidden="true">★</span><span class="lbl">Biblioteca</span></a>
+      <a href="#/addons" data-nav="addons"><span class="ico" aria-hidden="true">⚙</span><span class="lbl">Addons</span></a>
     </nav>
   </aside>
 
   <main>
     <header class="topbar">
-      <input id="q" type="search" placeholder="Pesquisar filmes e séries…" autocomplete="off" aria-label="Pesquisar">
+      <input id="q" type="search" placeholder="Pesquisar filmes e séries… (tecla /)" autocomplete="off" aria-label="Pesquisar">
     </header>
     <section id="view"></section>
   </main>
 
+  <div id="offline" class="offline hidden" role="alert">Sem conexão com a internet. Algumas fontes podem não carregar.</div>
+
   <div id="player" class="hidden">
     <div class="player-box">
       <button id="close-player" class="close" title="Fechar (Esc)" aria-label="Fechar player">✕</button>
+      <div id="player-title" class="player-title" aria-hidden="true"></div>
       <video id="video" class="video-js vjs-big-play-centered" controls preload="auto" playsinline></video>
     </div>
   </div>
@@ -50,6 +54,7 @@
   </dialog>
 
   <script src="./vendor/video.min.js"></script>
+  <script src="./lib.js"></script>
   <script src="./app.js"></script>
   <script src="./torrent-playback.js"></script>
 </body>

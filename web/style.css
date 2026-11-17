@@ -200,6 +200,83 @@ h1 { margin: 0 0 16px; }
 
 .row > .more { margin: 10px 0 0; }
 
+/* Progresso e selos sobre os cartazes */
+.poster { position: relative; overflow: hidden; }
+.progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  background: rgba(0, 0, 0, 0.5);
+}
+.progress span { display: block; height: 100%; background: var(--accent); }
+.seen {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 11px;
+}
+.logo-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+/* Aviso de sem conexão e título do player */
+.offline {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 60;
+  padding: 8px 16px;
+  background: #7f1d1d;
+  color: #fff;
+  text-align: center;
+  font-size: 14px;
+}
+.player-title {
+  position: absolute;
+  top: 12px;
+  left: 60px;
+  right: 60px;
+  color: #fff;
+  font-weight: 600;
+  text-shadow: 0 1px 3px #000;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Menu lateral: ícones sempre visíveis; rótulos somem quando recolhido (desktop) */
+.sidebar nav a { display: flex; align-items: center; gap: 10px; }
+.sidebar .ico { width: 20px; text-align: center; flex-shrink: 0; }
+.sidebar-toggle { display: none; align-self: flex-start; }
+@media (min-width: 721px) {
+  .sidebar-toggle { display: inline-block; }
+  body.nav-collapsed .sidebar { width: 64px; padding: 20px 8px; }
+  body.nav-collapsed .logo { font-size: 0; padding: 8px 0; }
+  body.nav-collapsed .logo::before { content: "C"; font-size: 22px; }
+  body.nav-collapsed .sidebar nav a { justify-content: center; padding: 10px 0; }
+  body.nav-collapsed .sidebar .lbl { display: none; }
+}
+@media (min-width: 721px) and (max-width: 1024px) {
+  .sidebar { width: 170px; }
+}
+
 /* Trabalho em andamento (ex.: abrir torrent): barra discreta no topo, com o tempo decorrido. */
 .busy {
   position: fixed;

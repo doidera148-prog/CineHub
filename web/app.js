@@ -50,12 +50,35 @@ const sectionOf = () => location.hash.replace(/^#\/?/, '').split('?')[0].split('
 
 // Avisos e confirmações dentro do app (substituem alert/confirm do navegador).
 let toastTimer;
-function toast(msg) {
+function toast(msg, ms = 4000) {
   toastEl.textContent = msg;
   toastEl.classList.remove('hidden');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toastEl.classList.add('hidden'), 4000);
+  toastTimer = setTimeout(() => toastEl.classList.add('hidden'), ms);
 }
+
+// Aviso de conexão: aparece quando o aparelho fica sem rede.
+function syncOnline() {
+  $('#offline')?.classList.toggle('hidden', navigator.onLine !== false);
+}
+window.addEventListener('online', syncOnline);
+window.addEventListener('offline', syncOnline);
+syncOnline();
+
+// Menu lateral recolhível no desktop (a preferência fica guardada neste aparelho).
+function applySidebar(collapsed) {
+  document.body.classList.toggle('nav-collapsed', collapsed);
+  const btn = $('#toggle-sidebar');
+  if (!btn) return;
+  btn.setAttribute('aria-expanded', String(!collapsed));
+  btn.title = collapsed ? 'Expandir menu' : 'Recolher menu';
+}
+$('#toggle-sidebar').onclick = () => {
+  const collapsed = !document.body.classList.contains('nav-collapsed');
+  store.set('sidebarCollapsed', collapsed);
+  applySidebar(collapsed);
+};
+applySidebar(store.get('sidebarCollapsed', false) === true);
 
 // Indicador persistente de trabalho em andamento (ex.: abrir um torrent leva até 1 minuto).
 // Fica visível até a operação terminar, com o tempo decorrido; não depende de toque, então
@@ -86,17 +109,8 @@ function askConfirm(msg, okLabel) {
   });
 }
 
-// Só http(s) sai do app: outros esquemas são ignorados.
-function isWebUrl(u) {
-  return typeof u === 'string' && /^https?:\/\//i.test(u);
-}
-
-// Imagem de fundo em CSS: só http(s), com aspas e parênteses codificados para não quebrar o estilo.
-function cssUrl(u) {
-  if (!isWebUrl(u)) return '';
-  const safe = encodeURI(u).replace(/['()]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
-  return `url('${safe}')`;
-}
+// Funções puras (URLs seguras, ordenação de fontes, próximo episódio) vêm de lib.js, testadas com node.
+const { isWebUrl, cssUrl, str, num, cleanFav, cleanProgress, progressPercent, sortStreams, nextEpisode } = window.CineHubLib;
 
 // Abre um link externo no navegador do aparelho (window.open não funciona no WebView do Android).
 async function openExternal(url) {
@@ -306,25 +320,6 @@ function subPref() {
 
 const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
 const MAX_FAVS = 500;
-const str = (v) => (typeof v === 'string' ? v : '');
-const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
-
-function cleanFav(f) {
-  return { id: str(f.id), type: str(f.type), name: str(f.name), poster: str(f.poster), releaseInfo: str(f.releaseInfo) };
-}
-
-function cleanProgress(p) {
-  return {
-    t: num(p.t),
-    duration: num(p.duration),
-    label: str(p.label),
-    seriesId: str(p.seriesId),
-    type: str(p.type),
-    name: str(p.name),
-    poster: str(p.poster),
-    updated: num(p.updated),
-  };
-}
 
 // Importa um backup: junta favoritos sem repetir e, no progresso, fica o registro mais recente.
 async function importData(file) {
@@ -552,13 +547,24 @@ function heroStyle(bg) {
   return `background-image: linear-gradient(90deg, var(--bg) 20%, transparent)${img ? ', ' + img : ''}`;
 }
 
+// Progresso guardado para um título (ou para um de seus episódios, em séries).
+function progressFor(id) {
+  const all = store.get('progress', {});
+  if (all[id]) return all[id];
+  return Object.values(all).find((p) => p && p.seriesId === id) || null;
+}
+
 function cardHtml(m) {
   const img = cssUrl(m.poster);
   const poster = img ? `background-image: ${img}` : '';
   const label = [m.name, m.releaseInfo].filter(Boolean).join(', ');
+  const p = progressFor(m.id);
+  const pct = progressPercent(p);
+  const bar = pct > 0 ? `<div class="progress" aria-hidden="true"><span style="width:${pct.toFixed(1)}%"></span></div>` : '';
+  const seen = p?.watched ? '<span class="seen">✓ Assistido</span>' : '';
   return `
     <a class="card" href="#/detail/${esc(m.type)}/${encodeURIComponent(m.id)}" aria-label="${esc(label)}">
-      <div class="poster" style="${esc(poster)}">${img ? '' : esc(m.name)}</div>
+      <div class="poster" style="${esc(poster)}">${img ? '' : esc(m.name)}${bar}${seen}</div>
       <div class="title">${esc(m.name)}</div>
       <div class="muted small">${esc(m.releaseInfo || '')}</div>
     </a>`;
@@ -567,9 +573,11 @@ function cardHtml(m) {
 function addonHtml(a) {
   const m = a.manifest;
   const resources = (m.resources || []).map((r) => (typeof r === 'string' ? r : r.name)).join(', ');
+  // Sem logo, mostra a inicial do nome em vez de um quadrado vazio.
+  const initial = esc(String(m.name || '?').trim().charAt(0).toUpperCase());
   return `
     <div class="addon">
-      ${isWebUrl(m.logo) ? `<img src="${esc(m.logo)}" alt="" loading="lazy">` : '<img alt="">'}
+      ${isWebUrl(m.logo) ? `<img src="${esc(m.logo)}" alt="" loading="lazy">` : `<span class="logo-fallback" aria-hidden="true">${initial}</span>`}
       <div>
         <strong>${esc(m.name)}</strong> <span class="muted small">v${esc(m.version)}</span>
         <p class="muted small">${esc(m.description || '')}</p>
@@ -635,7 +643,9 @@ async function loadStreams(kind, id, label, meta) {
     return;
   }
   if (seq !== streamsSeq) return;
-  const { streams = [], subtitles = [], errors = [] } = result;
+  const { subtitles = [], errors = [] } = result;
+  // Fontes que tocam vêm primeiro, depois as de maior resolução (e dublagem em português).
+  const streams = sortStreams(Array.isArray(result.streams) ? result.streams : []);
   const box = $('#streams') || $('#body');
   if (!box) return;
   box.innerHTML = '';
@@ -796,7 +806,7 @@ let nativeFailure = null;
 
 async function playNative(stream, label, id, meta, subs) {
   const saved = store.get('progress', {})[id];
-  const startMs = saved && saved.t > 5 ? saved.t * 1000 : 0;
+  const startMs = saved && saved.t > 5 && !saved.watched ? saved.t * 1000 : 0;
   current = { id, label, meta, src: stream.url, mime: '' };
   document.title = `${label} · CineHub`;
   try {
@@ -843,7 +853,7 @@ async function play(stream, label, id, meta, subs) {
   if (resumeHandler) vjsPlayer.off('loadedmetadata', resumeHandler);
   resumeHandler = () => {
     if (seq !== playSeq) return;
-    if (saved && saved.t > 5 && saved.t < vjsPlayer.duration() - 15) vjsPlayer.currentTime(saved.t);
+    if (saved && !saved.watched && saved.t > 5 && saved.t < vjsPlayer.duration() - 15) vjsPlayer.currentTime(saved.t);
   };
   vjsPlayer.one('loadedmetadata', resumeHandler);
 
@@ -855,6 +865,7 @@ async function play(stream, label, id, meta, subs) {
 
 function showPlayer() {
   if (!history.state?.player) history.pushState({ player: true }, '', location.href);
+  $('#player-title').textContent = current?.label || '';
   player.classList.remove('hidden');
 }
 
@@ -927,6 +938,7 @@ function saveProgress(force, pos) {
     name: meta.name || current.label,
     poster: meta.poster || '',
     updated: now,
+    watched: all[current.id]?.watched === true,
   };
   const kept = Object.entries(all)
     .sort((a, b) => (b[1].updated || 0) - (a[1].updated || 0))
@@ -936,12 +948,17 @@ function saveProgress(force, pos) {
 
 vjsPlayer.on('timeupdate', () => saveProgress(false));
 vjsPlayer.on('pause', () => saveProgress(true));
-vjsPlayer.on('ended', () => {
-  if (!current) return;
+// Terminou: marca como assistido (sai de "Continuar assistindo" e vira o selo nos cartazes).
+vjsPlayer.on('ended', () => markWatched(current?.id));
+function markWatched(id) {
+  if (!id) return;
   const all = store.get('progress', {});
-  delete all[current.id];
-  store.set('progress', all);
-});
+  all[id] = { ...(all[id] || { t: 0, duration: 0, label: '', seriesId: id, type: '', name: '', poster: '' }), watched: true, updated: Date.now() };
+  const kept = Object.entries(all)
+    .sort((a, b) => num(b[1]?.updated) - num(a[1]?.updated))
+    .slice(0, MAX_PROGRESS);
+  store.set('progress', Object.fromEntries(kept));
+}
 vjsPlayer.on('error', () => {
   if (!current) return;
   const err = vjsPlayer.error();
@@ -966,6 +983,7 @@ function closePlayer(fromHistory = false) {
     console.warn('falha ao limpar o player:', e);
   }
   current = null;
+  $('#player-title').textContent = '';
   keepScreenOn(false);
   document.title = 'CineHub';
   if (!fromHistory && history.state?.player) history.back();
@@ -974,7 +992,7 @@ function closePlayer(fromHistory = false) {
 // Fila de títulos com progresso parcial, do mais recente ao mais antigo.
 function continueWatchingRow() {
   const items = Object.values(store.get('progress', {}))
-    .filter((p) => p.duration > 0 && p.t > 5 && p.t < p.duration - 60)
+    .filter((p) => p && !p.watched && p.duration > 0 && p.t > 5 && p.t < p.duration - 60)
     .sort((a, b) => b.updated - a.updated)
     .slice(0, 20);
   if (!items.length) return null;
@@ -1066,6 +1084,17 @@ async function route() {
 }
 
 let usingKeys = false;
+// "/" foca a pesquisa (fora de campos de texto).
+document.addEventListener('keydown', (e) => {
+  if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+  const el = document.activeElement;
+  const typing = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el?.isContentEditable;
+  if (typing || !player.classList.contains('hidden') || confirmDialog.open) return;
+  e.preventDefault();
+  topQ.focus();
+  topQ.select();
+});
+
 document.addEventListener('keydown', () => (usingKeys = true), true);
 document.addEventListener('pointerdown', () => (usingKeys = false), true);
 
