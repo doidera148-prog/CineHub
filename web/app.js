@@ -902,7 +902,7 @@ function describePlaybackError(err, src, mime) {
   return 'Não foi possível tocar esta fonte. Tente outra.';
 }
 
-const vjsPlayer = videojs(video, { controls: true, fluid: true, preload: 'auto', playsinline: true });
+const vjsPlayer = videojs(video, { controls: true, fluid: true, preload: 'auto', playsinline: true, playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 2] });
 let current = null; // { id, label, meta } do que está tocando agora
 let playSeq = 0; // muda a cada fonte; legendas de fontes antigas são descartadas
 let blobUrls = [];
