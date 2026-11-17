@@ -74,6 +74,15 @@ test('fontes de torrent vêm antes das de link direto, mesmo com resolução men
   assert.deepEqual(out.map((s) => s.infoHash || s.url), ['b'.repeat(40), 'a'.repeat(40), 'https://a/direto']);
 });
 
+test('dublagem em português vem antes de torrent e de resolução maior', () => {
+  const out = L.sortStreams([
+    { infoHash: 'a'.repeat(40), title: '4K Legendado' },
+    { url: 'https://a/pt-direto', title: '720p Dublado' },
+    { infoHash: 'b'.repeat(40), title: '1080p Dublado' },
+  ]);
+  assert.deepEqual(out.map((s) => s.infoHash || s.url), ['b'.repeat(40), 'https://a/pt-direto', 'a'.repeat(40)]);
+});
+
 test('próximo episódio segue a ordem de temporada e episódio', () => {
   const videos = [
     { id: 'b:1:2', season: 1, episode: 2 },
