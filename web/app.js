@@ -713,6 +713,17 @@ async function subtitleDataUri(stream, subs) {
   }
 }
 
+// Texto legível para erros vindos do Tauri/plugins (que podem ser strings ou objetos).
+function describeError(e) {
+  if (typeof e === 'string') return e;
+  if (e && typeof e.message === 'string') return e.message;
+  try {
+    return JSON.stringify(e);
+  } catch {
+    return String(e);
+  }
+}
+
 // Motivo da última falha do player nativo (mostrado se o player web também não tocar).
 let nativeFailure = null;
 
@@ -731,7 +742,7 @@ async function playNative(stream, label, id, meta, subs) {
   } catch (e) {
     console.warn('player nativo indisponível, usando o do navegador:', e);
     // Guarda o motivo: o aviso do player web (ex.: "não toca MKV") o mostra junto.
-    nativeFailure = String(e).slice(0, 200);
+    nativeFailure = describeError(e).slice(0, 300);
     return false;
   } finally {
     current = null;
