@@ -233,12 +233,20 @@ function libraryPage() {
       <button id="import-data" class="chip">Importar dados</button>
       <input id="import-file" type="file" accept="application/json,.json" hidden>
     </div>
+    <label class="prefrow small">Idioma das legendas
+      <select id="sub-lang">
+        <option value="pt"${subPref() === 'pt' ? ' selected' : ''}>Português</option>
+        <option value="en"${subPref() === 'en' ? ' selected' : ''}>Inglês</option>
+        <option value="off"${subPref() === 'off' ? ' selected' : ''}>Sem legenda</option>
+      </select>
+    </label>
     <p class="muted small">Biblioteca e progresso ficam neste aparelho. Exporte um arquivo para levá-los a outro.</p>${
     favs.length
       ? `<div class="grid">${favs.map(cardHtml).join('')}</div>`
       : '<p class="muted">Sua biblioteca está vazia. Abra um título e clique em “Adicionar à biblioteca”.</p>'
   }`);
   $('#export-data').onclick = exportData;
+  $('#sub-lang').onchange = (e) => store.set('subLang', e.target.value);
   $('#import-data').onclick = () => $('#import-file').click();
   $('#import-file').onchange = (e) => {
     const file = e.target.files[0];
@@ -257,12 +265,43 @@ async function exportData() {
     favs: getFavs(),
     progress: store.get('progress', {}),
   };
+  const content = JSON.stringify(payload, null, 2);
   try {
-    const path = await call('save_export', { content: JSON.stringify(payload, null, 2) });
-    toast(`Backup salvo em: ${path}`);
+    // Desktop: o usuário escolhe onde salvar. Sem o diálogo (Android), salva na pasta do app.
+    let path;
+    if (!IS_ANDROID) {
+      try {
+        path = await invoke('plugin:dialog|save', {
+          options: {
+            defaultPath: `cinehub-dados-${payload.exportedAt.slice(0, 10)}.json`,
+            filters: [{ name: 'Backup do CineHub', extensions: ['json'] }],
+          },
+        });
+      } catch {
+        path = undefined; // diálogo indisponível: usa o salvamento interno abaixo
+      }
+      if (path === null) {
+        toast('Exportação cancelada.');
+        return;
+      }
+      if (path) {
+        await call('write_export', { path, content });
+        toast(`Backup salvo em: ${path}`);
+        return;
+      }
+    }
+    const saved = await call('save_export', { content });
+    toast(`Backup salvo em: ${saved}`);
   } catch (err) {
     toast(`Não consegui exportar: ${err.message}`);
   }
+}
+
+// Idioma das legendas (preferência guardada neste aparelho).
+const SUB_LANGS = { pt: /^(por|pt)/i, en: /^(eng|en)/i, off: null };
+function subPref() {
+  const v = store.get('subLang', 'pt');
+  return Object.prototype.hasOwnProperty.call(SUB_LANGS, v) ? v : 'pt';
 }
 
 const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
@@ -841,8 +880,10 @@ document.addEventListener('visibilitychange', () => {
 
 // Legendas: as da própria fonte + as de addons de legenda, só em português.
 function pickSubtitles(stream, subs) {
+  const re = SUB_LANGS[subPref()];
+  if (!re) return [];
   const all = [...(stream.subtitles || []), ...(subs || [])];
-  return all.filter((s) => /^(por|pt)/i.test(s.lang || '') && s.url).slice(0, 1);
+  return all.filter((s) => re.test(s.lang || '') && s.url).slice(0, 1);
 }
 
 function clearTextTracks() {

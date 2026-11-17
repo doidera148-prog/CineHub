@@ -133,6 +133,9 @@ mod imp {
             init.set_option("hwdec", "auto-safe")?;
             // Sem yt-dlp: a URL é sempre um vídeo direto vindo de um addon ou do torrent local.
             init.set_option("ytdl", "no")?;
+            // Títulos com várias faixas: prefere áudio e legenda em português.
+            init.set_option("alang", "pt,por")?;
+            init.set_option("slang", "pt,por")?;
             match wid {
                 // Dentro da janela do CineHub: o mpv cria uma janela filha que cobre a área do app.
                 Some(handle) => init.set_option("wid", handle)?,

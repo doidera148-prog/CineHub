@@ -95,9 +95,16 @@ pub struct Installed {
 impl Installed {
     /// Endereço base das rotas do addon (o manifest sem "/manifest.json").
     pub fn base(&self) -> String {
-        self.transport_url
+        // Query e fragmento não fazem parte do caminho das rotas: "…/manifest.json?key=x"
+        // vira "…" (antes, o sufixo não era encontrado e as rotas ficavam quebradas).
+        let without_query = self
+            .transport_url
+            .split(['?', '#'])
+            .next()
+            .unwrap_or(&self.transport_url);
+        without_query
             .strip_suffix("/manifest.json")
-            .unwrap_or(&self.transport_url)
+            .unwrap_or(without_query)
             .to_string()
     }
 
@@ -121,6 +128,9 @@ impl Installed {
         })
     }
 }
+
+/// Identificação enviada aos addons: sempre a versão real do app.
+const USER_AGENT: &str = concat!("CineHub/", env!("CARGO_PKG_VERSION"));
 
 /// Máximo de redirecionamentos seguidos ao falar com um addon.
 const ADDON_MAX_REDIRECTS: usize = 5;
@@ -159,7 +169,7 @@ pub fn client() -> Client {
     });
     Client::builder()
         .timeout(Duration::from_secs(20))
-        .user_agent("CineHub/0.2")
+        .user_agent(USER_AGENT)
         .redirect(policy)
         .dns_resolver(Arc::new(PublicResolver))
         .build()
@@ -175,13 +185,24 @@ const CACHE_MAX_ENTRIES: usize = 500;
 /// Limite do cache pelo tamanho das respostas originais (o valor já decodificado ocupa mais).
 const CACHE_MAX_BYTES: usize = 8 * 1024 * 1024;
 
+struct CacheEntry {
+    /// Quando foi gravada: define a validade (TTL).
+    stored: Instant,
+    /// Último uso (contador): define quem sai primeiro quando o cache enche (LRU).
+    used: u64,
+    value: Value,
+    size: usize,
+}
+
 #[derive(Default)]
 struct CacheInner {
-    map: HashMap<String, (Instant, Value, usize)>,
+    map: HashMap<String, CacheEntry>,
     bytes: usize,
+    tick: u64,
 }
 
 /// Cache em memória das respostas dos addons, para não refazer as mesmas chamadas.
+/// Quando enche, sai primeiro o item menos usado recentemente (e não tudo de uma vez).
 #[derive(Default)]
 pub struct Cache {
     inner: Mutex<CacheInner>,
@@ -189,22 +210,57 @@ pub struct Cache {
 
 impl Cache {
     fn get(&self, key: &str) -> Option<Value> {
-        let inner = self.inner.lock().ok()?;
-        let (at, value, _) = inner.map.get(key)?;
-        (at.elapsed() < CACHE_TTL).then(|| value.clone())
+        let mut inner = self.inner.lock().ok()?;
+        inner.tick += 1;
+        let tick = inner.tick;
+        let entry = inner.map.get_mut(key)?;
+        if entry.stored.elapsed() >= CACHE_TTL {
+            return None;
+        }
+        entry.used = tick;
+        Some(entry.value.clone())
     }
 
     fn put(&self, key: String, value: Value, size: usize) {
-        if let Ok(mut inner) = self.inner.lock() {
-            if inner.map.len() >= CACHE_MAX_ENTRIES || inner.bytes + size > CACHE_MAX_BYTES {
-                inner.map.clear();
-                inner.bytes = 0;
-            }
-            if let Some((_, _, old)) = inner.map.insert(key, (Instant::now(), value, size)) {
-                inner.bytes -= old;
-            }
-            inner.bytes += size;
+        let Ok(mut inner) = self.inner.lock() else {
+            return;
+        };
+        // Regravar a mesma chave substitui a antiga antes de medir o espaço.
+        if let Some(old) = inner.map.remove(&key) {
+            inner.bytes -= old.size;
         }
+        while !inner.map.is_empty()
+            && (inner.map.len() >= CACHE_MAX_ENTRIES || inner.bytes + size > CACHE_MAX_BYTES)
+        {
+            let Some(oldest) = inner
+                .map
+                .iter()
+                .min_by_key(|(_, e)| e.used)
+                .map(|(k, _)| k.clone())
+            else {
+                break;
+            };
+            if let Some(removed) = inner.map.remove(&oldest) {
+                inner.bytes -= removed.size;
+            }
+        }
+        inner.tick += 1;
+        let used = inner.tick;
+        inner.bytes += size;
+        inner.map.insert(
+            key,
+            CacheEntry {
+                stored: Instant::now(),
+                used,
+                value,
+                size,
+            },
+        );
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.inner.lock().map(|i| i.map.len()).unwrap_or(0)
     }
 }
 
@@ -312,7 +368,7 @@ const MAX_REDIRECTS: usize = 3;
 pub fn client_no_redirect() -> Client {
     Client::builder()
         .timeout(Duration::from_secs(20))
-        .user_agent("CineHub/0.2")
+        .user_agent(USER_AGENT)
         .redirect(reqwest::redirect::Policy::none())
         .dns_resolver(Arc::new(PublicResolver))
         .build()
@@ -498,6 +554,30 @@ mod tests {
         assert!(!a.supports("meta", "series", "xx1"));
         assert!(a.supports("stream", "movie", "tt1"));
         assert!(!a.supports("stream", "series", "tt1"));
+    }
+
+    #[test]
+    fn base_ignores_query_and_fragment() {
+        let mut a = installed(r#"{"id":"x","version":"1","name":"X"}"#);
+        a.transport_url = "https://addon.example/manifest.json?key=abc".into();
+        assert_eq!(a.base(), "https://addon.example");
+        a.transport_url = "https://addon.example/cfg/tok/manifest.json#x".into();
+        assert_eq!(a.base(), "https://addon.example/cfg/tok");
+    }
+
+    #[test]
+    fn cache_evicts_least_recently_used_first() {
+        let cache = Cache::default();
+        for i in 0..CACHE_MAX_ENTRIES {
+            cache.put(format!("k{i}"), Value::Null, 1);
+        }
+        // Usa k0: ele passa a ser o mais recente, então quem sai é k1.
+        assert!(cache.get("k0").is_some());
+        cache.put("novo".into(), Value::Null, 1);
+        assert_eq!(cache.len(), CACHE_MAX_ENTRIES);
+        assert!(cache.get("k0").is_some());
+        assert!(cache.get("k1").is_none());
+        assert!(cache.get("novo").is_some());
     }
 
     #[test]

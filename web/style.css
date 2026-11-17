@@ -314,3 +314,7 @@ body { font-size: 1rem; }
   .poster { height: 315px; }
   .sidebar { width: 240px; }
 }
+
+/* Preferências da biblioteca (ex.: idioma das legendas) */
+.prefrow { display: flex; align-items: center; gap: 8px; margin: 4px 0 12px; color: var(--muted); }
+.prefrow select { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font: inherit; }

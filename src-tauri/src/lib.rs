@@ -85,12 +85,24 @@ fn desktop_shortcuts<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("desktop-shortcuts").build()
 }
 
+/// Diálogo nativo "Salvar como" (desktop). No Android não existe: o plugin fica de fora.
+#[cfg(not(target_os = "android"))]
+fn desktop_dialog<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri_plugin_dialog::init()
+}
+
+#[cfg(target_os = "android")]
+fn desktop_dialog<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::new("desktop-dialog").build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_exoplayer::init())
         .plugin(desktop_shortcuts())
+        .plugin(desktop_dialog())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             let store_path = data_dir.join("addons.json");
@@ -142,6 +154,7 @@ pub fn run() {
             commands::subtitle,
             commands::torrent_open,
             commands::save_export,
+            commands::write_export,
             player::player_play,
         ])
         .run(tauri::generate_context!())

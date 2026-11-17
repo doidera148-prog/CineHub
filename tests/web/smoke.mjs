@@ -74,6 +74,23 @@ async function check(viewport, label) {
     failures.push(`[${label}] erro de fontes não foi mostrado ao usuário`);
   }
 
+  // Importar backup: adiciona favoritos e guarda o progresso (regra de importação da biblioteca).
+  await page.goto(`${base}/#/library`);
+  await page.waitForTimeout(300);
+  await page.setInputFiles('#import-file', {
+    name: 'backup.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({ app: 'CineHub', version: 1, favs: [{ id: 'tt9', type: 'movie', name: 'Importado' }], progress: { 'tt9:1': { t: 30, duration: 100, updated: 5 } } })),
+  });
+  await page.waitForTimeout(400);
+  const favs = await page.evaluate(() => JSON.parse(localStorage.getItem('favs') || '[]'));
+  if (!favs.some((f) => f.id === 'tt9')) failures.push(`[${label}] importação não adicionou favoritos`);
+
+  // Preferência de legenda: a escolha fica guardada neste aparelho.
+  await page.selectOption('#sub-lang', 'off');
+  const sub = await page.evaluate(() => localStorage.getItem('subLang'));
+  if (sub !== '"off"') failures.push(`[${label}] preferência de legenda não foi guardada (${sub})`);
+
   await page.goto(`${base}/#/movies`);
   await page.waitForTimeout(400);
   const focused = await page.evaluate(() => document.activeElement?.tagName);
