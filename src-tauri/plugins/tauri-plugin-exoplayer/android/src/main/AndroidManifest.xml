@@ -1,1 +1,4 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- O servidor local de torrent (127.0.0.1) é HTTP puro; o resto segue exigindo TLS. -->
+    <application android:networkSecurityConfig="@xml/cinehub_network_config" />
+</manifest>
