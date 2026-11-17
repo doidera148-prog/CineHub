@@ -51,6 +51,12 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         // Decodificador por hardware quando existir; se falhar, cai para o de software.
         val renderers = DefaultRenderersFactory(act).setEnableDecoderFallback(true)
         val player = ExoPlayer.Builder(act, renderers).build()
+        // Títulos com várias faixas de áudio (ex.: dublado e original): prefere português.
+        player.trackSelectionParameters = player.trackSelectionParameters
+            .buildUpon()
+            .setPreferredAudioLanguage("pt")
+            .setPreferredTextLanguage("pt")
+            .build()
 
         val view = PlayerView(act).apply {
             this.player = player
@@ -82,7 +88,7 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
 
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
-                errorMessage = "ExoPlayer não conseguiu tocar: ${error.errorCodeName}"
+                errorMessage = friendlyMessage(error)
                 dialog.dismiss()
             }
         })
@@ -106,5 +112,30 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         if (args.startMs > 0) player.seekTo(args.startMs)
         player.prepare()
         player.playWhenReady = true
+    }
+
+    /** Texto em português para o erro, com o código técnico entre parênteses (para suporte). */
+    private fun friendlyMessage(error: PlaybackException): String {
+        val detail = when (error.errorCode) {
+            PlaybackException.ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED ->
+                "conexão sem criptografia bloqueada pelo sistema"
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ->
+                "falha de rede ao baixar o vídeo. Verifique a conexão"
+            PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ->
+                "o servidor recusou o vídeo"
+            PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ->
+                "o vídeo não foi encontrado no servidor"
+            PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
+            PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED ->
+                "formato de contêiner não suportado ou arquivo danificado"
+            PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+            PlaybackException.ERROR_CODE_DECODING_FAILED,
+            PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,
+            PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES ->
+                "codec sem suporte neste aparelho"
+            else -> "erro de reprodução"
+        }
+        return "O Android não conseguiu tocar: $detail (${error.errorCodeName})"
     }
 }

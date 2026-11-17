@@ -456,7 +456,7 @@ pub async fn save_export(app: tauri::AppHandle, content: String) -> Result<Strin
     Ok(path.display().to_string())
 }
 
-fn srt_to_vtt(text: &str) -> String {
+pub(crate) fn srt_to_vtt(text: &str) -> String {
     let text = text.trim_start_matches('\u{feff}');
     if text.trim_start().starts_with("WEBVTT") {
         return text.to_string();

@@ -48,11 +48,17 @@ pub fn request_close() {
 fn set_escape_shortcut(app: &tauri::AppHandle, on: bool) {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
     let shortcuts = app.global_shortcut();
-    let _ = if on {
+    // Atalho global: enquanto o vídeo toca, o Esc é capturado pelo sistema inteiro.
+    // Se o registro falhar, o vídeo segue e o motivo fica no log (o Esc da janela ainda funciona).
+    let result = if on {
         shortcuts.register("Escape")
     } else {
         shortcuts.unregister("Escape")
     };
+    if let Err(e) = result {
+        let acao = if on { "registrar" } else { "liberar" };
+        eprintln!("aviso: não consegui {acao} o atalho Esc: {e}");
+    }
 }
 
 #[cfg(target_os = "android")]
@@ -61,18 +67,53 @@ fn set_escape_shortcut(_app: &tauri::AppHandle, _on: bool) {}
 #[tauri::command]
 pub async fn player_play(
     app: tauri::AppHandle,
+    state: tauri::State<'_, crate::AppState>,
     url: String,
     start_ms: Option<i64>,
+    subtitle_url: Option<String>,
 ) -> Result<PlayerResult, String> {
     if !is_playable_url(&url) {
         return Err("endereço de vídeo inválido".into());
     }
     let start = start_ms.unwrap_or(0).max(0);
+    // A legenda é baixada aqui (com as mesmas validações do resto do app) e entregue ao mpv
+    // como arquivo local. Se falhar, o vídeo toca sem legenda.
+    let subtitle = match subtitle_url.filter(|u| is_playable_url(u)) {
+        Some(sub) => fetch_subtitle_file(&app, &state, &sub).await,
+        None => None,
+    };
     let wid = embed_handle(&app);
     set_escape_shortcut(&app, true);
-    let result = tauri::async_runtime::spawn_blocking(move || imp::play(&url, start, wid)).await;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        imp::play(&url, start, wid, subtitle.as_deref())
+    })
+    .await;
     set_escape_shortcut(&app, false);
     result.map_err(|e| e.to_string())?
+}
+
+/// Baixa a legenda (até 2 MiB, só endereços públicos), converte para VTT e grava na pasta
+/// de dados do app. Devolve o caminho do arquivo, ou None se não der certo.
+async fn fetch_subtitle_file(
+    app: &tauri::AppHandle,
+    state: &crate::AppState,
+    url: &str,
+) -> Option<String> {
+    use tauri::Manager;
+    const MAX_SUBTITLE: usize = 2 * 1024 * 1024;
+    let bytes = match crate::addon::fetch_public_capped(&state.sub_http, url, MAX_SUBTITLE).await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            eprintln!("aviso: legenda indisponível para o player: {e}");
+            return None;
+        }
+    };
+    let dir = app.path().app_data_dir().ok()?.join("subtitles");
+    std::fs::create_dir_all(&dir).ok()?;
+    let path = dir.join("legenda.vtt");
+    let vtt = crate::commands::srt_to_vtt(&String::from_utf8_lossy(&bytes));
+    std::fs::write(&path, vtt).ok()?;
+    Some(path.display().to_string())
 }
 
 #[cfg(feature = "mpv")]
@@ -81,7 +122,12 @@ mod imp {
     use libmpv2::events::Event;
     use libmpv2::{mpv_end_file_reason, Mpv};
 
-    pub fn play(url: &str, start_ms: i64, wid: Option<i64>) -> Result<PlayerResult, String> {
+    pub fn play(
+        url: &str,
+        start_ms: i64,
+        wid: Option<i64>,
+        subtitle: Option<&str>,
+    ) -> Result<PlayerResult, String> {
         let mpv = Mpv::with_initializer(|init| {
             init.set_option("vo", "gpu")?;
             init.set_option("hwdec", "auto-safe")?;
@@ -110,6 +156,13 @@ mod imp {
             mpv.command("loadfile", &[url, "replace"])
         }
         .map_err(|e| format!("o mpv não abriu o vídeo: {e}"))?;
+
+        if let Some(path) = subtitle {
+            // Legenda em português, já convertida para VTT pelo backend. Falha aqui não impede o vídeo.
+            if let Err(e) = mpv.command("sub-add", &[path, "select", "CineHub", "pt"]) {
+                eprintln!("aviso: o mpv não carregou a legenda: {e}");
+            }
+        }
 
         let mut position = 0f64;
         let mut duration = 0f64;
@@ -275,7 +328,12 @@ mod win {
 mod imp {
     use super::PlayerResult;
 
-    pub fn play(_url: &str, _start_ms: i64, _wid: Option<i64>) -> Result<PlayerResult, String> {
+    pub fn play(
+        _url: &str,
+        _start_ms: i64,
+        _wid: Option<i64>,
+        _subtitle: Option<&str>,
+    ) -> Result<PlayerResult, String> {
         Err("player nativo não incluído nesta versão".into())
     }
 }

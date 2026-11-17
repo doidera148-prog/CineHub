@@ -57,6 +57,26 @@ function toast(msg) {
   toastTimer = setTimeout(() => toastEl.classList.add('hidden'), 4000);
 }
 
+// Indicador persistente de trabalho em andamento (ex.: abrir um torrent leva até 1 minuto).
+// Fica visível até a operação terminar, com o tempo decorrido; não depende de toque, então
+// funciona também com controle remoto de TV.
+const busyEl = $('#busy');
+function withBusy(text, promise) {
+  const started = Date.now();
+  const render = () => {
+    const secs = Math.floor((Date.now() - started) / 1000);
+    busyEl.innerHTML = `<span class="spinner" aria-hidden="true"></span><span>${esc(text)} <span class="muted small">${secs} s</span></span>`;
+  };
+  render();
+  busyEl.classList.remove('hidden');
+  const timer = setInterval(render, 1000);
+  return promise.finally(() => {
+    clearInterval(timer);
+    busyEl.classList.add('hidden');
+  });
+}
+const TORRENT_BUSY = 'Preparando torrent (pode levar até 1 minuto)';
+
 function askConfirm(msg, okLabel) {
   return new Promise((resolve) => {
     $('#confirm-msg').textContent = msg;
@@ -109,12 +129,14 @@ async function openTorrentSource(stream, label, id, meta, subs) {
   }
 
   try {
-    toast('Preparando torrent…');
-    const result = await call('torrent_open', {
-      magnet,
-      torrentBytes: null,
-      fileIndex: Number.isInteger(stream?.fileIndex) ? stream.fileIndex : null,
-    });
+    const result = await withBusy(
+      TORRENT_BUSY,
+      call('torrent_open', {
+        magnet,
+        torrentBytes: null,
+        fileIndex: Number.isInteger(stream?.fileIndex) ? stream.fileIndex : null,
+      }),
+    );
     const fixed = { ...stream, url: result.streamUrl, mimeType: result.mimeType, name: result.name || stream?.name || label };
     await play(fixed, label, id, meta, subs);
   } catch (err) {
@@ -122,14 +144,24 @@ async function openTorrentSource(stream, label, id, meta, subs) {
   }
 }
 
+// Reproduz um torrent recém-aberto pelo backend (magnet ou arquivo .torrent).
+async function playOpenedTorrent(result, fallbackName) {
+  const name = result.name || fallbackName;
+  const id = `torrent:${Date.now()}`;
+  const fake = { url: result.streamUrl, name, fileName: result.fileName, mimeType: result.mimeType };
+  await play(fake, name, id, { id, label: name, name, type: 'movie' }, []);
+}
+
 // ---------- Páginas ----------
 
 async function homePage(alive) {
   setView(`<h1>Início</h1><div id="rows">${skeleton()}${skeleton()}</div>`);
-  const [m, s] = await Promise.all([call('home', { kind: 'movie' }), call('home', { kind: 'series' })]);
+  // Um tipo que falha não derruba o outro: usa o que respondeu.
+  const [m, s] = await Promise.allSettled([call('home', { kind: 'movie' }), call('home', { kind: 'series' })]);
   if (!alive()) return;
+  const rowsOf = (r) => (r.status === 'fulfilled' ? r.value.rows : []);
   const cont = continueWatchingRow();
-  renderRows([...(cont ? [cont] : []), ...m.rows, ...s.rows], 'Nenhum catálogo disponível. Instale addons na aba Addons.');
+  renderRows([...(cont ? [cont] : []), ...rowsOf(m), ...rowsOf(s)], 'Nenhum catálogo disponível. Instale addons na aba Addons.');
 }
 
 async function catalogPage(kind, title, alive) {
@@ -337,21 +369,16 @@ async function addonsPage() {
           return;
         }
         const bytes = new Uint8Array(await file.arrayBuffer());
-        const result = await call('torrent_open', { magnet: null, torrentBytes: Array.from(bytes), fileIndex: null });
-        const streamUrl = result.streamUrl;
-        const fake = { url: streamUrl, name: result.name, fileName: result.fileName, mimeType: result.mimeType };
-        const playback = { id: `torrent:${Date.now()}`, label: result.name || file.name, name: result.name || file.name };
-        await play(fake, playback.label, playback.id, { ...playback, type: 'movie', name: playback.label }, []);
+        const result = await withBusy(TORRENT_BUSY, call('torrent_open', { magnet: null, torrentBytes: Array.from(bytes), fileIndex: null }));
+        await playOpenedTorrent(result, file.name);
         return;
       }
       if (!magnet) {
         toast('Cole um magnet ou selecione um .torrent.');
         return;
       }
-      const result = await call('torrent_open', { magnet, torrentBytes: null, fileIndex: null });
-      const fake = { url: result.streamUrl, name: result.name, fileName: result.fileName, mimeType: result.mimeType };
-      const playback = { id: `torrent:${Date.now()}`, label: result.name || 'Torrent', name: result.name || 'Torrent' };
-      await play(fake, playback.label, playback.id, { ...playback, type: 'movie', name: playback.label }, []);
+      const result = await withBusy(TORRENT_BUSY, call('torrent_open', { magnet, torrentBytes: null, fileIndex: null }));
+      await playOpenedTorrent(result, 'Torrent');
     } catch (err) {
       toast(err.message || String(err));
     }
@@ -503,7 +530,7 @@ function addonHtml(a) {
   const resources = (m.resources || []).map((r) => (typeof r === 'string' ? r : r.name)).join(', ');
   return `
     <div class="addon">
-      ${m.logo ? `<img src="${esc(m.logo)}" alt="">` : '<img alt="">'}
+      ${isWebUrl(m.logo) ? `<img src="${esc(m.logo)}" alt="" loading="lazy">` : '<img alt="">'}
       <div>
         <strong>${esc(m.name)}</strong> <span class="muted small">v${esc(m.version)}</span>
         <p class="muted small">${esc(m.description || '')}</p>
@@ -692,6 +719,7 @@ let current = null; // { id, label, meta } do que está tocando agora
 let playSeq = 0; // muda a cada fonte; legendas de fontes antigas são descartadas
 let blobUrls = [];
 let lastSave = 0;
+let resumeHandler = null; // retomada da posição salva no próximo loadedmetadata
 
 // Player nativo: ExoPlayer no Android, libmpv no desktop. Se o nativo falhar, usa o player web.
 // Se o nativo não estiver disponível (ex.: build sem a feature `mpv`), cai no player do navegador.
@@ -735,7 +763,10 @@ async function playNative(stream, label, id, meta, subs) {
   try {
     const command = IS_ANDROID ? 'plugin:exoplayer|play' : 'player_play';
     const args = { url: stream.url, startMs };
+    // Android: legenda como data: URI (o ExoPlayer carrega direto). Desktop: URL, que o
+    // backend baixa e entrega ao mpv como arquivo.
     if (IS_ANDROID) args.subtitle = await subtitleDataUri(stream, subs);
+    else args.subtitleUrl = pickSubtitles(stream, subs)[0]?.url ?? null;
     const res = await invoke(command, args);
     saveProgress(true, { t: (res?.positionMs || 0) / 1000, duration: (res?.durationMs || 0) / 1000 });
     return true;
@@ -769,10 +800,13 @@ async function play(stream, label, id, meta, subs) {
   for (const sub of pickSubtitles(stream, subs)) addSubtitle(sub.url, seq);
 
   const saved = store.get('progress', {})[id];
-  vjsPlayer.one('loadedmetadata', () => {
+  // Um único handler por vez: sem isso, cada vídeo novo empilha outro listener.
+  if (resumeHandler) vjsPlayer.off('loadedmetadata', resumeHandler);
+  resumeHandler = () => {
     if (seq !== playSeq) return;
     if (saved && saved.t > 5 && saved.t < vjsPlayer.duration() - 15) vjsPlayer.currentTime(saved.t);
-  });
+  };
+  vjsPlayer.one('loadedmetadata', resumeHandler);
 
   document.title = `${label} · CineHub`;
   showPlayer();
