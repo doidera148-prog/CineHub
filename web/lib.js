@@ -54,13 +54,16 @@
     return /dublad|dual|pt-?br|portugu/i.test(String(text || ''));
   }
 
-  // Ordena as fontes: as reproduzíveis primeiro, depois as de maior resolução, com dublagem
-  // em português na frente entre empates. A ordem original é mantida quando tudo empata.
+  // Ordena as fontes: fontes de torrent (infoHash/magnet, como as do Torrentio) vêm primeiro,
+  // depois as reproduzíveis, depois as de maior resolução, com dublagem em português na frente
+  // entre empates. A ordem original é mantida quando tudo empata.
   function sortStreams(list) {
     const score = (s) => {
       const text = `${s.name || ''} ${s.title || ''}`;
-      const playable = Boolean(s.url || s.externalUrl || s.infoHash || s.hash) ? 100 : 0;
-      return playable + qualityScore(text) * 2 + (isPortuguese(text) ? 1 : 0);
+      const hasLink = Boolean(s.url || s.externalUrl);
+      const torrent = !hasLink && Boolean(s.infoHash || s.hash) ? 1000 : 0;
+      const playable = hasLink || s.infoHash || s.hash ? 100 : 0;
+      return torrent + playable + qualityScore(text) * 2 + (isPortuguese(text) ? 1 : 0);
     };
     return list
       .map((s, i) => ({ s, i, score: score(s) }))

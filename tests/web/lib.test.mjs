@@ -65,6 +65,15 @@ test('dublagem em português desempata a favor, e a ordem original é mantida', 
   assert.deepEqual(out.map((s) => s.url), ['https://a/pt', 'https://a/eng', 'https://a/eng2']);
 });
 
+test('fontes de torrent vêm antes das de link direto, mesmo com resolução menor', () => {
+  const out = L.sortStreams([
+    { url: 'https://a/direto', title: '4K HDR' },
+    { infoHash: 'a'.repeat(40), title: '720p WEB' },
+    { infoHash: 'b'.repeat(40), title: '1080p BluRay' },
+  ]);
+  assert.deepEqual(out.map((s) => s.infoHash || s.url), ['b'.repeat(40), 'a'.repeat(40), 'https://a/direto']);
+});
+
 test('próximo episódio segue a ordem de temporada e episódio', () => {
   const videos = [
     { id: 'b:1:2', season: 1, episode: 2 },
