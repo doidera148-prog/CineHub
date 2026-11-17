@@ -67,7 +67,6 @@ async fn install_default_addon(handle: tauri::AppHandle) {
     }
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Esc global, só durante o vídeo (o player registra e solta o atalho). Não depende do foco.
 #[cfg(not(target_os = "android"))]
 fn desktop_shortcuts<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
@@ -86,6 +85,7 @@ fn desktop_shortcuts<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("desktop-shortcuts").build()
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
