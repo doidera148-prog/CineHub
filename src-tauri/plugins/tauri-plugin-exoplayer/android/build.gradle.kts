@@ -32,7 +32,7 @@ if (ffmpegExtension.exists()) {
 
 dependencies {
     if (ffmpegExtension.exists()) {
-        implementation(name = "media3-decoder-ffmpeg-1.4.1", ext = "aar")
+        implementation(mapOf("name" to "media3-decoder-ffmpeg-1.4.1", "ext" to "aar"))
     }
     api(project(":tauri-android"))
     implementation("androidx.core:core-ktx:1.13.1")
