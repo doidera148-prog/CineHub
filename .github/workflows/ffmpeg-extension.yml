@@ -72,8 +72,8 @@ jobs:
             "Extensão FFmpeg do AndroidX Media3 $MEDIA3_TAG (Apache-2.0)," \
             "com FFmpeg $FFMPEG_BRANCH compilado sem --enable-gpl (LGPL-2.1+)." \
             "Código: https://github.com/androidx/media e https://github.com/FFmpeg/FFmpeg" > "$NOTE"
-          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || \
-            gh release create "$RELEASE_TAG" --title "Extensão FFmpeg $MEDIA3_TAG" \
+          gh release view "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --title "Extensão FFmpeg $MEDIA3_TAG" \
               --notes "AAR da extensão FFmpeg do Media3 para o ExoPlayer do CineHub. Gerado pelo workflow ffmpeg-extension." \
               --prerelease
-          gh release upload "$RELEASE_TAG" "$AAR" "$NOTE" --clobber
+          gh release upload "$RELEASE_TAG" "$AAR" "$NOTE" -R "$GITHUB_REPOSITORY" --clobber
