@@ -77,8 +77,9 @@ mod imp {
         })
         .map_err(|e| format!("não consegui iniciar o mpv: {e}"))?;
 
-        // Esc também fecha o vídeo (além do q padrão do mpv).
+        // Esc e botão direito também fecham o vídeo (além do q padrão do mpv).
         let _ = mpv.command("keybind", &["ESC", "quit"]);
+        let _ = mpv.command("keybind", &["MBTN_RIGHT", "quit"]);
 
         if start_ms > 0 {
             let opts = format!("start={:.3}", start_ms as f64 / 1000.0);
@@ -156,6 +157,8 @@ mod win {
             cy: i32,
             flags: u32,
         ) -> Bool;
+        fn SetFocus(hwnd: Hwnd) -> Hwnd;
+        fn SetForegroundWindow(hwnd: Hwnd) -> Bool;
     }
 
     const SW_HIDE: i32 = 0;
@@ -195,6 +198,12 @@ mod win {
                 ShowWindow(handle as Hwnd, SW_HIDE);
             }
             hidden.push(handle);
+        }
+        // Foco no vídeo: sem isso, as teclas (Esc, Q) continuam indo para a webview escondida.
+        // SAFETY: video é o HWND do mpv (propriedade window-id).
+        unsafe {
+            SetForegroundWindow(video);
+            SetFocus(video);
         }
         // SAFETY: video é o HWND do mpv (propriedade window-id).
         unsafe {
