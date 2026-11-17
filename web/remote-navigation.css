@@ -51,6 +51,17 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   #player .player-box { width: 96vw; }
   #video { max-height: 90vh; }
 }
+/* Televisão (controle remoto, sem mouse nem toque): textos e botões maiores para a distância do sofá.
+   pointer: none só bate com aparelho sem ponteiro; celular e tablet usam pointer: coarse. */
+@media (min-width: 721px) and (max-width: 1499px) and (pointer: none) {
+  html { font-size: 18px; }
+  #nav-main a { font-size: 1rem; }
+  .title { font-size: 0.95rem; }
+  .row h2 { font-size: 1.35rem; }
+  .card { flex-basis: clamp(180px, 14vw, 230px); }
+  button, .btn-link, .primary-play { min-height: 52px; }
+  .billboard .btn-link { height: 3.4rem; font-size: 1.15rem; }
+}
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
