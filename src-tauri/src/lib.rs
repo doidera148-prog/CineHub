@@ -8,6 +8,7 @@ pub mod commands;
 pub mod diag;
 pub mod kodi;
 pub mod player;
+pub mod skip;
 pub mod store;
 pub mod torrent;
 
@@ -165,6 +166,7 @@ pub fn run() {
             diag::diagnostics_text,
             diag::save_diagnostics,
             player::player_play,
+            skip::skip_segments,
         ])
         .run(tauri::generate_context!())
         .expect("erro ao iniciar o CineHub");

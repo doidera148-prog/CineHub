@@ -103,6 +103,18 @@
 
   // Tipos de conteúdo do Stremio. "anime" tem episódios como as séries: mesma tela de temporadas,
   // mesmo caminho para fontes e para o próximo episódio. A chave é o tipo que o addon declara.
+  // Pular abertura, recapitulação e créditos. `segments` vem do backend, em segundos.
+  const SKIP_LABELS = { intro: 'Pular abertura', recap: 'Pular recapitulação', preview: 'Pular prévia', credits: 'Pular créditos' };
+  // Trecho que vale no instante t: some meio segundo antes do fim, para o botão não piscar
+  function activeSegment(segments, t) {
+    if (!Array.isArray(segments) || !Number.isFinite(t)) return null;
+    return segments.find((s) => s && t >= s.start && t < s.end - 0.5) || null;
+  }
+  // Teclas 0–9 pulam para 0–90% do vídeo; null se a tecla não for um dígito
+  function seekFraction(key, duration) {
+    if (!/^[0-9]$/.test(key) || !Number.isFinite(duration) || duration <= 0) return null;
+    return (Number(key) / 10) * duration;
+  }
   const SERIES_LIKE = ['series', 'anime'];
   function isSeriesLike(type) {
     return SERIES_LIKE.includes(str(type));
@@ -159,5 +171,8 @@
     torrentLanguage,
     nextEpisode,
     isPortuguese,
+    SKIP_LABELS,
+    activeSegment,
+    seekFraction,
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

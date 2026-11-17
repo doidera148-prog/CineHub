@@ -20,7 +20,13 @@ import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import android.os.Handler
+import android.os.Looper
+import android.view.Gravity
+import android.view.View
+import android.widget.Button
 import android.webkit.WebView
+import org.json.JSONArray
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 
@@ -30,6 +36,20 @@ class PlayArgs {
     var startMs: Long = 0
     /** Legenda VTT como data: URI (opcional). */
     var subtitle: String? = null
+    /** Trechos para pular, como JSON: [{"type":"intro","start":5,"end":90}, ...] (opcional). */
+    var segments: String? = null
+}
+
+/** Trecho a pular (abertura, recapitulação, créditos), em segundos. */
+private data class Skip(val kind: String, val start: Double, val end: Double) {
+    val label: String
+        get() = when (kind) {
+            "intro" -> "Pular abertura"
+            "recap" -> "Pular recapitulação"
+            "preview" -> "Pular prévia"
+            "credits" -> "Pular créditos"
+            else -> "Pular"
+        }
 }
 
 /** Player Android/Android TV em tela cheia, com controles Media3 acessíveis por toque e D-pad. */
@@ -92,13 +112,53 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
             setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
         }
         val dialog = Dialog(act, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
-        dialog.setContentView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+
+        // Pular abertura, recapitulação e créditos: um botão sobre o vídeo enquanto o trecho toca.
+        val skips = parseSkips(args.segments)
+        val handler = Handler(Looper.getMainLooper())
+        val density = act.resources.displayMetrics.density
+        var shownEnd: Double? = null
+        val skipButton = Button(act)
+        skipButton.visibility = View.GONE
+        skipButton.isAllCaps = false
+        skipButton.setOnClickListener {
+            val end = skipButton.tag as? Double
+            if (end != null) player.seekTo((end * 1000).toLong())
+            skipButton.visibility = View.GONE
+            shownEnd = null
+        }
+        val skipTick = object : Runnable {
+            override fun run() {
+                val t = player.currentPosition / 1000.0
+                val seg = skips.firstOrNull { t >= it.start && t < it.end - 0.5 }
+                val end = seg?.end
+                if (end != shownEnd) {
+                    shownEnd = end
+                    if (seg == null) {
+                        skipButton.visibility = View.GONE
+                    } else {
+                        skipButton.text = seg.label + " ▶"
+                        skipButton.tag = seg.end
+                        skipButton.visibility = View.VISIBLE
+                    }
+                }
+                handler.postDelayed(this, 500)
+            }
+        }
+        val frame = FrameLayout(act)
+        frame.addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        val buttonParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START)
+        val margin = (24 * density).toInt()
+        buttonParams.setMargins(margin, margin, 0, 0)
+        frame.addView(skipButton, buttonParams)
+        dialog.setContentView(frame, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
         var errorMessage: String? = null
         var answered = false
         fun answer() {
             if (answered) return
             answered = true
+            handler.removeCallbacks(skipTick)
             val position = player.currentPosition.coerceAtLeast(0L)
             val duration = player.duration.takeIf { it > 0L } ?: 0L
             view.player = null
@@ -118,6 +178,7 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         dialog.setOnDismissListener { answer() }
         dialog.show()
         view.requestFocus()
+        handler.post(skipTick)
 
         val item = MediaItem.Builder().setUri(args.url)
         args.subtitle?.takeIf { it.startsWith("data:text/vtt;base64,") }?.let { uri ->
@@ -133,6 +194,19 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         if (args.startMs > 0) player.seekTo(args.startMs)
         player.prepare()
         player.playWhenReady = true
+    }
+
+    private fun parseSkips(json: String?): List<Skip> {
+        if (json.isNullOrBlank()) return emptyList()
+        return try {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                Skip(o.getString("type"), o.getDouble("start"), o.getDouble("end"))
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
     }
 
     private fun friendlyMessage(error: PlaybackException): String {

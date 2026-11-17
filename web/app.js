@@ -469,6 +469,13 @@ function libraryPage() {
         <option value="off"${subPref() === 'off' ? ' selected' : ''}>Sem legenda</option>
       </select>
     </label>
+    <label class="prefrow small">Pular abertura e créditos
+      <select id="skip-pref">
+        <option value="on"${skipPref() ? ' selected' : ''}>Ligado</option>
+        <option value="off"${skipPref() ? '' : ' selected'}>Desligado</option>
+      </select>
+    </label>
+    <p class="muted small">Os tempos vêm de bases comunitárias (TheIntroDB e AniSkip). Desligue se não quiser que o título seja consultado nelas.</p>
     <label class="prefrow small">Tema
       <select id="theme-pref">
         <option value="system"${themePref() === 'system' ? ' selected' : ''}>Automático (do aparelho)</option>
@@ -486,6 +493,7 @@ function libraryPage() {
   $('#export-data').onclick = exportData;
   $('#export-diag').onclick = exportDiagnostics;
   $('#sub-lang').onchange = (e) => store.set('subLang', e.target.value);
+  $('#skip-pref').onchange = (e) => store.set('skipSegments', e.target.value);
   $('#theme-pref').onchange = (e) => {
     store.set('theme', e.target.value);
     applyTheme(e.target.value);
@@ -1364,7 +1372,7 @@ function describeError(e) {
 // Motivo da última falha do player nativo (mostrado se o player web também não tocar).
 let nativeFailure = null;
 
-async function playNative(stream, label, id, meta, subs) {
+async function playNative(stream, label, id, meta, subs, segments = []) {
   const saved = store.get('progress', {})[id];
   const startMs = saved && saved.t > 5 && !saved.watched ? saved.t * 1000 : 0;
   current = { id, label, meta, src: stream.url, mime: '' };
@@ -1376,6 +1384,8 @@ async function playNative(stream, label, id, meta, subs) {
     // backend baixa e entrega ao mpv como arquivo.
     if (IS_ANDROID) args.subtitle = await subtitleDataUri(stream, subs);
     else args.subtitleUrl = pickSubtitles(stream, subs)[0]?.url ?? null;
+    // Botão de pular no player nativo: tecla F12 (mpv, desktop) ou botão na tela (Android)
+    args.segments = IS_ANDROID ? JSON.stringify(segments) : segments;
     const res = await invoke(command, args);
     saveProgress(true, { t: (res?.positionMs || 0) / 1000, duration: (res?.durationMs || 0) / 1000 });
     return true;
@@ -1398,10 +1408,13 @@ async function play(stream, label, id, meta, subs) {
     return;
   }
   nativeFailure = null;
-  if (await playNative(stream, label, id, meta, subs)) return;
+  const segments = await skipSegmentsFor(id, meta);
+  if (await playNative(stream, label, id, meta, subs, segments)) return;
 
   saveProgress(true);
   const seq = ++playSeq;
+  skipSegs = segments;
+  hideSkip();
   current = { id, label, meta, src: stream.url, mime: stream.mimeType || '' };
 
   const src = { src: stream.url };
@@ -1480,6 +1493,79 @@ async function addSubtitle(url, seq) {
 
 // Progresso: salva no máximo a cada 5 s (e sempre ao pausar ou fechar), guardando os 50 mais recentes.
 // `pos` (em segundos) é usado pelo player nativo; sem ele, lê o player web.
+// ---- Pular abertura, recapitulação e créditos (tempos das bases comunitárias, consultados pelo backend)
+const skipPref = () => store.get('skipSegments', 'on') !== 'off';
+let skipSegs = [];
+let skipKey = null;
+let skipEnd = null;
+const skipBtn = $('#skip-seg');
+
+// Espera no máximo 3 s pelos tempos: sem resposta o vídeo toca normalmente, só sem o botão.
+async function skipSegmentsFor(id, meta) {
+  const mediaId = meta && (meta.seriesId || meta.id);
+  if (!skipPref() || !mediaId) return [];
+  const timeout = new Promise((resolve) => setTimeout(() => resolve({ segments: [] }), 3000));
+  try {
+    const res = await Promise.race([
+      call('skip_segments', { kind: meta.type || 'movie', id: mediaId, videoId: id }),
+      timeout,
+    ]);
+    return Array.isArray(res?.segments) ? res.segments : [];
+  } catch (_) {
+    return [];
+  }
+}
+function hideSkip() {
+  skipKey = null;
+  skipEnd = null;
+  skipBtn.classList.add('hidden');
+}
+function updateSkip() {
+  const seg = activeSegment(skipSegs, vjsPlayer.currentTime());
+  const key = seg ? `${seg.type}:${seg.end}` : null;
+  if (key === skipKey) return;
+  skipKey = key;
+  skipEnd = seg ? seg.end : null;
+  if (!seg) {
+    skipBtn.classList.add('hidden');
+    return;
+  }
+  skipBtn.textContent = `${SKIP_LABELS[seg.type] || 'Pular'} ▶`;
+  skipBtn.classList.remove('hidden');
+}
+skipBtn.onclick = () => {
+  if (skipEnd !== null) vjsPlayer.currentTime(skipEnd);
+  hideSkip();
+};
+
+// Atalhos do player: 0–9 pulam para 0–90% do vídeo; ? mostra a lista.
+document.addEventListener('keydown', (e) => {
+  if (player.classList.contains('hidden') || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+  if (e.key === '?') {
+    toast('0–9: pular para 0–90% do vídeo · ?: esta lista', 6000);
+    return;
+  }
+  const at = seekFraction(e.key, vjsPlayer.duration());
+  if (at !== null) {
+    e.preventDefault();
+    vjsPlayer.currentTime(at);
+  }
+});
+
+// Picture-in-picture: o vídeo segue numa janela flutuante enquanto o usuário usa outras telas.
+const pipBtn = $('#pip');
+const videoEl = $('#video');
+if (document.pictureInPictureEnabled && typeof videoEl.requestPictureInPicture === 'function') pipBtn.hidden = false;
+pipBtn.onclick = async () => {
+  try {
+    if (document.pictureInPictureElement) await document.exitPictureInPicture();
+    else await videoEl.requestPictureInPicture();
+  } catch (_) {
+    toast('Não foi possível abrir a janela flutuante neste aparelho.');
+  }
+};
+
 function saveProgress(force, pos) {
   if (!current) return;
   const now = Date.now();
@@ -1508,7 +1594,10 @@ function saveProgress(force, pos) {
   store.set('progress', Object.fromEntries(kept));
 }
 
-vjsPlayer.on('timeupdate', () => saveProgress(false));
+vjsPlayer.on('timeupdate', () => {
+  saveProgress(false);
+  updateSkip();
+});
 vjsPlayer.on('pause', () => saveProgress(true));
 // Terminou: marca como assistido (sai de "Continuar assistindo" e vira o selo nos cartazes)
 // e oferece o próximo episódio, quando há.
@@ -1584,6 +1673,7 @@ function closePlayer(fromHistory = false) {
   if (player.classList.contains('hidden')) return;
   // Esconde primeiro: se salvar o progresso falhar, o usuário ainda consegue sair do vídeo.
   player.classList.add('hidden');
+  hideSkip();
   try {
     saveProgress(true);
   } catch (e) {

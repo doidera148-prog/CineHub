@@ -7,6 +7,8 @@
 
 use serde::Serialize;
 
+use crate::skip::Segment;
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlayerResult {
@@ -71,6 +73,7 @@ pub async fn player_play(
     url: String,
     start_ms: Option<i64>,
     subtitle_url: Option<String>,
+    segments: Option<Vec<Segment>>,
 ) -> Result<PlayerResult, String> {
     if !is_playable_url(&url) {
         return Err("endereço de vídeo inválido".into());
@@ -83,9 +86,10 @@ pub async fn player_play(
         None => None,
     };
     let wid = embed_handle(&app);
+    let segments = segments.unwrap_or_default();
     set_escape_shortcut(&app, true);
     let result = tauri::async_runtime::spawn_blocking(move || {
-        imp::play(&url, start, wid, subtitle.as_deref())
+        imp::play(&url, start, wid, subtitle.as_deref(), &segments)
     })
     .await;
     set_escape_shortcut(&app, false);
@@ -119,14 +123,19 @@ async fn fetch_subtitle_file(
 #[cfg(feature = "mpv")]
 mod imp {
     use super::PlayerResult;
+    use crate::skip::{self, Segment};
     use libmpv2::events::Event;
     use libmpv2::{mpv_end_file_reason, Mpv};
+
+    /// Tecla que pula o trecho em andamento (abertura, recapitulação ou créditos).
+    const SKIP_KEY: &str = "F12";
 
     pub fn play(
         url: &str,
         start_ms: i64,
         wid: Option<i64>,
         subtitle: Option<&str>,
+        segments: &[Segment],
     ) -> Result<PlayerResult, String> {
         let mpv = Mpv::with_initializer(|init| {
             init.set_option("vo", "gpu")?;
@@ -169,6 +178,8 @@ mod imp {
 
         let mut position = 0f64;
         let mut duration = 0f64;
+        // Fim do trecho cuja tecla está ligada (None: nenhum trecho agora)
+        let mut bound_end: Option<f64> = None;
         let mut failed = false;
         // Dentro da janela do app: esconde os controles web e traz o vídeo para frente (Windows).
         #[cfg(all(windows, feature = "mpv"))]
@@ -197,6 +208,26 @@ mod imp {
             }
             if let Ok(d) = mpv.get_property::<f64>("duration") {
                 duration = d;
+            }
+            // Pular: ao entrar num trecho, avisa na tela e liga SKIP_KEY a um pulo para o fim dele.
+            // Ao sair, a tecla volta a não fazer nada.
+            let active = skip::active_segment(segments, position);
+            let end = active.map(|seg| seg.end);
+            if end != bound_end {
+                bound_end = end;
+                match active {
+                    Some(seg) => {
+                        let _ = mpv.command(
+                            "keybind",
+                            &[SKIP_KEY, &format!("seek {:.3} absolute", seg.end)],
+                        );
+                        let text = format!("{}: tecle {SKIP_KEY}", skip::label(&seg.kind));
+                        let _ = mpv.command("show-text", &[&text, "4000"]);
+                    }
+                    None => {
+                        let _ = mpv.command("keybind", &[SKIP_KEY, "ignore"]);
+                    }
+                }
             }
         }
 
@@ -336,6 +367,7 @@ mod imp {
         _start_ms: i64,
         _wid: Option<i64>,
         _subtitle: Option<&str>,
+        _segments: &[crate::skip::Segment],
     ) -> Result<PlayerResult, String> {
         Err("player nativo não incluído nesta versão".into())
     }

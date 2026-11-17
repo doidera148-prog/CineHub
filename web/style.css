@@ -287,6 +287,8 @@ button:disabled { opacity: 0.5; cursor: default; transform: none; }
   text-overflow: ellipsis;
 }
 .player-box { position: relative; }
+.skip-seg { position: absolute; left: 1rem; bottom: 4rem; z-index: 2; }
+.pip { right: 3.6rem; font-size: 1.15rem; }
 
 h1 { margin: 0 0 1rem; font-size: 1.75rem; }
 h2 { font-size: 1.25rem; }

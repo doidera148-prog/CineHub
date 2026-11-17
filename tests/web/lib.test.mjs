@@ -152,3 +152,22 @@ test('ordenação das fontes: maior qualidade e português primeiro', () => {
   assert.equal(L.sortStreamsBy(list, 'pt').map((s) => s.title).join('|'), 'c 1080p dublado|a 720p|b 4K');
   assert.equal(L.sortStreamsBy(list, 'default'), list);
 });
+
+test('o trecho ativo vale até meio segundo antes do fim', () => {
+  const segs = [{ type: 'intro', start: 5, end: 90 }, { type: 'credits', start: 1300, end: 1400 }];
+  assert.equal(L.activeSegment(segs, 4.9), null);
+  assert.equal(L.activeSegment(segs, 5).type, 'intro');
+  assert.equal(L.activeSegment(segs, 89.7), null);
+  assert.equal(L.activeSegment(segs, 1350).type, 'credits');
+  assert.equal(L.activeSegment(undefined, 10), null);
+  assert.equal(L.activeSegment(segs, NaN), null);
+});
+
+test('teclas 0–9 pulam para 0–90% do vídeo', () => {
+  assert.equal(L.seekFraction('0', 1000), 0);
+  assert.equal(L.seekFraction('5', 1000), 500);
+  assert.equal(L.seekFraction('9', 1000), 900);
+  assert.equal(L.seekFraction('a', 1000), null);
+  assert.equal(L.seekFraction('5', NaN), null);
+  assert.equal(L.seekFraction('5', 0), null);
+});
