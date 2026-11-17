@@ -472,3 +472,7 @@ body { font-size: 1rem; }
 /* Preferências da biblioteca (ex.: idioma das legendas) */
 .prefrow { display: flex; align-items: center; gap: 8px; margin: 4px 0 12px; color: var(--muted); }
 .prefrow select { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font: inherit; }
+
+/* Escolha de episódio/idioma dentro de um torrent */
+.torrent-pick .tp-list { list-style: none; padding: 0; margin: 12px 0; max-height: 50vh; overflow: auto; display: grid; gap: 8px; }
+.torrent-pick .tp-item { width: 100%; text-align: left; }

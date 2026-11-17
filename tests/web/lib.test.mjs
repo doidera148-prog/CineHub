@@ -83,6 +83,13 @@ test('dublagem em português vem antes de torrent e de resolução maior', () =>
   assert.deepEqual(out.map((s) => s.infoHash || s.url), ['b'.repeat(40), 'https://a/pt-direto', 'a'.repeat(40)]);
 });
 
+test('idioma do arquivo de torrent sai do nome', () => {
+  assert.equal(L.torrentLanguage('Show.S01E02.1080p.DUBLADO.mkv'), 'pt');
+  assert.equal(L.torrentLanguage('Movie.2020.PT-BR.mkv'), 'pt');
+  assert.equal(L.torrentLanguage('Show.S01E02.English.mkv'), 'en');
+  assert.equal(L.torrentLanguage('Show.S01E02.mkv'), 'other');
+});
+
 test('próximo episódio segue a ordem de temporada e episódio', () => {
   const videos = [
     { id: 'b:1:2', season: 1, episode: 2 },

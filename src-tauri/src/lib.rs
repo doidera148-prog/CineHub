@@ -155,6 +155,7 @@ pub fn run() {
             commands::streams,
             commands::subtitle,
             commands::torrent_open,
+            commands::torrent_select_file,
             commands::save_export,
             commands::write_export,
             kodi::kodi_addons,

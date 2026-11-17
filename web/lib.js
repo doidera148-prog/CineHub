@@ -72,6 +72,14 @@
       .map((x) => x.s);
   }
 
+  // Idioma do áudio pelo nome do arquivo de um torrent: 'pt', 'en' ou 'other'.
+  function torrentLanguage(name) {
+    const t = String(name || '');
+    if (isPortuguese(t) || /\bpt\b/i.test(t)) return 'pt';
+    if (/english|\beng\b|ingl[eê]s/i.test(t)) return 'en';
+    return 'other';
+  }
+
   // Próximo episódio na ordem (temporada, episódio). Null quando é o último.
   function nextEpisode(videos, currentId) {
     const eps = (Array.isArray(videos) ? videos : [])
@@ -104,6 +112,7 @@
     cleanProgress,
     progressPercent,
     sortStreams,
+    torrentLanguage,
     nextEpisode,
     isPortuguese,
   };

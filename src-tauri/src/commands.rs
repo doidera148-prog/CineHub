@@ -410,25 +410,52 @@ pub async fn torrent_open(
         (Some(m), None) => {
             let p = engine.add_magnet(m, file_index).await?;
             Ok(json!({
+                "token": p.token,
                 "streamUrl": p.stream_url,
                 "name": p.name,
                 "fileName": p.file_name,
                 "mimeType": p.mime_type,
                 "sizeBytes": p.size_bytes,
+                "videos": p.videos,
             }))
         }
         (None, Some(bytes)) => {
             let p = engine.add_torrent_file(bytes, file_index).await?;
             Ok(json!({
+                "token": p.token,
                 "streamUrl": p.stream_url,
                 "name": p.name,
                 "fileName": p.file_name,
                 "mimeType": p.mime_type,
                 "sizeBytes": p.size_bytes,
+                "videos": p.videos,
             }))
         }
         _ => Err("forneça exatamente um magnet ou um arquivo .torrent".into()),
     }
+}
+
+/// Troca o arquivo de vídeo de um torrent já aberto (episódio ou idioma escolhido pelo usuário).
+#[tauri::command]
+pub async fn torrent_select_file(
+    state: State<'_, AppState>,
+    token: String,
+    file_index: usize,
+) -> Result<Value, String> {
+    let engine = state
+        .torrent
+        .as_ref()
+        .ok_or("o motor de torrent não está disponível neste aparelho")?;
+    let p = engine.select_file(&token, file_index).await?;
+    Ok(json!({
+        "token": p.token,
+        "streamUrl": p.stream_url,
+        "name": p.name,
+        "fileName": p.file_name,
+        "mimeType": p.mime_type,
+        "sizeBytes": p.size_bytes,
+        "videos": p.videos,
+    }))
 }
 
 /// Tamanho máximo de um backup da biblioteca (2 MiB).

@@ -40,6 +40,26 @@ struct StreamFile {
     file_index: usize,
     size: u64,
     mime_type: &'static str,
+    videos: Vec<Candidate>,
+}
+
+/// Um arquivo de vídeo dentro do torrent, para a interface escolher episódio ou idioma.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoFile {
+    pub index: usize,
+    pub name: String,
+    pub size_bytes: u64,
+}
+
+impl From<&Candidate> for VideoFile {
+    fn from(c: &Candidate) -> Self {
+        Self {
+            index: c.index,
+            name: c.name.clone(),
+            size_bytes: c.size,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -60,11 +80,13 @@ pub struct TorrentEngine {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TorrentPlayback {
+    pub token: String,
     pub stream_url: String,
     pub name: String,
     pub file_name: String,
     pub mime_type: String,
     pub size_bytes: u64,
+    pub videos: Vec<VideoFile>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -81,6 +103,7 @@ struct Plan {
     file_name: String,
     size: u64,
     mime: &'static str,
+    videos: Vec<Candidate>,
 }
 
 impl TorrentEngine {
@@ -233,16 +256,50 @@ impl TorrentEngine {
                     file_index: plan.file_index,
                     size: plan.size,
                     mime_type: plan.mime,
+                    videos: plan.videos.clone(),
                 },
             );
         }
 
         Ok(TorrentPlayback {
             stream_url: format!("{}/stream/{token}", self.base_url),
+            token,
             name: plan.name,
             file_name: plan.file_name,
             mime_type: plan.mime.into(),
             size_bytes: plan.size,
+            videos: plan.videos.iter().map(VideoFile::from).collect(),
+        })
+    }
+
+    /// Troca o arquivo que toca dentro de um torrent já aberto (outro episódio, outro idioma).
+    pub async fn select_file(&self, token: &str, index: usize) -> Result<TorrentPlayback, String> {
+        const GONE: &str = "o torrent não está mais aberto; abra de novo";
+        let (torrent, videos) = {
+            let files = self.files.read().await;
+            let entry = files.get(token).ok_or(GONE)?;
+            (entry.torrent.clone(), entry.videos.clone())
+        };
+        let chosen = pick_video(&videos, Some(index))?;
+        let session = self.session().await?;
+        session
+            .update_only_files(&torrent, &HashSet::from([chosen.index]))
+            .await
+            .map_err(|e| format!("não foi possível selecionar o arquivo: {e:#}"))?;
+        let mut files = self.files.write().await;
+        let entry = files.get_mut(token).ok_or(GONE)?;
+        entry.file_index = chosen.index;
+        entry.size = chosen.size;
+        entry.mime_type = chosen.mime;
+        Ok(TorrentPlayback {
+            // O índice na URL faz o player recarregar o arquivo novo, e não reaproveitar o antigo.
+            stream_url: format!("{}/stream/{token}?file={}", self.base_url, chosen.index),
+            token: token.to_string(),
+            name: torrent.name().unwrap_or_else(|| "Torrent".into()),
+            file_name: chosen.name.clone(),
+            mime_type: chosen.mime.into(),
+            size_bytes: chosen.size,
+            videos: videos.iter().map(VideoFile::from).collect(),
         })
     }
 }
@@ -262,7 +319,8 @@ async fn prepare(
                 .collect::<Vec<_>>()
         })
         .map_err(|e| format!("metadados do torrent indisponíveis: {e:#}"))?;
-    let chosen = pick_video(&video_candidates(files), requested)?;
+    let videos = video_candidates(files);
+    let chosen = pick_video(&videos, requested)?;
     session
         .update_only_files(handle, &HashSet::from([chosen.index]))
         .await
@@ -273,6 +331,7 @@ async fn prepare(
         file_name: chosen.name,
         size: chosen.size,
         mime: chosen.mime,
+        videos,
     })
 }
 

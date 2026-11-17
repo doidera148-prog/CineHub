@@ -122,7 +122,7 @@ function askConfirm(msg, okLabel) {
 }
 
 // Funções puras (URLs seguras, ordenação de fontes, próximo episódio) vêm de lib.js, testadas com node.
-const { isWebUrl, cssUrl, str, num, cleanFav, cleanProgress, progressPercent, sortStreams, nextEpisode } = window.CineHubLib;
+const { isWebUrl, cssUrl, str, num, cleanFav, cleanProgress, progressPercent, sortStreams, nextEpisode, torrentLanguage } = window.CineHubLib;
 
 // Abre um link externo no navegador do aparelho (window.open não funciona no WebView do Android).
 async function openExternal(url) {
@@ -163,7 +163,8 @@ async function openTorrentSource(stream, label, id, meta, subs) {
         fileIndex: Number.isInteger(stream?.fileIndex) ? stream.fileIndex : null,
       }),
     );
-    const fixed = { ...stream, url: result.streamUrl, mimeType: result.mimeType, name: result.name || stream?.name || label };
+    const chosen = await pickTorrentVideo(result);
+    const fixed = { ...stream, url: chosen.streamUrl, mimeType: chosen.mimeType, name: chosen.name || stream?.name || label };
     await play(fixed, label, id, meta, subs);
   } catch (err) {
     logEvent('WARN', `abrir torrent falhou: ${err.message || String(err)}`);
@@ -171,8 +172,67 @@ async function openTorrentSource(stream, label, id, meta, subs) {
   }
 }
 
+// Torrent com vários vídeos (episódios ou versões em idiomas diferentes): deixa o usuário escolher.
+// Devolve o resultado do arquivo escolhido, ou o padrão se ele cancelar.
+function pickTorrentVideo(result) {
+  const videos = Array.isArray(result?.videos) ? result.videos : [];
+  if (videos.length < 2 || !result.token) return Promise.resolve(result);
+  const LANG = { pt: 'Português', en: 'Inglês', other: 'Outros' };
+  const present = new Set(videos.map((v) => torrentLanguage(v.name)));
+  const langs = ['pt', 'en', 'other'].filter((l) => present.has(l));
+  const size = (bytes) => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`);
+  const dlg = document.createElement('dialog');
+  dlg.className = 'torrent-pick';
+  dlg.setAttribute('aria-labelledby', 'tp-title');
+  dlg.innerHTML = `<form method="dialog" class="dialog-box">
+    <h2 id="tp-title">Escolha o arquivo</h2>
+    ${langs.length > 1 ? `<label class="small">Idioma <select id="tp-lang">
+      <option value="all">Todos</option>${langs.map((l) => `<option value="${l}">${LANG[l]}</option>`).join('')}
+    </select></label>` : ''}
+    <ul id="tp-list" class="tp-list"></ul>
+    <div class="dialog-actions"><button value="cancel" class="chip">Cancelar</button></div>
+  </form>`;
+  document.body.append(dlg);
+  return new Promise((resolve) => {
+    let chosen = null;
+    const list = dlg.querySelector('#tp-list');
+    const select = dlg.querySelector('#tp-lang');
+    // Começa no português, quando o torrent tem.
+    if (select) select.value = present.has('pt') ? 'pt' : 'all';
+    const fill = () => {
+      const lang = select ? select.value : 'all';
+      list.innerHTML = '';
+      for (const v of videos.filter((x) => lang === 'all' || torrentLanguage(x.name) === lang)) {
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'chip tp-item';
+        btn.textContent = `${v.name.split(/[\\/]/).pop()} · ${size(v.sizeBytes)}`;
+        btn.onclick = async () => {
+          btn.disabled = true;
+          try {
+            chosen = await call('torrent_select_file', { token: result.token, fileIndex: v.index });
+            dlg.close();
+          } catch (err) {
+            btn.disabled = false;
+            logEvent('WARN', `escolher arquivo do torrent falhou: ${err.message || String(err)}`);
+            toast(err.message || String(err));
+          }
+        };
+        li.append(btn);
+        list.append(li);
+      }
+    };
+    if (select) select.onchange = fill;
+    fill();
+    dlg.addEventListener('close', () => { dlg.remove(); resolve(chosen || result); }, { once: true });
+    dlg.showModal();
+  });
+}
+
 // Reproduz um torrent recém-aberto pelo backend (magnet ou arquivo .torrent).
-async function playOpenedTorrent(result, fallbackName) {
+async function playOpenedTorrent(input, fallbackName) {
+  const result = await pickTorrentVideo(input);
   const name = result.name || fallbackName;
   const id = `torrent:${Date.now()}`;
   const fake = { url: result.streamUrl, name, fileName: result.fileName, mimeType: result.mimeType };
