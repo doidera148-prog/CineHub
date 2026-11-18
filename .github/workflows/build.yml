@@ -315,11 +315,11 @@ jobs:
           "$ANDROID_HOME/emulator/emulator" -avd cinehub-tv -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect &
           adb wait-for-device
           for attempt in $(seq 1 60); do
-            booted=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\\r')
+            booted=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
             [ "$booted" = "1" ] && break
             sleep 5
           done
-          [ "$(adb shell getprop sys.boot_completed | tr -d '\\r')" = "1" ] || { echo "Emulador Android TV não iniciou"; exit 1; }
+          [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ] || { echo "Emulador Android TV não iniciou"; exit 1; }
           apk=$(find signed -type f -iname '*x86_64*.apk' -print -quit)
           test -n "$apk" || { echo "APK x86_64 não foi gerado"; exit 1; }
           adb install -r "$apk"
