@@ -154,6 +154,13 @@ mod imp {
         let mpv = Mpv::with_initializer(|init| {
             init.set_option("vo", "gpu")?;
             init.set_option("hwdec", "auto-safe")?;
+            // O OSC do mpv fornece controles clicáveis enquanto a WebView ainda não pode
+            // ser composta sobre a swapchain DirectComposition.
+            init.set_option("osc", "yes")?;
+            init.set_option("input-default-bindings", "yes")?;
+            init.set_option("input-vo-keyboard", "yes")?;
+            init.set_option("osd-level", "1")?;
+            init.set_option("border", "no")?;
             // Sem yt-dlp: a URL é sempre um vídeo direto vindo de um addon ou do torrent local.
             init.set_option("ytdl", "no")?;
             // Títulos com várias faixas: prefere áudio e legenda em português.
@@ -171,7 +178,14 @@ mod imp {
         })
         .map_err(|e| format!("não consegui iniciar o mpv: {e}"))?;
 
-        // Esc e botão direito também fecham o vídeo (além do q padrão do mpv).
+        // Controles de teclado explícitos, além do OSC clicável exibido pelo mpv.
+        let _ = mpv.command("keybind", &["SPACE", "cycle pause"]);
+        let _ = mpv.command("keybind", &["LEFT", "seek -10"]);
+        let _ = mpv.command("keybind", &["RIGHT", "seek 10"]);
+        let _ = mpv.command("keybind", &["UP", "add volume 5"]);
+        let _ = mpv.command("keybind", &["DOWN", "add volume -5"]);
+        let _ = mpv.command("keybind", &["M", "cycle mute"]);
+        let _ = mpv.command("keybind", &["F", "cycle fullscreen"]);
         let _ = mpv.command("keybind", &["ESC", "quit"]);
         let _ = mpv.command("keybind", &["MBTN_RIGHT", "quit"]);
 
