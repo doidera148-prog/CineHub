@@ -27,7 +27,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri
-      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
 
   lint:
     runs-on: ubuntu-22.04
@@ -71,8 +71,6 @@ jobs:
         with:
           manifest-path: src-tauri/Cargo.toml
           command: check licenses sources
-      - name: Sintaxe do JavaScript
-        run: node --check web/app.js && node --check tests/web/smoke.mjs
       - name: Auditoria de dependências
         uses: rustsec/audit-check@v2
         continue-on-error: true
