@@ -130,6 +130,7 @@ async fn proxy_request(
         sessions.get(&token).cloned()
     }.ok_or((StatusCode::NOT_FOUND, "sessão expirada".into()))?;
 
+    let original_origin = target.url.origin();
     let mut url = target.url;
     let mut response = None;
     for _ in 0..=MAX_REDIRECTS {
@@ -143,7 +144,7 @@ async fn proxy_request(
         };
         for (name, value) in &target.headers {
             let sensitive = *name == header::AUTHORIZATION || *name == header::COOKIE;
-            if !sensitive || url.origin() == target.url.origin() {
+            if !sensitive || url.origin() == original_origin {
                 request = request.header(name, value);
             }
         }
