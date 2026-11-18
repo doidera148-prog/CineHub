@@ -64,11 +64,13 @@ O plugin `tauri-plugin-exoplayer` usa AndroidX Media3/ExoPlayer em tela cheia. O
 
 ### Windows
 
-No Windows, `app.js` identifica o sistema e não tenta iniciar `player_play`/libmpv. A reprodução segue diretamente pelo Video.js/HTML5 dentro do WebView2, mantendo o vídeo e os controles na janela principal do CineHub. O workflow desktop não prepara DLL de libmpv nem habilita a feature `mpv` para Windows.
+No Windows, `app.js` usa `player_play` para iniciar libmpv com aceleração de hardware automática segura. A janela filha do mpv é posicionada acima da WebView, mas não deve ocultar toda a interface: `player_set_geometry` aplica uma região Win32 limitada à caixa do vídeo e subtrai recortes retangulares para o título e o botão Fechar do CineHub. Como regiões Win32 afetam pintura e hit-testing, a WebView permanece visível e recebe cliques nos recortes. A geometria é calculada em pixels físicos a partir de `getBoundingClientRect()` e atualizada em redimensionamentos.
+
+Esta é a primeira etapa do protótipo inspirado no Ventic. Os controles de transporte continuam sendo fornecidos pelo OSC do mpv; a integração de comandos, faixas de áudio/legenda e controles HTML completos será ampliada após validar a composição em Windows real. Se a técnica de recortes apresentar instabilidade, a alternativa a comparar é uma janela de overlay separada, como a arquitetura estudada no OpenPlayer. Android e Android TV continuam usando ExoPlayer e não passam por esse caminho.
 
 ### Linux e macOS
 
-A interface usa Video.js/WebView quando o player nativo não está habilitado. O módulo `player.rs` permanece no backend como integração opcional com libmpv para compilações que habilitem explicitamente a feature `mpv`; isso não faz parte do build padrão Windows.
+A interface usa Video.js/WebView quando o player nativo não está habilitado. O módulo `player.rs` também oferece integração opcional com libmpv em compilações específicas; o build padrão para Linux e macOS continua usando Video.js/WebView.
 
 ### WebView
 
@@ -89,7 +91,7 @@ A integração em `kodi.rs` e `web/kodi.js` usa JSON-RPC HTTP para conectar a um
 ## Testes e automação
 
 - `src-tauri/tests/addon_integration.rs`: testes de integração com um addon HTTP falso.
-- `tests/web/`: testes de fumaça da interface com Playwright/Chromium, incluindo um cenário Windows (user-agent Windows) que verifica o caminho Video.js/HTML5, proxy de mídia, solicitação de legenda e ausência de chamada ao player nativo. Esse cenário valida a integração da interface com APIs simuladas; não comprova decodificação de codecs nem reprodução real no WebView2 do Windows.
+- `tests/web/`: testes de fumaça da interface com Playwright/Chromium, incluindo um cenário Windows (user-agent Windows) que verifica a chamada a libmpv, a geometria da superfície nativa e os recortes de controles HTML com APIs simuladas. Esse cenário valida a integração da interface; não comprova composição visual, decodificação de codecs nem reprodução real no Windows.
 - `.github/workflows/build.yml`: testes Rust, lint, smoke web, builds desktop e Android e publicação de releases.
 - `.github/workflows/cleanup-actions.yml`: limpeza semanal de execuções concluídas do GitHub Actions com mais de 30 dias; permite execução manual com retenção configurável (1–365 dias) e simulação sem exclusão.
 
