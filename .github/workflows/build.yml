@@ -94,6 +94,9 @@ jobs:
       - name: Teste de fumaça da interface
         working-directory: tests/web
         run: npm test
+      - name: Testes de navegação por controle remoto (D-pad)
+        working-directory: tests/web
+        run: node remote-navigation.test.mjs
 
   desktop:
     strategy:
