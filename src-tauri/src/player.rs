@@ -5,9 +5,32 @@
 //! Só funciona quando o app é compilado com a feature `mpv` (que exige libmpv instalada).
 //! Sem a feature, o comando responde com erro e a interface usa o player do navegador.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::skip::Segment;
+
+/// Área retangular da interface web que deve permanecer visível sobre o vídeo.
+/// Coordenadas relativas à caixa do player, em pixels físicos do Windows.
+#[derive(Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlayerCutout {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[tauri::command]
+pub fn player_set_geometry(x: i32, y: i32, width: u32, height: u32, cutouts: Vec<PlayerCutout>) {
+    #[cfg(all(windows, feature = "mpv"))]
+    win::set_shape(x, y, width, height, &cutouts);
+    #[cfg(not(all(windows, feature = "mpv")))]
+    let _ = (x, y, width, height, cutouts);
+}
+
+#[tauri::command]
+pub fn player_close() {
+    request_close();
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -219,7 +242,6 @@ mod imp {
         let mut failed = false;
         // Dentro da janela do app: esconde os controles web e traz o vídeo para frente (Windows).
         #[cfg(all(windows, feature = "mpv"))]
-        let mut hidden: Vec<usize> = Vec::new();
         #[cfg(all(windows, feature = "mpv"))]
         let mut embedded = false;
         loop {
@@ -235,7 +257,7 @@ mod imp {
             if let (Some(parent), false) = (wid, embedded) {
                 if let Ok(video) = mpv.get_property::<i64>("window-id") {
                     embedded = true;
-                    hidden = super::win::take_over(parent, video);
+                    super::win::take_over(parent, video);
                 }
             }
             // Guarda a última posição conhecida: depois do fim do arquivo as propriedades não existem mais.
@@ -268,7 +290,7 @@ mod imp {
         }
 
         #[cfg(all(windows, feature = "mpv"))]
-        super::win::restore(&hidden);
+        super::win::restore();
 
         if failed {
             return Err("o mpv não conseguiu tocar este vídeo".into());
@@ -291,8 +313,10 @@ mod win {
 
     #[link(name = "user32")]
     extern "system" {
-        fn EnumChildWindows(parent: Hwnd, callback: EnumProc, lparam: isize) -> Bool;
-        fn ShowWindow(hwnd: Hwnd, cmd: i32) -> Bool;
+        fn CreateRectRgn(left: i32, top: i32, right: i32, bottom: i32) -> Hwnd;
+        fn CombineRgn(dest: Hwnd, src1: Hwnd, src2: Hwnd, mode: i32) -> i32;
+        fn DeleteObject(object: Hwnd) -> Bool;
+        fn SetWindowRgn(hwnd: Hwnd, region: Hwnd, redraw: Bool) -> i32;
         fn SetWindowPos(
             hwnd: Hwnd,
             after: Hwnd,
@@ -308,12 +332,11 @@ mod win {
     }
 
     const WM_CLOSE: u32 = 0x0010;
-    const SW_HIDE: i32 = 0;
-    const SW_SHOW: i32 = 5;
     const HWND_TOP: Hwnd = std::ptr::null_mut();
     const SWP_NOSIZE: u32 = 0x0001;
     const SWP_NOMOVE: u32 = 0x0002;
     const SWP_SHOWWINDOW: u32 = 0x0040;
+    const RGN_DIFF: i32 = 4;
 
     /// HWND do vídeo embutido enquanto ele toca (0 = nenhum).
     pub static VIDEO: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
@@ -329,69 +352,54 @@ mod win {
         }
     }
 
-    unsafe extern "system" fn collect(hwnd: Hwnd, lparam: isize) -> Bool {
-        // SAFETY: lparam aponta para o Vec criado em `take_over`, que vive até o retorno de EnumChildWindows.
-        let list = &mut *(lparam as *mut Vec<usize>);
-        list.push(hwnd as usize);
-        1
-    }
-
-    /// Esconde os filhos da janela principal (a webview) exceto o vídeo, e traz o vídeo para frente.
-    /// Devolve os handles escondidos, para `restore`.
-    pub fn take_over(parent: i64, video: i64) -> Vec<usize> {
+    /// Mantém o mpv acima da WebView sem esconder os controles HTML.
+    pub fn take_over(_parent: i64, video: i64) {
         let video = video as usize as Hwnd;
         VIDEO.store(video as usize as isize, std::sync::atomic::Ordering::SeqCst);
-        let mut children: Vec<usize> = Vec::new();
-        // SAFETY: parent é o HWND da janela principal; collect só lê o ponteiro passado.
-        unsafe {
-            EnumChildWindows(
-                parent as usize as Hwnd,
-                collect,
-                &mut children as *mut Vec<usize> as isize,
-            );
-        }
-        let mut hidden = Vec::new();
-        for handle in children {
-            if handle == video as usize {
-                continue;
-            }
-            // SAFETY: handles vieram de EnumChildWindows nesta mesma chamada.
-            unsafe {
-                ShowWindow(handle as Hwnd, SW_HIDE);
-            }
-            hidden.push(handle);
-        }
-        // Foco no vídeo: sem isso, as teclas (Esc, Q) continuam indo para a webview escondida.
-        // SAFETY: video é o HWND do mpv (propriedade window-id).
+        // SAFETY: video é o HWND retornado pelo próprio libmpv.
         unsafe {
             SetForegroundWindow(video);
             SetFocus(video);
+            SetWindowPos(video, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
         }
-        // SAFETY: video é o HWND do mpv (propriedade window-id).
-        unsafe {
-            SetWindowPos(
-                video,
-                HWND_TOP,
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
-            );
-        }
-        hidden
     }
 
-    /// Mostra de novo os controles web escondidos por `take_over`.
-    pub fn restore(hidden: &[usize]) {
-        VIDEO.store(0, std::sync::atomic::Ordering::SeqCst);
-        for handle in hidden {
-            // SAFETY: handles escondidos por take_over; podem já ter sido destruídos, o que só faz ShowWindow falhar.
-            unsafe {
-                ShowWindow(*handle as Hwnd, SW_SHOW);
+    /// Recorta a janela nativa para a caixa de vídeo e subtrai as áreas dos
+    /// controles HTML. A região Win32 afeta desenho e hit-testing.
+    pub fn set_shape(x: i32, y: i32, width: u32, height: u32, cutouts: &[super::PlayerCutout]) {
+        let video = VIDEO.load(std::sync::atomic::Ordering::SeqCst);
+        if video == 0 || width == 0 || height == 0 { return; }
+        // SAFETY: os handles de região são criados e liberados nesta função.
+        unsafe {
+            let right_edge = x.saturating_add(width.min(i32::MAX as u32) as i32);
+            let bottom_edge = y.saturating_add(height.min(i32::MAX as u32) as i32);
+            let region = CreateRectRgn(x, y, right_edge, bottom_edge);
+            if region.is_null() { return; }
+            for cutout in cutouts {
+                let left = x.saturating_add(cutout.x).max(x);
+                let top = y.saturating_add(cutout.y).max(y);
+                let right = left.saturating_add(cutout.width.min(i32::MAX as u32) as i32).min(right_edge);
+                let bottom = top.saturating_add(cutout.height.min(i32::MAX as u32) as i32).min(bottom_edge);
+                if right <= left || bottom <= top { continue; }
+                let hole = CreateRectRgn(left, top, right, bottom);
+                if !hole.is_null() {
+                    CombineRgn(region, region, hole, RGN_DIFF);
+                    DeleteObject(hole);
+                }
             }
+            if SetWindowRgn(video as usize as Hwnd, region, 1) == 0 { DeleteObject(region); }
         }
     }
+
+    /// Remove o recorte ao encerrar a reprodução.
+    pub fn restore() {
+        let video = VIDEO.swap(0, std::sync::atomic::Ordering::SeqCst);
+        if video != 0 {
+            // SAFETY: região nula restaura a forma retangular padrão da janela.
+            unsafe { SetWindowRgn(video as usize as Hwnd, std::ptr::null_mut(), 1); }
+        }
+    }
+
 }
 
 #[cfg(not(feature = "mpv"))]
@@ -430,6 +438,14 @@ mod tests {
             "libmpv rejeitou as opções do OSC: {:?}",
             result.err()
         );
+    }
+
+    #[test]
+    fn player_cutouts_deserialize_and_keep_signed_offsets() {
+        let cutout: super::PlayerCutout = serde_json::from_str(
+            r#"{"x":-4,"y":12,"width":80,"height":32}"#,
+        ).unwrap();
+        assert_eq!(cutout, super::PlayerCutout { x: -4, y: 12, width: 80, height: 32 });
     }
 
     #[test]
