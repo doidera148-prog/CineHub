@@ -30,7 +30,6 @@ axum = "0.8"
 librqbit = { version = "9.1.0", default-features = false, features = ["rust-tls"] }
 tokio-util = { version = "0.7", features = ["io"] }
 uuid = { version = "1", features = ["v4"] }
-urlencoding = "2"
 libmpv2 = { version = "7.0.1", optional = true }
 
 [features]
@@ -53,3 +52,7 @@ opt-level = "s"
 tauri-plugin-global-shortcut = "2"
 # Diálogo nativo "Salvar como" para exportar a biblioteca (só desktop).
 tauri-plugin-dialog = "2"
+
+[package.metadata.cargo-machete]
+# Dependências utilizadas exclusivamente por scripts de build.
+ignored = ["tauri-build"]
