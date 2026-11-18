@@ -59,7 +59,7 @@ jobs:
             -not -path 'web/vendor/*' -print0 \
             | xargs -0 -r -n1 node --check
       - name: Validar sintaxe Python
-        run: python3 -m compileall -q android-tv
+        run: python3 -m compileall -q src-tauri/android-tv
       - name: Validar metadados e dependências Rust
         run: cargo metadata --manifest-path src-tauri/Cargo.toml --locked --format-version 1 --no-deps > /dev/null
       - name: Verificação de compilação Rust (todos os targets)

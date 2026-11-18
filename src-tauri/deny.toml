@@ -1,5 +1,5 @@
 # cargo-deny: licenças, avisos de segurança e fontes das dependências.
-# Usado no CI em modo informativo (não bloqueia o build). Rode localmente com:
+# Usado no CI como verificação obrigatória. Rode localmente com:
 #   cargo deny --manifest-path src-tauri/Cargo.toml check
 
 [advisories]
@@ -20,6 +20,8 @@ allow = [
   "Unicode-DFS-2016",
   "Zlib",
   "MPL-2.0",
+  "GPL-3.0-or-later",
+  "LGPL-2.1-only",
   "CDLA-Permissive-2.0",
   "BSL-1.0",
   "CC0-1.0",
