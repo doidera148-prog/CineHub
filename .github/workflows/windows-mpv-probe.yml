@@ -41,6 +41,10 @@ jobs:
           $dll = Get-ChildItem $dest -Filter 'libmpv-2.dll' -Recurse | Select-Object -First 1
           if (-not $dll) { throw 'libmpv-2.dll não foi encontrado no pacote.' }
           $env:MPV_LIB_DIR = $dll.Directory.FullName
+          # O tauri.windows.conf.json declara esta DLL como recurso obrigatório.
+          $resources = Join-Path $env:GITHUB_WORKSPACE 'src-tauri/resources'
+          New-Item -ItemType Directory -Force -Path $resources | Out-Null
+          Copy-Item $dll.FullName (Join-Path $resources 'mpv-2.dll') -Force
           "MPV_LIB_DIR=$($dll.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
           "MPV_DLL=$($dll.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Create MSVC import library
