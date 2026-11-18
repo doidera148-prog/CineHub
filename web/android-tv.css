@@ -209,3 +209,19 @@ body.tv-mode {
 @media (prefers-reduced-motion: reduce) {
   .tv-mode .card, .tv-mode #nav-main a { transition: none; }
 }
+
+
+/* Ajustes fluidos para TV: cartões e colunas acompanham a resolução e o espaço útil. */
+.tv-mode #view { min-width: 0; width: 100%; }
+.tv-mode .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr)); gap: clamp(16px, 1.5vw, 28px); }
+.tv-mode .grid .favcell { width: auto; min-width: 0; }
+.tv-mode .grid .card { width: 100%; flex: initial; }
+.tv-mode .card .title { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; min-height: 2.4em; }
+.tv-mode .episodes { grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+.tv-mode .hero-info, .tv-mode .billboard-info { max-width: min(100%, 760px); }
+.tv-mode #view :where(.actions, .dataactions, .seasons, .stream-tools, .stream-group) { flex-wrap: wrap; }
+.tv-mode #view :where(input, select, button, .stream, .addon) { min-width: 0; max-width: 100%; }
+@media (max-width: 1100px) {
+  .tv-mode .grid { grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); }
+  .tv-mode .card { flex-basis: auto; }
+}
