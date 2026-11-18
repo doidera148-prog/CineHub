@@ -8,14 +8,16 @@
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="./vendor/video-js.min.css">
   <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./accessibility.css">
   <link rel="stylesheet" href="./remote-navigation.css">
   <link rel="stylesheet" href="./android-tv.css">
 </head>
 <body>
+  <a class="skip-link" href="#view">Pular para o conteúdo</a>
   <aside class="sidebar">
     <div class="logo">CineHub</div>
     <button id="toggle-sidebar" class="chip sidebar-toggle" aria-expanded="true" aria-controls="nav-main" title="Recolher menu">☰</button>
-    <nav id="nav-main">
+    <nav id="nav-main" aria-label="Navegação principal">
       <a href="#/" data-nav="home"><span class="ico" aria-hidden="true">⌂</span><span class="lbl">Início</span></a>
       <a href="#/movies" data-nav="movies"><span class="ico" aria-hidden="true">▣</span><span class="lbl">Filmes</span></a>
       <a href="#/series" data-nav="series"><span class="ico" aria-hidden="true">▤</span><span class="lbl">Séries</span></a>
@@ -26,23 +28,23 @@
     </nav>
   </aside>
 
-  <main>
+  <main id="main-content">
     <header class="topbar">
-      <input id="q" type="search" enterkeyhint="search" placeholder="Pesquisar… (tecla /)" autocomplete="off" aria-label="Pesquisar">
+      <input id="q" type="search" enterkeyhint="search" placeholder="Pesquisar… (tecla /)" autocomplete="off" aria-label="Pesquisar" aria-keyshortcuts="/">
     </header>
     <section id="view"></section>
   </main>
 
   <div id="offline" class="offline hidden" role="alert">Sem conexão com a internet. Algumas fontes podem não carregar.</div>
 
-  <div id="player" class="hidden">
+  <div id="player" class="hidden" role="dialog" aria-modal="true" aria-label="Reprodutor de vídeo">
     <div class="player-box">
       <button id="close-player" class="close" type="button" title="Fechar (Esc)" aria-label="Fechar player">✕</button>
       <div id="player-title" class="player-title" aria-hidden="true"></div>
       <button id="next-ep" class="chip next-ep hidden" type="button"></button>
       <button id="skip-seg" class="chip skip-seg hidden" type="button"></button>
       <button id="pip" class="close pip" type="button" title="Janela flutuante (picture-in-picture)" aria-label="Janela flutuante" hidden>⧉</button>
-      <video id="video" class="video-js vjs-big-play-centered" controls preload="auto" playsinline></video>
+      <video id="video" class="video-js vjs-big-play-centered" controls preload="metadata" playsinline aria-label="Vídeo em reprodução"></video>
     </div>
   </div>
 
