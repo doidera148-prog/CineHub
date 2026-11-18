@@ -383,7 +383,13 @@ impl TorrentEngine {
             return Ok(false);
         }
 
-        let session = self.session().await?;
+        let session = match self.session().await {
+            Ok(session) => session,
+            Err(error) => {
+                self.files.write().await.insert(token.to_string(), file);
+                return Err(error);
+            }
+        };
         if let Err(error) = session.delete(TorrentIdOrHash::Id(id), true).await {
             // Se o motor não conseguiu encerrar, restaura a rota para não deixar a sessão órfã.
             self.files.write().await.insert(token.to_string(), file);
