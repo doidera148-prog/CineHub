@@ -295,8 +295,8 @@ test('backup exportado é canônico, sanitizado e pode ser importado novamente',
   assert.equal(payload.favs[0].extra, undefined);
   assert.equal(payload.progress['movie:1'].extra, undefined);
   const restored = L.mergeBackupData([], {}, JSON.parse(JSON.stringify(payload)));
-  assert.deepEqual(restored.favs, payload.favs);
-  assert.deepEqual(restored.progress, payload.progress);
+  assert.equal(JSON.stringify(restored.favs), JSON.stringify(payload.favs));
+  assert.equal(JSON.stringify(restored.progress), JSON.stringify(payload.progress));
 });
 
 test('backup exportado respeita os limites de favoritos e progresso', () => {
