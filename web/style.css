@@ -1311,3 +1311,22 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.7); }
 .addon-health[data-state="ok"] { color: var(--success, #36a66a); }
 .addon-health[data-state="version-differs"] { color: var(--warning, #c58a2b); }
 .addon-health[data-state="error"] { color: var(--danger, #d45b5b); }
+
+
+/* Ícones vetoriais consistentes (estilo outline) para navegação e controles. */
+.ico svg,
+.sidebar-toggle svg,
+#close-player svg,
+#pip svg {
+  display: block;
+  width: 1em;
+  height: 1em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.sidebar-toggle svg { width: 1.2rem; height: 1.2rem; }
+#close-player svg { width: 1.25em; height: 1.25em; }
+#pip svg { width: 1.1em; height: 1.1em; }
