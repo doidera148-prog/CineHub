@@ -1431,7 +1431,7 @@ async function play(stream, label, id, meta, subs) {
     const originalUrl = stream.url;
     stream = {
       ...stream,
-      mimeType: stream.mimeType || (/\\.m3u8(\\?|$)/i.test(originalUrl) ? 'application/x-mpegURL' : ''),
+      mimeType: stream.mimeType || (/\.m3u8(\?|$)/i.test(originalUrl) ? 'application/x-mpegURL' : ''),
       url: await call('media_proxy_url', {
         url: originalUrl,
         behaviorHints: stream.behaviorHints || null,
