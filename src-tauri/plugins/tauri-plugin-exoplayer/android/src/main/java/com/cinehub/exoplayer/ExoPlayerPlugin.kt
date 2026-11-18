@@ -164,7 +164,8 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         }
         // Seletor de legendas: lista todas as faixas e oferece a opção Desativadas.
         var availableSubtitleTracks: List<Pair<Tracks.Group, Int>> = emptyList()
-        val subtitleButton = Button(act).apply {
+        lateinit var subtitleButton: Button
+        subtitleButton = Button(act).apply {
             text = "Legendas ▾"
             isAllCaps = false
             visibility = View.GONE
