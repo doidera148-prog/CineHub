@@ -177,8 +177,11 @@ async fn proxy_request(
         // ilimitada antes de verificar o tamanho.
         let mut upstream = upstream;
         let mut bytes = Vec::new();
-        while let Some(chunk) = upstream.chunk().await
-            .map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))? {
+        loop {
+            let next = tokio::time::timeout(Duration::from_secs(45), upstream.chunk()).await
+                .map_err(|_| (StatusCode::GATEWAY_TIMEOUT, "timeout lendo playlist HLS".into()))?
+                .map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))?;
+            let Some(chunk) = next else { break };
             if bytes.len() + chunk.len() > 4 * 1024 * 1024 {
                 return Err((StatusCode::PAYLOAD_TOO_LARGE, "playlist HLS excede 4 MiB".into()));
             }
@@ -208,10 +211,11 @@ async fn proxy_request(
         Body::empty()
     } else {
         let chunks = stream::unfold(upstream, |mut resp| async move {
-            match resp.chunk().await {
-                Ok(Some(bytes)) => Some((Ok::<_, std::io::Error>(bytes), resp)),
-                Ok(None) => None,
-                Err(e) => Some((Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())), resp)),
+            match tokio::time::timeout(Duration::from_secs(45), resp.chunk()).await {
+                Ok(Ok(Some(bytes))) => Some((Ok::<_, std::io::Error>(bytes), resp)),
+                Ok(Ok(None)) => None,
+                Ok(Err(e)) => Some((Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())), resp)),
+                Err(_) => Some((Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "timeout lendo mídia")), resp)),
             }
         });
         Body::from_stream(chunks)
