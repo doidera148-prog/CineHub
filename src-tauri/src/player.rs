@@ -158,8 +158,9 @@ mod imp {
             // nativa cobre a WebView, portanto os controles HTML do CineHub não ficam visíveis.
             // Não deixar em "auto": o usuário precisa ter controles acessíveis durante o vídeo.
             init.set_option("osc", "yes")?;
-            init.set_option("osc-visibility", "always")?;
-            init.set_option("osc-idle", "yes")?;
+            // osc-visibility e osc-idle são opções do script OSC, não opções globais do mpv.
+            // Passá-las diretamente a set_option causa MPV_ERROR_OPTION_NOT_FOUND (-5).
+            init.set_option("script-opts", "osc-visibility=always,osc-idle=yes")?;
             init.set_option("input-default-bindings", "yes")?;
             init.set_option("input-vo-keyboard", "yes")?;
             init.set_option("osd-level", "3")?;
@@ -411,6 +412,25 @@ mod imp {
 #[cfg(test)]
 mod tests {
     use super::is_playable_url;
+
+    #[cfg(feature = "mpv")]
+    #[test]
+    fn mpv_osc_script_options_are_valid() {
+        use libmpv2::Mpv;
+
+        let result = Mpv::with_initializer(|init| {
+            init.set_option("vo", "null")?;
+            init.set_option("ao", "null")?;
+            init.set_option("osc", "yes")?;
+            init.set_option("script-opts", "osc-visibility=always,osc-idle=yes")?;
+            Ok(())
+        });
+        assert!(
+            result.is_ok(),
+            "libmpv rejeitou as opções do OSC: {:?}",
+            result.err()
+        );
+    }
 
     #[test]
     fn only_http_urls_reach_mpv() {
