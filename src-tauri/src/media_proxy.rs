@@ -5,7 +5,6 @@
 use std::{
     collections::HashMap,
     net::SocketAddr,
-    str::FromStr,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -317,14 +316,27 @@ async fn proxy_request(
             .body(Body::from(rewritten))
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
     }
-    for name in [header::CONTENT_TYPE, header::CONTENT_LENGTH, header::CONTENT_RANGE, header::ACCEPT_RANGES, header::ETAG, header::LAST_MODIFIED] {
-        if let Some(value) = upstream.headers().get(&name) { builder = builder.header(name, value); }
+    for name in [
+        header::CONTENT_TYPE,
+        header::CONTENT_LENGTH,
+        header::CONTENT_RANGE,
+        header::ACCEPT_RANGES,
+        header::ETAG,
+        header::LAST_MODIFIED,
+    ] {
+        if let Some(value) = upstream.headers().get(&name) {
+            builder = builder.header(name, value);
+        }
     }
     // O token é uma credencial local; não há cookies de sessão e o CORS não permite credenciais.
-    builder = builder.header("access-control-allow-origin", "*")
+    builder = builder
+        .header("access-control-allow-origin", "*")
         .header("access-control-allow-methods", "GET, HEAD, OPTIONS")
         .header("access-control-allow-headers", "Range, If-Range")
-        .header("access-control-expose-headers", "Content-Length, Content-Range, Accept-Ranges");
+        .header(
+            "access-control-expose-headers",
+            "Content-Length, Content-Range, Accept-Ranges",
+        );
     let body = if method == Method::HEAD || status == StatusCode::NO_CONTENT {
         Body::empty()
     } else {
@@ -341,10 +353,7 @@ async fn proxy_request(
                 Ok(Ok(Some(bytes))) => Some((Ok(bytes), (resp, None))),
                 Ok(Ok(None)) => None,
                 Ok(Err(e)) => Some((
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        e.to_string(),
-                    )),
+                    Err(std::io::Error::other(e.to_string())),
                     (resp, None),
                 )),
                 Err(_) => Some((
