@@ -44,6 +44,7 @@ class PlayArgs {
     var startMs: Long = 0
     /** Lista JSON de legendas VTT em base64, com idioma, rótulo e preferência inicial. */
     var subtitles: String? = null
+    var subtitlesDisabled: Boolean = false
     /** Trechos para pular, como JSON: [{"type":"intro","start":5,"end":90}, ...] (opcional). */
     var segments: String? = null
 }
@@ -345,6 +346,12 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         }
         if (subtitleConfigurations.isNotEmpty()) item.setSubtitleConfigurations(subtitleConfigurations)
         player.setMediaItem(item.build())
+        if (args.subtitlesDisabled) {
+            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                .build()
+            subtitleButton.text = "Legendas: desativadas ▾"
+        }
         if (args.startMs > 0) player.seekTo(args.startMs)
         player.prepare()
         player.playWhenReady = true

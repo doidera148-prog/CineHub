@@ -109,6 +109,28 @@ async function checkWindowsPlayer() {
   await page.close();
 }
 
+async function checkAndroidPlayer() {
+  const page = await browser.newPage({
+    viewport: { width: 1280, height: 720 },
+    userAgent: 'Mozilla/5.0 (Linux; Android 11; Android TV) AppleWebKit/537.36 Chrome/120.0 Safari/537.36',
+  });
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.addInitScript(fixtures);
+  await page.goto(`${base}/#/detail/movie/tt1`);
+  await page.locator('.stream').waitFor({ state: 'visible' });
+  await page.locator('.stream').click();
+  await page.waitForFunction(() => window.__calls.some((call) => call.cmd === 'plugin:exoplayer|play'));
+  const args = await page.evaluate(() => window.__calls.find((call) => call.cmd === 'plugin:exoplayer|play')?.args);
+  const subtitles = JSON.parse(args?.subtitles || '[]');
+  if (!Array.isArray(subtitles) || subtitles.length !== 1) failures.push('[android-player] legenda externa não foi enviada ao ExoPlayer');
+  if (subtitles[0]?.language !== 'pt' || subtitles[0]?.isDefault !== true) failures.push('[android-player] idioma/preferência da legenda não foi preservado');
+  if (!subtitles[0]?.data?.length) failures.push('[android-player] conteúdo VTT não foi codificado para o ExoPlayer');
+  if (args?.subtitlesDisabled !== false) failures.push('[android-player] preferência padrão de legendas foi enviada incorretamente');
+  if (errors.length) failures.push(...errors.map((e) => `[android-player] ${e}`));
+  await page.close();
+}
+
 async function checkBackupImport() {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   const errors = [];
@@ -161,7 +183,7 @@ async function checkTv() {
   if (await page.evaluate(() => document.activeElement?.closest('.strip') === document.querySelector('.strip'))) failures.push('[tv] controle ficou preso na borda do trilho');
   await page.close();
 }
-try { await check({ width: 360, height: 800 }, 'celular'); await check({ width: 1280, height: 800 }, 'desktop'); await checkTv(); await checkBackupImport(); await checkWindowsPlayer(); }
+try { await check({ width: 360, height: 800 }, 'celular'); await check({ width: 1280, height: 800 }, 'desktop'); await checkTv(); await checkBackupImport(); await checkWindowsPlayer(); await checkAndroidPlayer(); }
 finally { await browser.close(); server.close(); }
 if (failures.length) { console.error('Falhas:\n- ' + failures.join('\n- ')); process.exit(1); }
 console.log('Smoke test ok: rotas, acessibilidade e navegação em celular, desktop e Android TV.');

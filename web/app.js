@@ -1698,8 +1698,10 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
     const command = IS_ANDROID ? 'plugin:exoplayer|play' : 'player_play';
     const args = { url: stream.url, startMs };
     // Android recebe todas as faixas para seleção no ExoPlayer; desktop usa a preferida.
-    if (IS_ANDROID) args.subtitles = await subtitlePayload(stream, subs);
-    else args.subtitleUrl = pickSubtitles(stream, subs)[0]?.url ?? null;
+    if (IS_ANDROID) {
+      args.subtitles = await subtitlePayload(stream, subs);
+      args.subtitlesDisabled = subPref() === 'off';
+    } else args.subtitleUrl = pickSubtitles(stream, subs)[0]?.url ?? null;
     // Botão de pular no player nativo: tecla F12 (mpv, desktop) ou botão na tela (Android)
     args.segments = IS_ANDROID ? JSON.stringify(segments) : segments;
     const res = await invoke(command, args);
