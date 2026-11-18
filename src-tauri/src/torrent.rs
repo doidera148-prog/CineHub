@@ -306,16 +306,15 @@ impl TorrentEngine {
             };
         };
         let stats = handle.stats();
-        let (download_speed_bytes, upload_speed_bytes, peers, peers_seen) =
-            match &stats.live {
-                Some(live) => (
-                    (live.download_speed.mbps.max(0.0) * 125_000.0) as u64,
-                    (live.upload_speed.mbps.max(0.0) * 125_000.0) as u64,
-                    live.snapshot.peer_stats.live as usize,
-                    live.snapshot.peer_stats.seen as usize,
-                ),
-                None => (0, 0, 0, 0),
-            };
+        let (download_speed_bytes, upload_speed_bytes, peers, peers_seen) = match &stats.live {
+            Some(live) => (
+                (live.download_speed.mbps.max(0.0) * 125_000.0) as u64,
+                (live.upload_speed.mbps.max(0.0) * 125_000.0) as u64,
+                live.snapshot.peer_stats.live as usize,
+                live.snapshot.peer_stats.seen as usize,
+            ),
+            None => (0, 0, 0, 0),
+        };
         TorrentNetworkStats {
             active: true,
             state: stats.state.to_string(),
