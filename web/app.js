@@ -1649,9 +1649,10 @@ let blobUrls = [];
 let lastSave = 0;
 let resumeHandler = null; // retomada da posição salva no próximo loadedmetadata
 
-// Player nativo: ExoPlayer no Android, libmpv no desktop. Se o nativo falhar, usa o player web.
-// Se o nativo não estiver disponível (ex.: build sem a feature `mpv`), cai no player do navegador.
+// Android usa ExoPlayer. No Windows, a reprodução é sempre feita pelo player HTML5
+// dentro do WebView2; evita abrir uma janela externa do mpv e mantém os controles do CineHub.
 const IS_ANDROID = /Android/i.test(navigator.userAgent);
+const IS_WINDOWS = /Windows/i.test(navigator.userAgent);
 
 // Legenda em português como data: URI (VTT), para o ExoPlayer carregar sem arquivo local.
 async function subtitleDataUri(stream, subs) {
@@ -1747,7 +1748,8 @@ async function play(stream, label, id, meta, subs) {
     }
   }
   const segments = await skipSegmentsFor(id, meta);
-  if (await playNative(stream, label, id, meta, subs, segments)) return;
+  // Windows: manter a reprodução no WebView2 (Video.js/HTML5), sem iniciar libmpv.
+  if (!IS_WINDOWS && await playNative(stream, label, id, meta, subs, segments)) return;
 
   saveProgress(true);
   const seq = ++playSeq;
