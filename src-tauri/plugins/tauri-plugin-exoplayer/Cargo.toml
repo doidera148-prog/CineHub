@@ -11,3 +11,7 @@ tauri = { version = "2", features = [] }
 
 [build-dependencies]
 tauri-plugin = { version = "2", features = ["build"] }
+
+[package.metadata.cargo-machete]
+# Crate usado exclusivamente pelo build.rs do plugin.
+ignored = ["tauri-plugin"]
