@@ -449,8 +449,7 @@ async fn register_child(
             "URI filha inválida na playlist".into(),
         )
     })?;
-    if !crate::addon::is_safe_url(url.as_str()).await
-    {
+    if !crate::addon::is_safe_url(url.as_str()).await {
         return Err((
             StatusCode::FORBIDDEN,
             "playlist referencia destino não permitido".into(),
@@ -518,11 +517,15 @@ mod tests {
     fn hls_root_relative_and_protocol_relative_references_resolve() {
         let base = Url::parse("https://cdn.example/live/master.m3u8").unwrap();
         assert_eq!(
-            resolve_playlist_reference(&base, "/segments/one.ts").unwrap().as_str(),
+            resolve_playlist_reference(&base, "/segments/one.ts")
+                .unwrap()
+                .as_str(),
             "https://cdn.example/segments/one.ts"
         );
         assert_eq!(
-            resolve_playlist_reference(&base, "//media.example/segment.ts").unwrap().as_str(),
+            resolve_playlist_reference(&base, "//media.example/segment.ts")
+                .unwrap()
+                .as_str(),
             "https://media.example/segment.ts"
         );
     }
@@ -531,7 +534,10 @@ mod tests {
     fn hls_query_only_reference_keeps_current_resource_path() {
         let base = Url::parse("https://cdn.example/live/index.m3u8?token=old").unwrap();
         let resolved = resolve_playlist_reference(&base, "?token=new").unwrap();
-        assert_eq!(resolved.as_str(), "https://cdn.example/live/index.m3u8?token=new");
+        assert_eq!(
+            resolved.as_str(),
+            "https://cdn.example/live/index.m3u8?token=new"
+        );
     }
 
     #[test]
@@ -539,7 +545,9 @@ mod tests {
         let base = Url::parse("https://cdn.example/live/master.m3u8").unwrap();
         assert!(resolve_playlist_reference(&base, "javascript:alert(1)").is_err());
         assert!(resolve_playlist_reference(&base, "data:text/plain,test").is_err());
-        assert!(resolve_playlist_reference(&base, "https://user:pass@cdn.example/segment.ts").is_err());
+        assert!(
+            resolve_playlist_reference(&base, "https://user:pass@cdn.example/segment.ts").is_err()
+        );
     }
 
     #[test]
