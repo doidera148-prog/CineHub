@@ -370,25 +370,26 @@ impl TorrentEngine {
     /// Encerra a sessão ativa associada ao token e invalida imediatamente sua URL local.
     pub async fn close(&self, token: &str) -> Result<bool, String> {
         let mut active = self.active.lock().await;
-        let torrent = {
-            let files = self.files.read().await;
-            files.get(token).map(|entry| entry.torrent.clone())
+        let file = {
+            let mut files = self.files.write().await;
+            files.remove(token)
         };
-        let Some(torrent) = torrent else {
+        let Some(file) = file else {
             return Ok(false);
         };
-        let id = torrent.id();
+        let id = file.torrent.id();
         if *active != Some(id) {
+            self.files.write().await.insert(token.to_string(), file);
             return Ok(false);
         }
 
         let session = self.session().await?;
-        session
-            .delete(TorrentIdOrHash::Id(id), true)
-            .await
-            .map_err(|e| format!("não foi possível encerrar o torrent: {e:#}"))?;
+        if let Err(error) = session.delete(TorrentIdOrHash::Id(id), true).await {
+            // Se o motor não conseguiu encerrar, restaura a rota para não deixar a sessão órfã.
+            self.files.write().await.insert(token.to_string(), file);
+            return Err(format!("não foi possível encerrar o torrent: {error:#}"));
+        }
 
-        self.files.write().await.remove(token);
         *active = None;
         Ok(true)
     }
