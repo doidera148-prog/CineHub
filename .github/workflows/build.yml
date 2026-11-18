@@ -59,7 +59,9 @@ jobs:
             -not -path 'web/vendor/*' -print0 \
             | xargs -0 -r -n1 node --check
       - name: Detectar variáveis e imports JavaScript não utilizados
-        run: npx --yes eslint@9 --no-config-lookup --ignore-pattern '**/vendor/**' --rule 'no-unused-vars: [\"error\", {\"caughtErrorsIgnorePattern\": \"^_\"}]' web tests
+        run: |
+          find web tests -type f \\( -name '*.js' -o -name '*.mjs' \\) -not -path 'web/vendor/*' -print0 \\
+            | xargs -0 -r npx --yes eslint@9 --no-config-lookup --rule 'no-unused-vars:error'
       - name: Validar sintaxe Python
         run: python3 -m compileall -q src-tauri/android-tv tests/python
       - name: Testes de regressão dos scripts Python
