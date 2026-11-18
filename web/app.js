@@ -1435,6 +1435,7 @@ async function play(stream, label, id, meta, subs) {
       url: await call('media_proxy_url', {
         url: originalUrl,
         behaviorHints: stream.behaviorHints || null,
+        mimeType: stream.mimeType || null,
       }),
     };
   } catch (e) {
