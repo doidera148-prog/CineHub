@@ -542,8 +542,8 @@ fn normalize_url(raw: &str) -> Result<String, String> {
         .strip_prefix("stremio://")
         .map(|rest| format!("https://{rest}"))
         .unwrap_or_else(|| raw.to_string());
-    let mut url = reqwest::Url::parse(&normalized)
-        .map_err(|_| "endereço do addon inválido".to_string())?;
+    let mut url =
+        reqwest::Url::parse(&normalized).map_err(|_| "endereço do addon inválido".to_string())?;
     if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none()
         || !url.username().is_empty()
