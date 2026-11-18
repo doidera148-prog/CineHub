@@ -27,7 +27,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets --locked
 
   lint:
     runs-on: ubuntu-22.04
@@ -59,7 +59,9 @@ jobs:
             -not -path 'web/vendor/*' -print0 \
             | xargs -0 -r -n1 node --check
       - name: Validar sintaxe Python
-        run: python3 -m compileall -q src-tauri/android-tv
+        run: python3 -m compileall -q src-tauri/android-tv tests/python
+      - name: Testes de regressão dos scripts Python
+        run: python3 -m unittest discover -s tests/python -v
       - name: Validar metadados e dependências Rust
         run: cargo metadata --manifest-path src-tauri/Cargo.toml --locked --format-version 1 --no-deps > /dev/null
       - name: Verificação de compilação Rust (todos os targets)
