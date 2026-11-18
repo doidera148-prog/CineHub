@@ -1,0 +1,70 @@
+name: Limpeza automática do GitHub Actions
+
+on:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+    inputs:
+      retention_days:
+        description: "Manter execuções concluídas dos últimos N dias"
+        required: true
+        default: "30"
+        type: string
+      dry_run:
+        description: "Apenas listar o que seria removido"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: actions-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Remover execuções antigas
+    runs-on: ubuntu-latest
+    steps:
+      - name: Limpar histórico antigo
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RETENTION_DAYS: ${{ inputs.retention_days || '30' }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! [[ "$RETENTION_DAYS" =~ ^[1-9][0-9]*$ ]] || (( RETENTION_DAYS > 365 )); then
+            echo "::error:: retention_days deve ser um número entre 1 e 365."
+            exit 1
+          fi
+
+          cutoff="$(date -u -d "$RETENTION_DAYS days ago" +%s)"
+          echo "Retenção: $RETENTION_DAYS dias"
+          echo "Execuções ativas (queued/in_progress) nunca são removidas."
+          echo "Modo simulação: $DRY_RUN"
+
+          count=0
+          while IFS=$'\t' read -r run_id created_at name conclusion status; do
+            [[ -n "$run_id" ]] || continue
+            created_epoch="$(date -u -d "$created_at" +%s)"
+            if (( created_epoch >= cutoff )); then
+              continue
+            fi
+
+            printf 'Execução antiga: id=%s | %s | %s | %s\n' "$run_id" "$created_at" "$conclusion" "$name"
+            if [[ "$DRY_RUN" != "true" ]]; then
+              gh api --silent --method DELETE "repos/$GITHUB_REPOSITORY/actions/runs/$run_id"
+              echo "Removida: $run_id"
+            fi
+            count=$((count + 1))
+          done < <(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs?per_page=100" --jq '.workflow_runs[] | select(.status == "completed") | [.id, .created_at, .name, (.conclusion // ""), .status] | @tsv')
+
+          echo "Total de execuções elegíveis: $count"
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "Simulação concluída; nada foi apagado."
+          fi
