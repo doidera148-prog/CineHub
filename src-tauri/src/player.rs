@@ -17,9 +17,11 @@ pub struct PlayerResult {
 }
 
 /// Só aceita http/https: o mpv não pode abrir arquivos locais nem opções de linha de comando.
-pub fn is_playable_url(url: &str) -> bool {
-    let u = url.trim();
-    (u.starts_with("http://") || u.starts_with("https://")) && !u.starts_with('-')
+pub fn is_playable_url(raw: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(raw.trim()) else {
+        return false;
+    };
+    matches!(url.scheme(), "http" | "https") && url.host_str().is_some()
 }
 
 /// Handle da janela principal, para o mpv desenhar o vídeo dentro dela (Windows).
@@ -381,6 +383,9 @@ mod tests {
     fn only_http_urls_reach_mpv() {
         assert!(is_playable_url("https://example.com/video.mkv"));
         assert!(is_playable_url("http://127.0.0.1:9000/stream/0"));
+        assert!(is_playable_url("http://192.168.1.20:8080/video.mp4"));
+        assert!(!is_playable_url("https:///missing-host/video.mp4"));
+        assert!(!is_playable_url("http://"));
         assert!(!is_playable_url("file:///etc/passwd"));
         assert!(!is_playable_url("--script=/tmp/x.lua"));
         assert!(!is_playable_url("/caminho/local.mp4"));
