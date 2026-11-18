@@ -512,6 +512,22 @@ fn is_auxiliary_video(name: &str) -> bool {
         || tokens.windows(2).any(|pair| pair == ["behind", "scenes"])
 }
 
+fn is_portuguese_video(name: &str) -> bool {
+    let normalized = name.to_ascii_lowercase();
+    let tokens: Vec<&str> = normalized
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .collect();
+    normalized.contains("portugu")
+        || normalized.contains("pt-br")
+        || tokens.iter().any(|token| {
+            matches!(
+                *token,
+                "ptbr" | "dublado" | "dublada" | "dublagem" | "brazil" | "brazilian"
+            )
+        })
+}
+
 fn pick_video(candidates: &[Candidate], requested: Option<usize>) -> Result<Candidate, String> {
     match requested {
         Some(index) => candidates
@@ -521,7 +537,13 @@ fn pick_video(candidates: &[Candidate], requested: Option<usize>) -> Result<Cand
             .ok_or_else(|| "o índice informado não corresponde a um arquivo de vídeo".to_string()),
         None => candidates
             .iter()
-            .max_by_key(|candidate| (!is_auxiliary_video(&candidate.name), candidate.size))
+            .max_by_key(|candidate| {
+                (
+                    !is_auxiliary_video(&candidate.name),
+                    is_portuguese_video(&candidate.name),
+                    candidate.size,
+                )
+            })
             .cloned()
             .ok_or_else(|| "este torrent não contém um formato de vídeo compatível".to_string()),
     }
@@ -745,6 +767,24 @@ mod tests {
             candidate(2, 100, "Movie.mkv"),
         ];
         assert_eq!(pick_video(&files, None).map(|c| c.index), Ok(2));
+    }
+
+    #[test]
+    fn automatic_selection_prefers_portuguese_video_over_larger_english_file() {
+        let files = [
+            candidate(0, 900, "Movie.1080p.ENG.mkv"),
+            candidate(1, 600, "Movie.1080p.PT-BR.Dublado.mkv"),
+        ];
+        assert_eq!(pick_video(&files, None).map(|c| c.index), Ok(1));
+    }
+
+    #[test]
+    fn explicit_file_index_overrides_portuguese_preference() {
+        let files = [
+            candidate(0, 900, "Movie.1080p.ENG.mkv"),
+            candidate(1, 600, "Movie.1080p.PT-BR.mkv"),
+        ];
+        assert_eq!(pick_video(&files, Some(0)).map(|c| c.index), Ok(0));
     }
 
     #[test]
