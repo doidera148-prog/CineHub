@@ -26,6 +26,7 @@ async function check(viewport, label) {
   const page = await browser.newPage({ viewport });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
+  page.on('response', (response) => { if (response.status() === 403) errors.push(`HTTP 403: ${response.url()}`); });
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
   await page.addInitScript(fixtures);
   for (const hash of routes) {
