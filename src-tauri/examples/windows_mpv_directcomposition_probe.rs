@@ -29,11 +29,15 @@ mod windows_probe {
     }
 
     const IID_IDXGI_DEVICE: Guid = Guid {
-        data1: 0x54ec77fa, data2: 0x1377, data3: 0x44e6,
+        data1: 0x54ec77fa,
+        data2: 0x1377,
+        data3: 0x44e6,
         data4: [0x8c, 0x32, 0x88, 0xfd, 0x5f, 0x44, 0xc8, 0x4c],
     };
     const IID_DCOMP_DEVICE: Guid = Guid {
-        data1: 0xc37ea93a, data2: 0xe7aa, data3: 0x450d,
+        data1: 0xc37ea93a,
+        data2: 0xe7aa,
+        data3: 0x450d,
         data4: [0xb1, 0x6f, 0x97, 0x46, 0xcb, 0x04, 0x07, 0xf3],
     };
 
@@ -49,8 +53,13 @@ mod windows_probe {
     struct ComPtr(*mut c_void);
 
     impl ComPtr {
-        fn new() -> Self { Self(ptr::null_mut()) }
-        fn as_ptr(&self) -> *mut c_void { self.0 }
+        fn new() -> Self {
+            Self(ptr::null_mut())
+        }
+
+        fn as_ptr(&self) -> *mut c_void {
+            self.0
+        }
     }
 
     impl Drop for ComPtr {
@@ -74,17 +83,18 @@ mod windows_probe {
         }
     }
 
-    unsafe fn call_get_device(
-        swapchain: *mut c_void,
-        device: &mut ComPtr,
-    ) -> Result<(), String> {
+    unsafe fn call_get_device(swapchain: *mut c_void, device: &mut ComPtr) -> Result<(), String> {
         // IDXGISwapChain herda IDXGIDeviceSubObject; GetDevice é o slot 7.
         let table = *(swapchain as *mut *mut *mut c_void);
         let get_device: unsafe extern "system" fn(
-            *mut c_void, *const Guid, *mut *mut c_void,
+            *mut c_void,
+            *const Guid,
+            *mut *mut c_void,
         ) -> i32 = transmute(*table.add(7));
-        check(get_device(swapchain, &IID_IDXGI_DEVICE, &mut device.0),
-            "IDXGISwapChain::GetDevice")
+        check(
+            get_device(swapchain, &IID_IDXGI_DEVICE, &mut device.0),
+            "IDXGISwapChain::GetDevice",
+        )
     }
 
     unsafe fn attach_to_hwnd(
@@ -107,11 +117,13 @@ mod windows_probe {
         // IDCompositionDevice: CreateTargetForHwnd = slot 6; CreateVisual = slot 7.
         let device_table = *(dcomp_device.as_ptr() as *mut *mut *mut c_void);
         let create_target: unsafe extern "system" fn(
-            *mut c_void, *mut c_void, i32, *mut *mut c_void,
+            *mut c_void,
+            *mut c_void,
+            i32,
+            *mut *mut c_void,
         ) -> i32 = transmute(*device_table.add(6));
-        let create_visual: unsafe extern "system" fn(
-            *mut c_void, *mut *mut c_void,
-        ) -> i32 = transmute(*device_table.add(7));
+        let create_visual: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> i32 =
+            transmute(*device_table.add(7));
 
         let mut target = ComPtr::new();
         check(
@@ -125,28 +137,31 @@ mod windows_probe {
         )?;
 
         let mut visual = ComPtr::new();
-        check(create_visual(dcomp_device.as_ptr(), &mut visual.0),
-            "IDCompositionDevice::CreateVisual")?;
+        check(
+            create_visual(dcomp_device.as_ptr(), &mut visual.0),
+            "IDCompositionDevice::CreateVisual",
+        )?;
 
         // IDCompositionVisual::SetContent = slot 11.
         let visual_table = *(visual.as_ptr() as *mut *mut *mut c_void);
-        let set_content: unsafe extern "system" fn(
-            *mut c_void, *mut c_void,
-        ) -> i32 = transmute(*visual_table.add(11));
-        check(set_content(visual.as_ptr(), swapchain),
-            "IDCompositionVisual::SetContent")?;
+        let set_content: unsafe extern "system" fn(*mut c_void, *mut c_void) -> i32 =
+            transmute(*visual_table.add(11));
+        check(
+            set_content(visual.as_ptr(), swapchain),
+            "IDCompositionVisual::SetContent",
+        )?;
 
         // IDCompositionTarget::SetRoot = slot 3.
         let target_table = *(target.as_ptr() as *mut *mut *mut c_void);
-        let set_root: unsafe extern "system" fn(
-            *mut c_void, *mut c_void,
-        ) -> i32 = transmute(*target_table.add(3));
-        check(set_root(target.as_ptr(), visual.as_ptr()),
-            "IDCompositionTarget::SetRoot")?;
+        let set_root: unsafe extern "system" fn(*mut c_void, *mut c_void) -> i32 =
+            transmute(*target_table.add(3));
+        check(
+            set_root(target.as_ptr(), visual.as_ptr()),
+            "IDCompositionTarget::SetRoot",
+        )?;
 
         // IDCompositionDevice::Commit = slot 3.
-        let commit: unsafe extern "system" fn(*mut c_void) -> i32 =
-            transmute(*device_table.add(3));
+        let commit: unsafe extern "system" fn(*mut c_void) -> i32 = transmute(*device_table.add(3));
         check(commit(dcomp_device.as_ptr()), "IDCompositionDevice::Commit")?;
 
         println!("DIRECTCOMPOSITION_ATTACHED=1");
@@ -158,15 +173,21 @@ mod windows_probe {
     pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         let mut args = std::env::args().skip(1);
         let url = args.next().ok_or("informe a URL HTTP/HTTPS do vídeo")?;
-        let hwnd_arg = args.next().ok_or("informe o HWND da janela do CineHub (ex.: 0x123456)")?;
-        if args.next().is_some() { return Err("argumentos extras não são aceitos".into()); }
+        let hwnd_arg = args
+            .next()
+            .ok_or("informe o HWND da janela do CineHub (ex.: 0x123456)")?;
+        if args.next().is_some() {
+            return Err("argumentos extras não são aceitos".into());
+        }
         if !(url.starts_with("https://") || url.starts_with("http://")) {
             return Err("somente URLs HTTP/HTTPS são aceitas".into());
         }
         let hwnd = isize::from_str_radix(hwnd_arg.trim_start_matches("0x"), 16)
             .or_else(|_| hwnd_arg.parse::<isize>())
             .map_err(|_| "HWND inválido")?;
-        if hwnd == 0 { return Err("HWND não pode ser zero".into()); }
+        if hwnd == 0 {
+            return Err("HWND não pode ser zero".into());
+        }
 
         let mpv = Mpv::with_initializer(|init| {
             init.set_option("vo", "gpu-next")?;
