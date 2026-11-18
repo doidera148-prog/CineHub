@@ -13,7 +13,7 @@ use axum::{
     Router,
 };
 use futures::stream;
-use reqwest::{redirect::Policy, Client, Url};
+use reqwest::{Client, Url};
 use serde_json::Value;
 use tokio::{net::TcpListener, sync::RwLock};
 use uuid::Uuid;
@@ -109,6 +109,15 @@ async fn proxy_request(
 ) -> Result<Response, (StatusCode, String)> {
     if token.len() != 32 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err((StatusCode::NOT_FOUND, "não encontrado".into()));
+    }
+    if method == Method::OPTIONS {
+        return Response::builder()
+            .status(StatusCode::NO_CONTENT)
+            .header("access-control-allow-origin", "*")
+            .header("access-control-allow-methods", "GET, HEAD, OPTIONS")
+            .header("access-control-allow-headers", "Range, If-Range")
+            .body(Body::empty())
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
     }
     let target = {
         let mut sessions = state.sessions.write().await;
