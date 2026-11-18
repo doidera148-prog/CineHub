@@ -418,8 +418,7 @@ pub async fn media_proxy_url(
 ) -> Result<String, String> {
     let proxy = state.media_proxy.get_or_init(|| async {
         crate::media_proxy::MediaProxy::start().await
-            .expect("não foi possível iniciar o proxy local de mídia")
-    }).await;
+    }).await.as_ref().map_err(Clone::clone)?;
     proxy.register(&url, behavior_hints.as_ref()).await
 }
 
