@@ -522,17 +522,32 @@ pub(crate) fn srt_to_vtt(text: &str) -> String {
 
 /// Aceita a URL do manifest, "stremio://..." ou a base do addon (acrescenta /manifest.json).
 fn normalize_url(raw: &str) -> Result<String, String> {
-    let mut url = raw.trim().to_string();
-    if let Some(rest) = url.strip_prefix("stremio://") {
-        url = format!("https://{rest}");
+    let raw = raw.trim();
+    if raw.is_empty() || raw.len() > 2048 {
+        return Err("informe um endereço válido (máximo de 2048 caracteres)".into());
     }
-    if !(url.starts_with("https://") || url.starts_with("http://")) {
-        return Err("A URL precisa começar com https://, http:// ou stremio://".into());
+    let normalized = raw
+        .strip_prefix("stremio://")
+        .map(|rest| format!("https://{rest}"))
+        .unwrap_or_else(|| raw.to_string());
+    let mut url = reqwest::Url::parse(&normalized)
+        .map_err(|_| "endereço do addon inválido".to_string())?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err("use um endereço http(s) público, sem usuário ou senha na URL".into());
     }
-    if !url.ends_with("manifest.json") {
-        url = format!("{}/manifest.json", url.trim_end_matches('/'));
+    // Acrescenta o caminho antes da query: /manifest.json?key=x precisa manter o parâmetro.
+    let path = url.path().trim_end_matches('/');
+    if !path.ends_with("/manifest.json") && path != "manifest.json" {
+        let next = if path.is_empty() { "/manifest.json" } else { &format!("{path}/manifest.json") };
+        url.set_path(next);
     }
-    Ok(url)
+    // Fragmentos nunca são enviados ao servidor e só criam URLs duplicadas no armazenamento.
+    url.set_fragment(None);
+    Ok(url.to_string())
 }
 
 #[cfg(test)]
@@ -550,6 +565,21 @@ mod tests {
             "https://a.example/manifest.json"
         );
         assert!(normalize_url("ftp://x").is_err());
+        assert_eq!(
+            normalize_url("https://a.example?token=abc").unwrap(),
+            "https://a.example/manifest.json?token=abc"
+        );
+        assert_eq!(
+            normalize_url("https://a.example/manifest.json?token=abc").unwrap(),
+            "https://a.example/manifest.json?token=abc"
+        );
+        assert_eq!(
+            normalize_url("https://a.example/addon/manifest.json#ignored").unwrap(),
+            "https://a.example/addon/manifest.json"
+        );
+        assert!(normalize_url("https://user:pass@a.example").is_err());
+        assert!(normalize_url("https://a.example/manifest.json?token=abc").is_ok());
+        assert!(normalize_url(&"x".repeat(2049)).is_err());
     }
 
     #[test]
