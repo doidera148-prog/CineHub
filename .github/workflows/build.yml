@@ -108,21 +108,9 @@ jobs:
       - name: Instalar Tauri CLI
         if: steps.tauri-cache.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version "^2" --locked
-      - name: Preparar libmpv (Windows, player nativo)
-        if: matrix.platform == 'windows-latest'
-        working-directory: src-tauri
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: ../.github/scripts/prepare-libmpv.ps1
-      # O código do mpv (feature `mpv`) só é compilado aqui; o lint do Linux não o analisa.
-      - name: Clippy com o player nativo (Windows)
-        if: matrix.platform == 'windows-latest'
-        working-directory: src-tauri
-        run: cargo clippy --all-targets --features mpv -- -D warnings
       - name: Gerar pacotes
         working-directory: src-tauri
-        run: cargo tauri build ${{ matrix.platform == 'windows-latest' && '--features mpv' || '' }}
+        run: cargo tauri build
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cinehub-${{ matrix.platform }}
