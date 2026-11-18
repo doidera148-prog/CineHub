@@ -39,6 +39,7 @@ pub struct AppState {
 /// Addons padrão instalados automaticamente quando ainda não estão na lista.
 const DEFAULT_ADDON: &str = "https://v3-cinemeta.strem.io/manifest.json";
 const DEFAULT_ANIME_ADDON: &str = "https://1fe84bc728af-stremio-anime-catalogs.baby-beamup.club/%7B%22search%22%3A%22on%22%7D/manifest.json";
+const DEFAULT_TORRENTIO_ADDON: &str = "https://torrentio.strem.fun/manifest.json";
 
 /// Instala um addon padrão com novas tentativas (espera crescente), pois a rede pode não
 /// estar pronta logo ao abrir o app. A verificação é individual para não sobrescrever addons
@@ -123,6 +124,9 @@ pub fn run() {
             let needs_anime = !installed
                 .iter()
                 .any(|a| a.transport_url == DEFAULT_ANIME_ADDON);
+            let needs_torrentio = !installed
+                .iter()
+                .any(|a| a.transport_url == DEFAULT_TORRENTIO_ADDON);
             let torrent_dir = data_dir.join("torrents");
             let torrent = match torrent::TorrentEngine::new(torrent_dir) {
                 Ok(engine) => {
@@ -166,6 +170,14 @@ pub fn run() {
                     handle,
                     DEFAULT_ANIME_ADDON,
                     "Anime Catalogs",
+                ));
+            }
+            if needs_torrentio {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(install_default_addon(
+                    handle,
+                    DEFAULT_TORRENTIO_ADDON,
+                    "Torrentio",
                 ));
             }
             Ok(())
