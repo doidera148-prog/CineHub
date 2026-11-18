@@ -3,6 +3,22 @@
   const str = (v) => (typeof v === 'string' ? v : '');
   const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
+  // Streams locais do motor torrent já estão preparados pelo backend e não podem passar pelo proxy externo.
+  function isLocalTorrentStream(stream) {
+    const url = String(stream?.url ?? '').trim();
+    try {
+      const parsed = new URL(url);
+      return ['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname)
+        && parsed.pathname.startsWith('/stream/');
+    } catch {
+      return false;
+    }
+  }
+
+  function shouldUseMediaProxy(stream) {
+    return !isLocalTorrentStream(stream);
+  }
+
   // Só http(s) é aceito como link de imagem ou de página.
   function isWebUrl(u) {
     return typeof u === 'string' && /^https?:\/\//i.test(u);
@@ -154,6 +170,8 @@
 
   root.CineHubLib = {
     str,
+    isLocalTorrentStream,
+    shouldUseMediaProxy,
     qualityLabel,
     filterStreams,
     sortStreamsBy,
