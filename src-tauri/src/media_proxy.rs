@@ -66,8 +66,9 @@ impl MediaProxy {
     /// Registra uma URL validada e retorna uma URL local imprevisível.
     pub async fn register(&self, raw_url: &str, hints: Option<&Value>) -> Result<String, String> {
         let url = Url::parse(raw_url.trim()).map_err(|_| "URL de mídia inválida".to_string())?;
-        if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
-            return Err("somente fontes HTTP/HTTPS podem usar o proxy".into());
+        if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none()
+            || !url.username().is_empty() || url.password().is_some() {
+            return Err("somente fontes HTTP/HTTPS válidas, sem credenciais embutidas, podem usar o proxy".into());
         }
         if url.path().to_ascii_lowercase().ends_with(".mpd") {
             return Err("DASH ainda não está habilitado no proxy".into());
@@ -132,14 +133,20 @@ async fn proxy_request(
     let mut url = target.url;
     let mut response = None;
     for _ in 0..=MAX_REDIRECTS {
-        if !crate::addon::is_safe_url(url.as_str()).await {
+        if !url.username().is_empty() || url.password().is_some()
+            || !crate::addon::is_safe_url(url.as_str()).await {
             return Err((StatusCode::FORBIDDEN, "redirecionamento bloqueado".into()));
         }
         let mut request = match method {
             Method::HEAD => state.client.head(url.clone()),
             _ => state.client.get(url.clone()),
         };
-        for (name, value) in &target.headers { request = request.header(name, value); }
+        for (name, value) in &target.headers {
+            let sensitive = *name == header::AUTHORIZATION || *name == header::COOKIE;
+            if !sensitive || url.origin() == target.url.origin() {
+                request = request.header(name, value);
+            }
+        }
         if let Some(range) = incoming.get(header::RANGE) { request = request.header(header::RANGE, range); }
         if let Some(if_range) = incoming.get(header::IF_RANGE) { request = request.header(header::IF_RANGE, if_range); }
         let upstream = request.send().await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("falha na fonte: {e}")))?;
@@ -248,7 +255,8 @@ async fn register_child(
 ) -> Result<String, (StatusCode, String)> {
     let url = base.join(reference)
         .map_err(|_| (StatusCode::BAD_GATEWAY, "URI filha inválida na playlist".into()))?;
-    if !crate::addon::is_safe_url(url.as_str()).await {
+    if !url.username().is_empty() || url.password().is_some()
+        || !crate::addon::is_safe_url(url.as_str()).await {
         return Err((StatusCode::FORBIDDEN, "playlist referencia destino não permitido".into()));
     }
     let token = Uuid::new_v4().simple().to_string();
@@ -257,9 +265,15 @@ async fn register_child(
     if sessions.len() >= 4096 {
         return Err((StatusCode::TOO_MANY_REQUESTS, "limite de recursos HLS atingido".into()));
     }
+    let child_headers = if url.origin() == base.origin() {
+        headers.to_vec()
+    } else {
+        headers.iter().filter(|(name, _)| *name != header::AUTHORIZATION && *name != header::COOKIE)
+            .cloned().collect()
+    };
     sessions.insert(token.clone(), Target {
         url,
-        headers: headers.to_vec(),
+        headers: child_headers,
         expires: Instant::now() + SESSION_TTL,
     });
     Ok(format!("/media/{token}"))
