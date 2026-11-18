@@ -83,11 +83,23 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
             invoke.reject("argumentos inválidos para o player nativo")
             return
         }
-        if (!(args.url.startsWith("https://") || args.url.startsWith("http://"))) {
+        if (!isPlayableUrl(args.url)) {
             invoke.reject("endereço de vídeo inválido")
             return
         }
         act.runOnUiThread { openPlayer(invoke, args) }
+    }
+
+    /** Aceita HTTP(S) com host válido, preservando streams locais de torrent e LAN. */
+    private fun isPlayableUrl(raw: String): Boolean {
+        return try {
+            val uri = Uri.parse(raw.trim())
+            (uri.scheme.equals("http", ignoreCase = true) ||
+                uri.scheme.equals("https", ignoreCase = true)) &&
+                !uri.host.isNullOrBlank()
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun openPlayer(invoke: Invoke, args: PlayArgs) {
