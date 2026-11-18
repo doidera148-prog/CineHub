@@ -29,6 +29,8 @@ import android.view.Gravity
 import android.view.View
 import android.widget.Button
 import android.webkit.WebView
+import android.util.Base64
+import java.io.File
 import org.json.JSONArray
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
@@ -253,6 +255,7 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         dialog.setContentView(frame, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
         var errorMessage: String? = null
+        var subtitleFile: File? = null
         var answered = false
         fun answer() {
             if (answered) return
@@ -262,6 +265,8 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
             val duration = player.duration.takeIf { it > 0L } ?: 0L
             view.player = null
             player.release()
+            subtitleFile?.delete()
+            subtitleFile = null
             if (errorMessage != null) invoke.reject(errorMessage!!)
             else invoke.resolve(JSObject().apply {
                 put("positionMs", position)
@@ -280,14 +285,29 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         handler.post(skipTick)
 
         val item = MediaItem.Builder().setUri(args.url)
-        args.subtitle?.takeIf { it.startsWith("data:text/vtt;base64,") }?.let { uri ->
-            item.setSubtitleConfigurations(listOf(
-                MediaItem.SubtitleConfiguration.Builder(Uri.parse(uri))
-                    .setMimeType(MimeTypes.TEXT_VTT)
-                    .setLanguage("pt")
-                    .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-                    .build()
-            ))
+        args.subtitle?.takeIf { it.startsWith("data:text/vtt;base64,") }?.let { dataUri ->
+            // Evita depender do suporte a data: URI no DataSource do Media3 em diferentes
+            // versões/aparelhos Android. O arquivo temporário é removido ao fechar o player.
+            try {
+                val encoded = dataUri.substringAfter(',', "")
+                val bytes = Base64.decode(encoded, Base64.DEFAULT)
+                if (bytes.isNotEmpty()) {
+                    val file = File.createTempFile("cinehub-subtitle-", ".vtt", act.cacheDir)
+                    file.writeBytes(bytes)
+                    subtitleFile = file
+                    item.setSubtitleConfigurations(listOf(
+                        MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(file))
+                            .setMimeType(MimeTypes.TEXT_VTT)
+                            .setLanguage("pt")
+                            .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+                            .build()
+                    ))
+                }
+            } catch (e: Exception) {
+                subtitleFile?.delete()
+                subtitleFile = null
+                android.util.Log.w("CineHubExoPlayer", "Não foi possível preparar a legenda externa", e)
+            }
         }
         player.setMediaItem(item.build())
         if (args.startMs > 0) player.seekTo(args.startMs)
