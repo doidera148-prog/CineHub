@@ -1765,7 +1765,7 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
   } finally {
     if (IS_WINDOWS && nativePlayerActive) {
       nativePlayerActive = false;
-      closePlayer(false);
+      closePlayer(false, false);
     }
     current = null;
     document.title = 'CineHub';
@@ -2140,15 +2140,17 @@ vjsPlayer.on('error', () => {
   toast(nativeFailure ? `${reason} (player nativo: ${nativeFailure})` : reason);
 });
 
-function closePlayer(fromHistory = false) {
+function closePlayer(fromHistory = false, save = true) {
   if (player.classList.contains('hidden')) return;
   // Esconde primeiro: se salvar o progresso falhar, o usuário ainda consegue sair do vídeo.
   player.classList.add('hidden');
   hideSkip();
-  try {
-    saveProgress(true);
-  } catch (e) {
-    console.warn('progresso não salvo:', e);
+  if (save) {
+    try {
+      saveProgress(true);
+    } catch (e) {
+      console.warn('progresso não salvo:', e);
+    }
   }
   try {
     vjsPlayer.pause();
