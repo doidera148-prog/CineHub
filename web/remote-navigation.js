@@ -31,18 +31,33 @@
     return document.activeElement === el;
   }
   function nearest(from, candidates, direction) {
-    const a = from.getBoundingClientRect(), ax = a.left + a.width / 2, ay = a.top + a.height / 2;
+    const a = from.getBoundingClientRect();
     const horizontal = direction === 'left' || direction === 'right';
+    const aMainStart = horizontal ? a.left : a.top;
+    const aMainEnd = horizontal ? a.right : a.bottom;
+    const aCrossStart = horizontal ? a.top : a.left;
+    const aCrossEnd = horizontal ? a.bottom : a.right;
     let best = null, bestScore = Infinity;
     for (const el of candidates) {
       if (el === from || !el.isConnected) continue;
-      const b = el.getBoundingClientRect(), dx = b.left + b.width / 2 - ax, dy = b.top + b.height / 2 - ay;
-      const ahead = direction === 'right' ? dx > 3 : direction === 'left' ? dx < -3 : direction === 'down' ? dy > 3 : dy < -3;
+      const b = el.getBoundingClientRect();
+      const bMainStart = horizontal ? b.left : b.top;
+      const bMainEnd = horizontal ? b.right : b.bottom;
+      const bCrossStart = horizontal ? b.top : b.left;
+      const bCrossEnd = horizontal ? b.bottom : b.right;
+      // Considera a posição das bordas, não apenas o centro: evita saltos
+      // diagonais quando há cards/botões de tamanhos diferentes.
+      const ahead = direction === 'right' ? bMainStart >= aMainEnd - 2 :
+        direction === 'left' ? bMainEnd <= aMainStart + 2 :
+        direction === 'down' ? bMainStart >= aMainEnd - 2 :
+        bMainEnd <= aMainStart + 2;
       if (!ahead) continue;
-      // Prioriza a direção pressionada e penaliza elementos muito fora do mesmo eixo.
-      const primary = horizontal ? Math.abs(dx) : Math.abs(dy);
-      const cross = horizontal ? Math.abs(dy) : Math.abs(dx);
-      const score = primary + cross * 2.4;
+      const crossGap = Math.max(0, bCrossStart - aCrossEnd, aCrossStart - bCrossEnd);
+      const mainGap = Math.max(0, bMainStart - aMainEnd, aMainStart - bMainEnd);
+      const crossOverlap = crossGap === 0;
+      // Um item na mesma coluna/linha sempre vence um item apenas diagonal.
+      const score = (crossOverlap ? 0 : 10000 + crossGap * 8) + mainGap * 2 +
+        Math.abs(((bCrossStart + bCrossEnd) - (aCrossStart + aCrossEnd)) / 2);
       if (score < bestScore) { best = el; bestScore = score; }
     }
     return best;
