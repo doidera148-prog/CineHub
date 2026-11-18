@@ -6,7 +6,6 @@
 
   const invoke = (command, args) => window.__TAURI__.core.invoke(command, args);
   let credentials = { endpoint: '', username: null, password: null };
-  let currentDirectory = '';
 
   function makePanel() {
     if (view.querySelector('#kodi-panel')) return;
@@ -80,7 +79,6 @@
   }
 
   async function browseDirectory(directory) {
-    currentDirectory = directory;
     const listing = view.querySelector('#kodi-listing');
     const status = view.querySelector('#kodi-status');
     if (!listing) return;
