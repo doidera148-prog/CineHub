@@ -1917,6 +1917,7 @@ async function route() {
   const path = location.hash.replace(/^#\/?/, '').split('?')[0];
   const [section, kind, id] = path.split('/');
   const active = section === 'detail' ? '' : section || 'home';
+  document.body.classList.toggle('search-active', active === 'search');
   if (player.classList.contains('hidden') && section !== 'detail') {
     document.title = PAGE_TITLES[active] ? `${PAGE_TITLES[active]} · CineHub` : 'CineHub';
   }
