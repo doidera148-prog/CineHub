@@ -167,7 +167,7 @@ function askConfirm(msg, okLabel) {
 }
 
 // Funções puras (URLs seguras, ordenação de fontes, próximo episódio) vêm de lib.js, testadas com node.
-const { isWebUrl, cssUrl, str, num, cleanFav, cleanProgress, mergeBackupData, createBackupData, writeStorageBatch, progressPercent, sortStreams, nextEpisode, torrentLanguage, isSeriesLike, typeLabel, qualityLabel, filterStreams, sortStreamsBy } = window.CineHubLib;
+const { isWebUrl, cssUrl, str, num, cleanFav, cleanProgress, mergeBackupData, createBackupData, writeStorageBatch, progressPercent, sortStreams, nextEpisode, torrentLanguage, isSeriesLike, typeLabel, qualityLabel, filterStreams, sortStreamsBy, isMkvStream } = window.CineHubLib;
 
 const STREAM_LANG = { pt: 'Português', en: 'Inglês', other: 'Outros' };
 const STREAM_SORTS = [
@@ -1287,7 +1287,8 @@ async function loadStreams(kind, id, label, meta) {
   if (seq !== streamsSeq) return;
   const { subtitles = [], errors = [] } = result;
   // Fontes que tocam vêm primeiro, depois as de maior resolução (e dublagem em português).
-  const streams = sortStreams(Array.isArray(result.streams) ? result.streams : []);
+  const allStreams = Array.isArray(result.streams) ? result.streams : [];
+  const streams = sortStreams(allStreams.filter((stream) => !isMkvStream(stream)));
   const box = $('#streams') || $('#body');
   if (!box) return;
   box.innerHTML = '';
@@ -1305,7 +1306,9 @@ async function loadStreams(kind, id, label, meta) {
   if (!streams.length) {
     const message = document.createElement('p');
     message.className = 'muted';
-    message.textContent = 'Nenhuma fonte encontrada. Verifique os addons instalados ou tente novamente.';
+    message.textContent = allStreams.length && allStreams.every(isMkvStream)
+      ? 'As fontes encontradas estão em MKV, que não é compatível com este aparelho. Procure uma versão MP4 ou WebM.'
+      : 'Nenhuma fonte MP4/WebM compatível encontrada. Verifique os addons instalados ou tente novamente.';
     const retry = document.createElement('button');
     retry.type = 'button';
     retry.className = 'chip';
@@ -1976,7 +1979,7 @@ async function playNextEpisode() {
       'Buscando fontes do próximo episódio',
       call('streams', { kind: epKind, id: ep.id }),
     );
-    const pick = sortStreams(Array.isArray(streams) ? streams : []).find((s) => s.url || s.externalUrl || s.infoHash || s.hash);
+    const pick = sortStreams((Array.isArray(streams) ? streams : []).filter((s) => !isMkvStream(s))).find((s) => s.url || s.externalUrl || s.infoHash || s.hash);
     if (!pick) {
       toast('Sem fontes para o próximo episódio.');
       return;
