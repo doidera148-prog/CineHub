@@ -199,6 +199,10 @@ jobs:
         if: matrix.platform == 'windows-latest'
         working-directory: src-tauri
         run: cargo tauri build --config tauri.windows.conf.json --features mpv
+      - name: Testar inicialização das opções OSC do libmpv
+        if: matrix.platform == 'windows-latest'
+        working-directory: src-tauri
+        run: cargo test --features mpv --lib mpv_osc_script_options_are_valid
       - name: Verificar se o instalador desktop foi gerado
         shell: bash
         run: |
