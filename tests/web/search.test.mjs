@@ -142,6 +142,20 @@ try {
   await page.waitForFunction(() => document.querySelector('#anime-search-status')?.textContent === '1 resultado');
   assert.match(await page.locator('#anime-search-results').innerText(), /Anime naruto/);
 
+  // Acentos, símbolos, aspas e caracteres CJK devem atravessar a pesquisa sem corrupção.
+  await page.goto(`${base}/#/search?q=inicial`);
+  const unicodeQuery = 'ação "東京" 🎬';
+  await page.locator('#sq').fill(unicodeQuery);
+  await waitForQuery(unicodeQuery, null);
+  assert.equal((await calls()).at(-1).q, unicodeQuery, 'caracteres Unicode devem ser preservados');
+
+  // O limite de 200 caracteres é aplicado no próprio campo e na consulta enviada.
+  const oversized = 'x'.repeat(260);
+  await page.locator('#sq').fill(oversized);
+  assert.equal(await page.locator('#sq').inputValue().then(value => value.length), 200);
+  await waitForQuery('x'.repeat(200), null);
+  assert.equal((await calls()).at(-1).q.length, 200);
+
   assert.deepEqual(errors, [], 'a pesquisa não deve produzir erros JavaScript/console');
   console.log('Pesquisa UI: debounce, normalização, limpar, concorrência, vazio/erro, Escape, IME, barra superior e animes — OK');
 } finally {
