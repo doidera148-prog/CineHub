@@ -256,9 +256,15 @@ impl TorrentEngine {
             }
         };
 
-        if let Some(previous) = active.replace(id).filter(|prev| *prev != id) {
-            let _ = session.delete(TorrentIdOrHash::Id(previous), true).await;
+        if let Some(previous) = *active {
+            if previous != id {
+                if let Err(error) = session.delete(TorrentIdOrHash::Id(previous), true).await {
+                    let _ = session.delete(TorrentIdOrHash::Id(id), true).await;
+                    return Err(format!("não foi possível encerrar o torrent anterior: {error:#}"));
+                }
+            }
         }
+        *active = Some(id);
         let token = Uuid::new_v4().simple().to_string();
         {
             let mut files = self.files.write().await;
@@ -331,6 +337,8 @@ impl TorrentEngine {
     /// Troca o arquivo que toca dentro de um torrent já aberto (outro episódio, outro idioma).
     pub async fn select_file(&self, token: &str, index: usize) -> Result<TorrentPlayback, String> {
         const GONE: &str = "o torrent não está mais aberto; abra de novo";
+        // Serializa a troca de arquivo com abertura e encerramento da sessão.
+        let _active = self.active.lock().await;
         let (torrent, videos) = {
             let files = self.files.read().await;
             let entry = files.get(token).ok_or(GONE)?;
@@ -357,6 +365,32 @@ impl TorrentEngine {
             size_bytes: chosen.size,
             videos: videos.iter().map(VideoFile::from).collect(),
         })
+    }
+
+    /// Encerra a sessão ativa associada ao token e invalida imediatamente sua URL local.
+    pub async fn close(&self, token: &str) -> Result<bool, String> {
+        let mut active = self.active.lock().await;
+        let torrent = {
+            let files = self.files.read().await;
+            files.get(token).map(|entry| entry.torrent.clone())
+        };
+        let Some(torrent) = torrent else {
+            return Ok(false);
+        };
+        let id = torrent.id();
+        if *active != Some(id) {
+            return Ok(false);
+        }
+
+        let session = self.session().await?;
+        session
+            .delete(TorrentIdOrHash::Id(id), true)
+            .await
+            .map_err(|e| format!("não foi possível encerrar o torrent: {e:#}"))?;
+
+        self.files.write().await.remove(token);
+        *active = None;
+        Ok(true)
     }
 }
 
