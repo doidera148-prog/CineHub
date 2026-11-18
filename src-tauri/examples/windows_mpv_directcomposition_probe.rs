@@ -106,11 +106,7 @@ mod windows_probe {
 
         let mut dcomp_device = ComPtr::new();
         check(
-            DCompositionCreateDevice(
-                dxgi_device.as_ptr(),
-                &IID_DCOMP_DEVICE,
-                &mut dcomp_device.0,
-            ),
+            DCompositionCreateDevice(dxgi_device.as_ptr(), &IID_DCOMP_DEVICE, &mut dcomp_device.0),
             "DCompositionCreateDevice",
         )?;
 
