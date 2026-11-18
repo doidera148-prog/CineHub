@@ -746,7 +746,7 @@ const COMMUNITY_ADDONS = [
   { id: 'com.stremio.torrentio.addon', name: 'Torrentio', version: '0.0.15',
     description: 'Addon comunitário de fontes de vídeo. A disponibilidade depende dos provedores e das configurações do serviço.',
     url: 'https://torrentio.strem.fun/manifest.json', logo: 'https://torrentio.strem.fun/images/logo_v1.png',
-    categories: ['streams'], tags: ['Filmes', 'Séries', 'Anime', 'Streams'] },,
+    categories: ['streams'], tags: ['Filmes', 'Séries', 'Anime', 'Streams'] },
   { id: 'stremio.addons.mediafusion|elfhosted', name: 'MediaFusion | ElfHosted', version: '6.2.0',
     description: 'Addon versátil com fontes P2P, provedores debrid, catálogos e suporte a vários idiomas. Pode ser usado sem configurar uma conta premium em modos compatíveis.',
     url: 'https://mediafusion.elfhosted.com/manifest.json',
