@@ -37,6 +37,44 @@
     return `url('${safe}')`;
   }
 
+  // Mescla um backup sem confiar nas chaves ou nos registros recebidos.
+  function mergeBackupData(currentFavs, currentProgress, data, maxFavs = 500, maxProgress = 50) {
+    if (!data || data.app !== 'CineHub' || data.version !== 1) throw new Error('backup incompatível ou inválido');
+
+    const favs = Array.isArray(currentFavs) ? currentFavs.slice() : [];
+    const ids = new Set(favs.map((f) => f && f.id).filter((id) => typeof id === 'string'));
+    if (Array.isArray(data.favs)) {
+      for (const item of data.favs) {
+        if (!item || typeof item.id !== 'string' || !item.id.trim() || item.id.length > 512 || ids.has(item.id)) continue;
+        favs.push(cleanFav(item));
+        ids.add(item.id);
+        if (favs.length >= maxFavs) break;
+      }
+    }
+
+    // Objetos comuns podem herdar chaves como __proto__; use um dicionário sem protótipo.
+    const progress = Object.create(null);
+    const forbidden = new Set(['__proto__', 'prototype', 'constructor']);
+    const mergeProgress = (source) => {
+      if (!source || typeof source !== 'object' || Array.isArray(source)) return;
+      for (const [key, value] of Object.entries(source)) {
+        if (!key || key.length > 512 || forbidden.has(key) || !value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const incoming = cleanProgress(value);
+        incoming.t = Math.max(0, incoming.t);
+        incoming.duration = Math.max(0, incoming.duration);
+        incoming.updated = Math.max(0, incoming.updated);
+        if (!Object.hasOwn(progress, key) || incoming.updated > progress[key].updated) progress[key] = incoming;
+      }
+    };
+    mergeProgress(currentProgress);
+    mergeProgress(data.progress);
+
+    const kept = Object.entries(progress)
+      .sort((a, b) => b[1].updated - a[1].updated)
+      .slice(0, maxProgress);
+    return { favs: favs.slice(0, maxFavs), progress: Object.fromEntries(kept) };
+  }
+
   function cleanFav(f) {
     return { id: str(f.id), type: str(f.type), name: str(f.name), poster: str(f.poster), releaseInfo: str(f.releaseInfo) };
   }
@@ -190,6 +228,7 @@
     isWebUrl,
     cssUrl,
     cleanFav,
+    mergeBackupData,
     cleanProgress,
     progressPercent,
     sortStreams,
