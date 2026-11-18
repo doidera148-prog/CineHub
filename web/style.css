@@ -212,6 +212,7 @@ main {
 
 /* Na página de pesquisa, o campo interno é o único visível; evita duas buscas simultâneas. */
 body.search-active .topbar { display: none; }
+body.animes-active .topbar { display: none; }
 
 /* Busca: campo compacto à direita que abre ao receber foco. */
 .topbar {
