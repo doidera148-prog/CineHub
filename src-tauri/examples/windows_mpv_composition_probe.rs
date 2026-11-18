@@ -27,8 +27,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mpv = Mpv::with_initializer(|init| {
         init.set_option("vo", "gpu-next")?;
-        init.set_option("gpu-api", "d3d11")?;
+        init.set_option("gpu-context", "d3d11")?;
         init.set_option("d3d11-output-mode", "composition")?;
+        init.set_option("d3d11-composition-size", "1280x720")?;
         init.set_option("hwdec", "auto-safe")?;
         init.set_option("ytdl", "no")?;
         init.set_option("force-window", "yes")?;
