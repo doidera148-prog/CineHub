@@ -279,9 +279,32 @@
     return list;
   }
 
+  // Todas as faixas são mantidas; o idioma preferido só define a seleção inicial.
+  function selectSubtitles(stream, subtitles, preferred = 'pt') {
+    const all = [...(Array.isArray(stream?.subtitles) ? stream.subtitles : []), ...(Array.isArray(subtitles) ? subtitles : [])];
+    const seen = new Set();
+    const languageOf = (item) => String(item?.lang || item?.language || item?.srclang || '').trim();
+    const matches = (language, choice) => {
+      const value = language.toLowerCase();
+      if (choice === 'pt') return /^(por|pt(?:[-_]|$)|portugu[eê]s)/i.test(value);
+      if (choice === 'en') return /^(eng|en(?:[-_]|$)|english)/i.test(value);
+      return false;
+    };
+    return all.filter((item) => {
+      const url = typeof item?.url === 'string' ? item.url.trim() : '';
+      if (!(url.startsWith('http://') || url.startsWith('https://')) || seen.has(url)) return false;
+      seen.add(url); return true;
+    }).map((item, index) => {
+      const language = languageOf(item) || 'und';
+      const label = String(item?.label || item?.name || '').trim() || (language === 'und' ? 'Legenda ' + (index + 1) : language);
+      return { url: item.url.trim(), language, label, isDefault: preferred !== 'off' && matches(language, preferred) };
+    }).sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
+  }
+
   root.CineHubLib = {
     str,
     isLocalTorrentStream,
+    selectSubtitles,
     shouldUseMediaProxy,
     isTorrentSource,
     qualityLabel,

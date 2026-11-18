@@ -1,6 +1,7 @@
 package com.cinehub.exoplayer
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.app.Dialog
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -10,6 +11,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
+import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -39,8 +42,8 @@ import androidx.activity.OnBackPressedCallback
 class PlayArgs {
     lateinit var url: String
     var startMs: Long = 0
-    /** Legenda VTT como data: URI (opcional). */
-    var subtitle: String? = null
+    /** Lista JSON de legendas VTT em base64, com idioma, rótulo e preferência inicial. */
+    var subtitles: String? = null
     /** Trechos para pular, como JSON: [{"type":"intro","start":5,"end":90}, ...] (opcional). */
     var segments: String? = null
 }
@@ -158,41 +161,68 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
                 ).build().show()
             }
         }
-        // Controle direto de legendas: não depende do diálogo genérico de seleção.
-        // Isso permite desligar inclusive uma faixa externa que foi selecionada automaticamente.
-        var subtitlesDisabled = false
+        // Seletor de legendas: lista todas as faixas e oferece a opção Desativadas.
+        var availableSubtitleTracks: List<Pair<Tracks.Group, Int>> = emptyList()
         val subtitleButton = Button(act).apply {
-            text = "Desativar legendas"
+            text = "Legendas ▾"
             isAllCaps = false
             visibility = View.GONE
             isFocusable = true
             isFocusableInTouchMode = true
             setOnClickListener {
-                subtitlesDisabled = !subtitlesDisabled
-                player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, subtitlesDisabled)
-                    .build()
-                text = if (subtitlesDisabled) "Ativar legendas" else "Desativar legendas"
+                val tracks = availableSubtitleTracks
+                if (tracks.isEmpty()) {
+                    AlertDialog.Builder(act).setTitle("Legendas")
+                        .setMessage("Nenhuma legenda disponível nesta fonte.")
+                        .setPositiveButton("OK", null).show()
+                } else {
+                    val choices = mutableListOf("Desativadas")
+                    tracks.forEachIndexed { index, entry ->
+                        val format = entry.first.getTrackFormat(entry.second)
+                        val language = format.language?.takeIf { it.isNotBlank() }
+                        val label = format.label?.takeIf { it.isNotBlank() }
+                            ?: language?.let { "Legenda ($it)" } ?: ("Legenda " + (index + 1))
+                        choices.add(label)
+                    }
+                    val selected = if (player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) 0
+                        else tracks.indexOfFirst { it.first.isTrackSelected(it.second) }.let { if (it < 0) -1 else it + 1 }
+                    AlertDialog.Builder(act).setTitle("Legendas")
+                        .setSingleChoiceItems(choices.toTypedArray(), selected) { dialog, which ->
+                            val builder = player.trackSelectionParameters.buildUpon()
+                                .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                            if (which == 0) {
+                                builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                                subtitleButton.text = "Legendas: desativadas ▾"
+                            } else {
+                                val (group, trackIndex) = tracks[which - 1]
+                                builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                                    .addOverride(TrackSelectionOverride(group.mediaTrackGroup, listOf(trackIndex)))
+                                subtitleButton.text = "Legendas: " + choices[which] + " ▾"
+                            }
+                            player.trackSelectionParameters = builder.build()
+                            dialog.dismiss()
+                        }.setNegativeButton("Fechar", null).show()
+                }
             }
         }
         var hasMultipleAudioTracks = false
-        var hasSubtitleTracks = false
         fun updateTrackButtons(visible: Boolean) {
             audioButton.visibility = if (hasMultipleAudioTracks && visible) View.VISIBLE else View.GONE
-            subtitleButton.visibility = if (hasSubtitleTracks && visible) View.VISIBLE else View.GONE
+            // Botão fica disponível mesmo sem faixa para explicar que a fonte não oferece legenda.
+            subtitleButton.visibility = if (visible) View.VISIBLE else View.GONE
         }
         player.addListener(object : Player.Listener {
-            override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+            override fun onTracksChanged(tracks: Tracks) {
                 hasMultipleAudioTracks = tracks.groups
                     .filter { it.type == C.TRACK_TYPE_AUDIO }
-                    .sumOf { group ->
-                        (0 until group.length).count { group.isTrackSupported(it) }
-                    } > 1
-                // Considera as faixas de texto presentes mesmo quando o renderer não
-                // consegue classificá-las como suportadas antes da preparação completa.
-                hasSubtitleTracks = tracks.groups
-                    .any { it.type == C.TRACK_TYPE_TEXT && it.length > 0 }
-                // Os seletores só aparecem junto com os controles do player.
+                    .sumOf { group -> (0 until group.length).count { group.isTrackSupported(it) } } > 1
+                availableSubtitleTracks = tracks.groups
+                    .filter { it.type == C.TRACK_TYPE_TEXT }
+                    .flatMap { group -> (0 until group.length)
+                        .filter { group.isTrackSupported(it) || group.isTrackSelected(it) }
+                        .map { index -> group to index }
+                    }
+                if (availableSubtitleTracks.isEmpty()) subtitleButton.text = "Legendas ▾"
                 updateTrackButtons(view.isControllerFullyVisible)
             }
         })
@@ -255,7 +285,7 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         dialog.setContentView(frame, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
         var errorMessage: String? = null
-        var subtitleFile: File? = null
+        val subtitleFiles = mutableListOf<File>()
         var answered = false
         fun answer() {
             if (answered) return
@@ -265,8 +295,8 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
             val duration = player.duration.takeIf { it > 0L } ?: 0L
             view.player = null
             player.release()
-            subtitleFile?.delete()
-            subtitleFile = null
+            subtitleFiles.forEach { it.delete() }
+            subtitleFiles.clear()
             if (errorMessage != null) invoke.reject(errorMessage!!)
             else invoke.resolve(JSObject().apply {
                 put("positionMs", position)
@@ -285,30 +315,35 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         handler.post(skipTick)
 
         val item = MediaItem.Builder().setUri(args.url)
-        args.subtitle?.takeIf { it.startsWith("data:text/vtt;base64,") }?.let { dataUri ->
-            // Evita depender do suporte a data: URI no DataSource do Media3 em diferentes
-            // versões/aparelhos Android. O arquivo temporário é removido ao fechar o player.
-            try {
-                val encoded = dataUri.substringAfter(',', "")
+        val subtitleConfigurations = mutableListOf<MediaItem.SubtitleConfiguration>()
+        try {
+            val subtitleArray = args.subtitles?.let { JSONArray(it) } ?: JSONArray()
+            for (index in 0 until subtitleArray.length()) {
+                val subtitle = subtitleArray.optJSONObject(index) ?: continue
+                val encoded = subtitle.optString("data")
+                if (encoded.isBlank()) continue
                 val bytes = Base64.decode(encoded, Base64.DEFAULT)
-                if (bytes.isNotEmpty()) {
-                    val file = File.createTempFile("cinehub-subtitle-", ".vtt", act.cacheDir)
-                    file.writeBytes(bytes)
-                    subtitleFile = file
-                    item.setSubtitleConfigurations(listOf(
-                        MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(file))
-                            .setMimeType(MimeTypes.TEXT_VTT)
-                            .setLanguage("pt")
-                            .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-                            .build()
-                    ))
-                }
-            } catch (e: Exception) {
-                subtitleFile?.delete()
-                subtitleFile = null
-                android.util.Log.w("CineHubExoPlayer", "Não foi possível preparar a legenda externa", e)
+                if (bytes.isEmpty()) continue
+                val file = File.createTempFile("cinehub-subtitle-", ".vtt", act.cacheDir)
+                file.writeBytes(bytes)
+                subtitleFiles.add(file)
+                val language = subtitle.optString("language", "und").takeIf { it.isNotBlank() } ?: "und"
+                val label = subtitle.optString("label", "Legenda " + (index + 1)).takeIf { it.isNotBlank() }
+                    ?: "Legenda " + (index + 1)
+                val isDefault = subtitle.optBoolean("isDefault", false)
+                subtitleConfigurations.add(
+                    MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(file))
+                        .setMimeType(MimeTypes.TEXT_VTT)
+                        .setLanguage(language)
+                        .setLabel(label)
+                        .setSelectionFlags(if (isDefault) C.SELECTION_FLAG_DEFAULT else 0)
+                        .build()
+                )
             }
+        } catch (e: Exception) {
+            android.util.Log.w("CineHubExoPlayer", "Não foi possível preparar uma ou mais legendas externas", e)
         }
+        if (subtitleConfigurations.isNotEmpty()) item.setSubtitleConfigurations(subtitleConfigurations)
         player.setMediaItem(item.build())
         if (args.startMs > 0) player.seekTo(args.startMs)
         player.prepare()

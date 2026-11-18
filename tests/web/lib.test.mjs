@@ -13,6 +13,37 @@ vm.createContext(ctx);
 vm.runInContext(src, ctx);
 const L = ctx.CineHubLib;
 
+test('seleciona todas as legendas externas e prioriza o idioma preferido', () => {
+  const stream = { subtitles: [
+    { lang: 'eng', url: 'https://subs.test/en.vtt' },
+    { lang: 'pt-BR', url: 'https://subs.test/pt.vtt' },
+    { lang: 'por', url: 'https://subs.test/pt.vtt' },
+  ] };
+  const addons = [
+    { language: 'Português (Brasil)', url: 'https://subs.test/pt2.vtt', label: 'Português Brasil' },
+    { language: 'English', url: 'https://subs.test/en2.vtt' },
+    { lang: 'pt', url: 'file:///private.vtt' },
+  ];
+  const selected = L.selectSubtitles(stream, addons, 'pt');
+  assert.equal(selected.length, 4);
+  assert.equal(selected[0].url, 'https://subs.test/pt.vtt');
+  assert.equal(selected[0].isDefault, true);
+  assert.equal(selected[1].isDefault, true);
+  assert.equal(selected.some((item) => item.language === 'eng'), true);
+  assert.equal(L.selectSubtitles(stream, addons, 'en')[0].url, 'https://subs.test/en.vtt');
+  assert.equal(L.selectSubtitles(stream, addons, 'off').every((item) => !item.isDefault), true);
+});
+
+test('ignora legendas sem URL e remove URLs duplicadas', () => {
+  const selected = L.selectSubtitles({ subtitles: [
+    { lang: 'pt', url: 'https://subs.test/a.vtt' },
+    { lang: 'en', url: 'https://subs.test/a.vtt' },
+    { lang: 'pt' },
+  ] }, [], 'pt');
+  assert.equal(selected.length, 1);
+  assert.equal(selected[0].language, 'pt');
+});
+
 test('só http(s) é aceito como URL de imagem', () => {
   assert.equal(L.isWebUrl('https://a.example/p.jpg'), true);
   assert.equal(L.isWebUrl('javascript:alert(1)'), false);

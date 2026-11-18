@@ -1655,20 +1655,22 @@ let resumeHandler = null; // retomada da posição salva no próximo loadedmetad
 const IS_ANDROID = /Android/i.test(navigator.userAgent);
 const IS_WINDOWS = /Windows/i.test(navigator.userAgent);
 
-// Legenda em português como data: URI (VTT), para o ExoPlayer carregar sem arquivo local.
-async function subtitleDataUri(stream, subs) {
-  const sub = pickSubtitles(stream, subs)[0];
-  if (!sub) return null;
-  try {
-    const vtt = await call('subtitle', { url: sub.url });
-    const bytes = new TextEncoder().encode(vtt);
-    let binary = '';
-    for (const b of bytes) binary += String.fromCharCode(b);
-    return 'data:text/vtt;base64,' + btoa(binary);
-  } catch (e) {
-    console.warn('legenda indisponível para o player nativo:', e);
-    return null;
-  }
+// Baixa todas as legendas externas para que o usuário escolha no ExoPlayer.
+async function subtitlePayload(stream, subs) {
+  const selected = pickSubtitles(stream, subs).slice(0, 8);
+  const tracks = await Promise.all(selected.map(async (sub) => {
+    try {
+      const vtt = await call('subtitle', { url: sub.url });
+      const bytes = new TextEncoder().encode(vtt);
+      let binary = '';
+      for (const b of bytes) binary += String.fromCharCode(b);
+      return { data: btoa(binary), language: sub.language, label: sub.label, isDefault: sub.isDefault };
+    } catch (e) {
+      console.warn('legenda indisponível para o player nativo:', sub.label, e);
+      return null;
+    }
+  }));
+  return JSON.stringify(tracks.filter(Boolean));
 }
 
 // Texto legível para erros vindos do Tauri/plugins (que podem ser strings ou objetos).
@@ -1695,9 +1697,8 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
   try {
     const command = IS_ANDROID ? 'plugin:exoplayer|play' : 'player_play';
     const args = { url: stream.url, startMs };
-    // Android: legenda como data: URI (o ExoPlayer carrega direto). Desktop: URL, que o
-    // backend baixa e entrega ao mpv como arquivo.
-    if (IS_ANDROID) args.subtitle = await subtitleDataUri(stream, subs);
+    // Android recebe todas as faixas para seleção no ExoPlayer; desktop usa a preferida.
+    if (IS_ANDROID) args.subtitles = await subtitlePayload(stream, subs);
     else args.subtitleUrl = pickSubtitles(stream, subs)[0]?.url ?? null;
     // Botão de pular no player nativo: tecla F12 (mpv, desktop) ou botão na tela (Android)
     args.segments = IS_ANDROID ? JSON.stringify(segments) : segments;
@@ -1809,13 +1810,7 @@ document.addEventListener('visibilitychange', () => {
 
 // Legendas: as da própria fonte + as de addons de legenda, só em português.
 function pickSubtitles(stream, subs) {
-  const re = SUB_LANGS[subPref()];
-  if (!re) return [];
-  const all = [...(stream.subtitles || []), ...(Array.isArray(subs) ? subs : [])];
-  const languageOf = (subtitle) => String(subtitle?.lang || subtitle?.language || subtitle?.srclang || '').trim();
-  // Addons Stremio podem devolver códigos ISO (por/pt-BR) ou nomes ("Português",
-  // "Portuguese (Brazil)"). Aceita os dois formatos para não descartar uma legenda válida.
-  return all.filter((s) => s?.url && re.test(languageOf(s))).slice(0, 1);
+  return window.CineHubLib.selectSubtitles(stream, subs, subPref());
 }
 
 function clearTextTracks() {
