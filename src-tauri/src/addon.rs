@@ -562,8 +562,10 @@ pub fn literal_host_is_public(raw: &str) -> bool {
     }
 }
 
-/// Checagem completa: os literais e também o DNS. Todo endereço que o nome resolve
-/// precisa ser público. (Um DNS que muda a resposta depois ainda pode burlar isso.)
+/// Checagem completa: o host precisa resolver para pelo menos um IP público.
+/// Respostas DNS mistas podem ocorrer em redes móveis, DNS filtrado ou split-horizon;
+/// isso não abre acesso à rede privada porque PublicResolver filtra novamente os IPs
+/// no momento da conexão HTTP e só entrega endereços públicos ao cliente.
 pub async fn is_safe_url(raw: &str) -> bool {
     if !literal_host_is_public(raw) {
         return false;
@@ -583,10 +585,7 @@ pub async fn is_safe_url(raw: &str) -> bool {
     }
     let port = url.port_or_known_default().unwrap_or(443);
     match tokio::net::lookup_host((host, port)).await {
-        Ok(addrs) => {
-            let addrs: Vec<_> = addrs.collect();
-            !addrs.is_empty() && addrs.iter().all(|a| ip_is_public(a.ip()))
-        }
+        Ok(addrs) => addrs.into_iter().any(|addr| ip_is_public(addr.ip())),
         Err(_) => false,
     }
 }
