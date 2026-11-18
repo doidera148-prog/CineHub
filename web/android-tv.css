@@ -1,0 +1,201 @@
+/* Interface dedicada para Android TV: navegação em coluna e conteúdo em trilhos. */
+body.tv-mode {
+  --tv-rail: 112px;
+  --tv-card: clamp(176px, 13vw, 232px);
+  --tv-gap: clamp(22px, 2.2vw, 38px);
+  --gutter: clamp(34px, 4vw, 76px);
+  min-height: 100vh;
+  overflow-x: hidden;
+  font-size: 18px;
+}
+.tv-mode .sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: var(--tv-rail);
+  height: 100vh;
+  padding: 30px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 44px;
+  background: linear-gradient(90deg, #080809 0%, rgba(8,8,9,.97) 76%, rgba(8,8,9,.78) 100%);
+  border-right: 1px solid rgba(255,255,255,.07);
+  box-shadow: 12px 0 42px rgba(0,0,0,.22);
+}
+.tv-mode .sidebar.solid,
+.tv-mode .sidebar:focus-within { background: #080809; }
+.tv-mode .logo {
+  margin: 0;
+  font-size: 1.8rem;
+  letter-spacing: .02em;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+}
+.tv-mode #nav-main {
+  width: 100%;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
+  gap: 12px;
+  overflow: visible;
+}
+.tv-mode #nav-main a {
+  min-height: 76px;
+  padding: 10px 4px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  border-radius: 16px;
+  color: #a6a6ad;
+  font-size: 11px;
+  font-weight: 650;
+  text-align: center;
+  white-space: normal;
+  transition: color .16s ease, background .16s ease, transform .16s ease;
+}
+.tv-mode #nav-main .ico {
+  display: block;
+  font-size: 27px;
+  line-height: 1;
+}
+.tv-mode #nav-main .lbl { display: block; }
+.tv-mode #nav-main a::after { display: none; }
+.tv-mode #nav-main a.active {
+  color: #fff;
+  background: rgba(229,9,20,.18);
+  box-shadow: inset 3px 0 #e50914;
+}
+.tv-mode main {
+  width: calc(100% - var(--tv-rail));
+  margin-left: var(--tv-rail);
+  padding: 28px var(--gutter) 70px;
+}
+.tv-mode .topbar {
+  position: absolute;
+  top: 28px;
+  right: var(--gutter);
+}
+.tv-mode .topbar input,
+.tv-mode .topbar input:focus {
+  width: 260px;
+  height: 54px;
+  padding: 0 20px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.09);
+  border: 1px solid rgba(255,255,255,.12);
+  color: #fff;
+  font-size: 16px;
+}
+.tv-mode .topbar input:focus {
+  width: 340px;
+  background: #17171b;
+  border-color: rgba(255,255,255,.7);
+}
+.tv-mode #view > h1 {
+  margin: 22px 0 26px;
+  font-size: clamp(30px, 3vw, 44px);
+}
+.tv-mode .billboard {
+  height: clamp(390px, 56vh, 620px);
+  min-height: 390px;
+  margin: 0 calc(-1 * var(--gutter)) 34px;
+  border-radius: 0 0 22px 22px;
+}
+.tv-mode .billboard-info {
+  max-width: min(660px, 58%);
+  padding: 0 0 48px var(--gutter);
+}
+.tv-mode .billboard h2 { font-size: clamp(48px, 5vw, 76px); }
+.tv-mode .billboard p { font-size: 17px; max-width: 560px; }
+.tv-mode .billboard .actions { gap: 16px; }
+.tv-mode .billboard .btn-link {
+  min-height: 58px;
+  padding: 0 26px;
+  font-size: 17px;
+}
+.tv-mode .row { margin: 0 0 38px; }
+.tv-mode .row h2 {
+  margin: 0 0 16px;
+  font-size: clamp(21px, 2vw, 28px);
+  font-weight: 700;
+}
+.tv-mode .row h2 .small { font-size: 13px; }
+.tv-mode .strip {
+  gap: var(--tv-gap);
+  padding: 14px 10px 24px;
+  overflow-x: auto;
+  overflow-y: visible;
+  scroll-padding-inline: 24px;
+  scrollbar-width: none;
+}
+.tv-mode .strip::-webkit-scrollbar { display: none; }
+.tv-mode .card {
+  flex: 0 0 var(--tv-card);
+  transform-origin: center center;
+  border-radius: 13px;
+  padding: 0;
+  transition: transform .16s ease, filter .16s ease;
+}
+.tv-mode .card .poster {
+  height: calc(var(--tv-card) * 1.48);
+  border-radius: 13px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.28);
+}
+.tv-mode .card .title {
+  margin-top: 10px;
+  font-size: 15px;
+  font-weight: 650;
+}
+.tv-mode .card .small { font-size: 12px; }
+.tv-mode .card:focus,
+.tv-mode .card:focus-visible,
+.tv-mode #nav-main a:focus-visible,
+.tv-mode button:focus-visible,
+.tv-mode input:focus-visible,
+.tv-mode select:focus-visible,
+.tv-mode .btn-link:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 5px;
+  box-shadow: 0 0 0 8px rgba(229,9,20,.62), 0 14px 32px rgba(0,0,0,.5);
+  z-index: 5;
+}
+.tv-mode .card:focus,
+.tv-mode .card:focus-visible { transform: scale(1.075); }
+.tv-mode button, .tv-mode .btn-link, .tv-mode input, .tv-mode select {
+  min-height: 54px;
+}
+.tv-mode .seasons { gap: 14px; }
+.tv-mode .seasons button,
+.tv-mode .actions button,
+.tv-mode .dialog-actions button { padding: 14px 22px; font-size: 16px; }
+.tv-mode .episodes { grid-template-columns: repeat(2, minmax(280px, 1fr)); gap: 12px; }
+.tv-mode .ep { min-height: 68px; font-size: 16px; }
+.tv-mode #streams { max-width: 980px; padding: 18px; }
+.tv-mode .stream { min-height: 76px; font-size: 16px; }
+.tv-mode .stream strong { font-size: 17px; }
+.tv-mode .stream span { font-size: 15px; }
+.tv-mode .addon { min-height: 110px; padding: 20px; }
+.tv-mode .addon button { min-width: 130px; }
+.tv-mode .dataactions { gap: 14px; }
+.tv-mode .dataactions button { min-height: 58px; padding-inline: 22px; }
+.tv-mode :focus:not(:focus-visible) { outline: none; }
+.tv-mode .busy { top: 26px; left: 50%; }
+.tv-mode .toast { bottom: 34px; font-size: 16px; padding: 16px 24px; }
+.tv-mode #player .player-box { width: min(94vw, 1600px); }
+.tv-mode #video { max-height: 90vh; }
+.tv-mode #close-player { min-width: 62px; min-height: 62px; font-size: 25px; }
+.tv-mode .dialog-box { padding: 28px; min-width: 420px; }
+.tv-mode .dialog-actions { gap: 14px; }
+@media (max-width: 1100px) {
+  body.tv-mode { --tv-rail: 94px; --tv-card: 168px; --tv-gap: 22px; --gutter: 28px; }
+  .tv-mode .sidebar { padding-inline: 8px; }
+  .tv-mode #nav-main a { min-height: 68px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tv-mode .card, .tv-mode #nav-main a { transition: none; }
+}
