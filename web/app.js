@@ -746,7 +746,22 @@ const COMMUNITY_ADDONS = [
   { id: 'com.stremio.torrentio.addon', name: 'Torrentio', version: '0.0.15',
     description: 'Addon comunitário de fontes de vídeo. A disponibilidade depende dos provedores e das configurações do serviço.',
     url: 'https://torrentio.strem.fun/manifest.json', logo: 'https://torrentio.strem.fun/images/logo_v1.png',
-    categories: ['streams'], tags: ['Filmes', 'Séries', 'Anime', 'Streams'] },
+    categories: ['streams'], tags: ['Filmes', 'Séries', 'Anime', 'Streams'] },,
+  { id: 'stremio.addons.mediafusion|elfhosted', name: 'MediaFusion | ElfHosted', version: '6.2.0',
+    description: 'Addon versátil com fontes P2P, provedores debrid, catálogos e suporte a vários idiomas. Pode ser usado sem configurar uma conta premium em modos compatíveis.',
+    url: 'https://mediafusion.elfhosted.com/manifest.json',
+    logo: 'https://raw.githubusercontent.com/mhdzumair/MediaFusion/main/resources/images/mediafusion_logo.png',
+    categories: ['streams'], tags: ['Filmes', 'Séries', 'Anime', 'Live TV', 'Debrid', 'P2P'] },
+  { id: 'comet.elfhosted.com', name: 'Comet | ElfHosted', version: '2.0.0',
+    description: 'Busca fontes de filmes, séries e anime. A instância pública do ElfHosted entrega streams via debrid; requer configurar um provedor e sua chave.',
+    url: 'https://comet.elfhosted.com/manifest.json',
+    logo: 'https://raw.githubusercontent.com/g0ldyy/comet/refs/heads/main/comet/assets/icon.png',
+    categories: ['streams'], tags: ['Filmes', 'Séries', 'Anime', 'Debrid', 'Torrents'] },
+  { id: 'jackettio.elfhosted.com', name: 'Jackettio | ElfHosted', version: '1.7.0',
+    description: 'Pesquisa em indexadores configurados no Jackett e resolve resultados por serviços debrid. Requer configuração de Jackett e provedor compatível.',
+    url: 'https://jackettio.elfhosted.com/manifest.json',
+    logo: 'https://docs.elfhosted.com/images/logo.png',
+    categories: ['streams'], tags: ['Filmes', 'Séries', 'Jackett', 'Debrid', 'Torrents'] },
 ];
 
 async function addonsPage() {
