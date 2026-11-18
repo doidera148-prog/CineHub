@@ -207,6 +207,8 @@ pub fn run() {
             diag::diagnostics_text,
             diag::save_diagnostics,
             player::player_play,
+            player::player_set_geometry,
+            player::player_close,
             skip::skip_segments,
         ])
         .run(tauri::generate_context!())
