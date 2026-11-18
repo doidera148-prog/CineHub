@@ -173,8 +173,14 @@ mod tests {
             redact("conexão com 192.168.0.10 caiu"),
             "conexão com <ip> caiu"
         );
-        assert_eq!(redact("conexão com 2001:db8::1 caiu"), "conexão com <ip> caiu");
-        assert_eq!(redact("conexão com [2001:db8::1] caiu"), "conexão com <ip> caiu");
+        assert_eq!(
+            redact("conexão com 2001:db8::1 caiu"),
+            "conexão com <ip> caiu"
+        );
+        assert_eq!(
+            redact("conexão com [2001:db8::1] caiu"),
+            "conexão com <ip> caiu"
+        );
         assert_eq!(redact("erro apikey=abc123 x"), "erro apikey=<redigido> x");
     }
 
