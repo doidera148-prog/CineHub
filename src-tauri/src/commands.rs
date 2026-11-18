@@ -126,25 +126,28 @@ const MAX_QUERY_CHARS: usize = 200;
 
 /// Busca em todos os catálogos que aceitam o parâmetro "search".
 #[tauri::command]
-pub async fn search(state: State<'_, AppState>, q: String) -> Result<Value, String> {
+pub async fn search(
+    state: State<'_, AppState>,
+    q: String,
+    kind: Option<String>,
+) -> Result<Value, String> {
     let needle: String = q.trim().chars().take(MAX_QUERY_CHARS).collect();
-    if needle.is_empty() {
-        return Ok(json!({ "rows": [] }));
-    }
+    if needle.is_empty() { return Ok(json!({ "rows": [] })); }
     let addons: Vec<Installed> = state.addons.read().await.clone();
     let mut jobs = Vec::new();
     for a in &addons {
         for c in &a.manifest.catalogs {
-            if c.supports_search() && matches!(c.kind.as_str(), "movie" | "series" | "anime") {
-                jobs.push((a.clone(), c.clone()));
-            }
+            let matches_kind = match kind.as_deref() {
+                Some(requested) => catalog_matches_kind(a, c, requested),
+                None => matches!(c.kind.as_str(), "movie" | "series" | "anime"),
+            };
+            if c.supports_search() && matches_kind { jobs.push((a.clone(), c.clone())); }
         }
     }
     let extra = format!("search={}", addon::enc(&needle));
     let rows = run_catalogs(&state, jobs, extra).await;
     Ok(json!({ "rows": rows }))
 }
-
 /// Máximo de catálogos consultados ao mesmo tempo.
 const MAX_PARALLEL: usize = 6;
 
