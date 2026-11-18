@@ -7,6 +7,7 @@ pub mod addon;
 pub mod commands;
 pub mod diag;
 pub mod kodi;
+pub mod media_proxy;
 pub mod player;
 pub mod skip;
 pub mod store;
@@ -31,6 +32,8 @@ pub struct AppState {
     pub torrent: Option<Arc<torrent::TorrentEngine>>,
     /// Garante que as gravações de addons.json aconteçam uma de cada vez.
     pub save_lock: tokio::sync::Mutex<()>,
+    /// Proxy HTTP progressivo, iniciado sob demanda e restrito ao loopback.
+    pub media_proxy: tokio::sync::OnceCell<Arc<media_proxy::MediaProxy>>,
 }
 
 /// Addon de metadados oficial do Stremio, instalado na primeira execução.
@@ -137,6 +140,7 @@ pub fn run() {
                 store_path,
                 torrent,
                 save_lock: tokio::sync::Mutex::new(()),
+                media_proxy: tokio::sync::OnceCell::new(),
             });
 
             if needs_default {
