@@ -733,84 +733,173 @@ async function importData(file) {
   }
 }
 
+// Catálogo comunitário próprio do CineHub. URLs de manifest verificadas antes de serem incluídas.
+const COMMUNITY_ADDONS = [
+  { id: 'community.anime.kitsu', name: 'Anime Kitsu', version: '0.0.10',
+    description: 'Catálogos de animes populares, em exibição e mais bem avaliados, com metadados do Kitsu.',
+    url: 'https://anime-kitsu.strem.fun/manifest.json', logo: 'https://i.imgur.com/7N6XGoO.png',
+    categories: ['anime', 'catalog'], tags: ['Anime', 'Catálogos', 'Metadados'] },
+  { id: 'com.stremio.torrentio.catalog.addon', name: 'Torrent Catalogs', version: '1.0.2',
+    description: 'Catálogos de filmes, séries e animes organizados por torrents populares. Para catálogos de anime, requer o Anime Kitsu.',
+    url: 'https://torrent-catalogs.strem.fun/manifest.json', logo: 'https://i.ibb.co/w4BnkC9/GwxAcDV.png',
+    categories: ['catalog', 'anime'], tags: ['Filmes', 'Séries', 'Anime', 'Catálogos'] },
+  { id: 'com.stremio.torrentio.addon', name: 'Torrentio', version: '0.0.15',
+    description: 'Addon comunitário de fontes de vídeo. A disponibilidade depende dos provedores e das configurações do serviço.',
+    url: 'https://torrentio.strem.fun/manifest.json', logo: 'https://torrentio.strem.fun/images/logo_v1.png',
+    categories: ['streams'], tags: ['Filmes', 'Séries', 'Anime', 'Streams'] },
+];
+
 async function addonsPage() {
-  setView(`
-    <h1>Addons</h1>
-    <form id="af" class="addform">
-      <input id="au" placeholder="Cole o link do addon (manifest.json ou stremio://…)" aria-label="Link do addon">
-      <button>Instalar</button>
-    </form>
+  setView(\`
+    <div class="addons-heading"><div><h1>Addons</h1><p class="muted small">Amplie os catálogos e recursos do CineHub.</p></div></div>
+    <div class="addon-tabs" role="tablist" aria-label="Seções de addons">
+      <button type="button" class="chip on" data-addon-tab="community" role="tab" aria-selected="true">Comunidade</button>
+      <button type="button" class="chip" data-addon-tab="installed" role="tab" aria-selected="false">Instalados</button>
+    </div>
+    <section id="community-panel" class="addon-panel" role="tabpanel">
+      <p class="muted small">Catálogo selecionado e mantido pelo CineHub. São addons independentes de terceiros; confira a descrição e instale apenas serviços em que confia.</p>
+      <div class="community-tools">
+        <input id="community-search" type="search" placeholder="Buscar addons…" aria-label="Buscar addons da comunidade" autocomplete="off">
+        <div class="community-filters" role="group" aria-label="Filtrar addons">
+          <button type="button" class="chip small on" data-addon-filter="all" aria-pressed="true">Todos</button>
+          <button type="button" class="chip small" data-addon-filter="catalog" aria-pressed="false">Catálogos</button>
+          <button type="button" class="chip small" data-addon-filter="anime" aria-pressed="false">Anime</button>
+          <button type="button" class="chip small" data-addon-filter="streams" aria-pressed="false">Streams</button>
+        </div>
+      </div>
+      <div id="community-list" class="community-grid"><p class="muted">Carregando catálogo…</p></div>
+    </section>
+    <section id="installed-panel" class="addon-panel" role="tabpanel" hidden>
+      <div id="al" class="loading">Carregando addons instalados…</div>
+    </section>
+    <details class="addon-manual"><summary>Instalar addon por endereço</summary>
+      <form id="af" class="addform">
+        <input id="au" placeholder="Link do manifest.json ou stremio://…" aria-label="Link do addon">
+        <button type="submit">Instalar</button>
+      </form>
+    </details>
     <form id="tf" class="torrentform">
       <input id="tm" placeholder="Cole um magnet: ou use um arquivo .torrent" aria-label="Link magnet do torrent">
-      <label class="torrentfile">
-        <span>Selecionar .torrent</span>
-        <input id="torrent-file" type="file" accept=".torrent" hidden>
-      </label>
+      <label class="torrentfile"><span>Selecionar .torrent</span><input id="torrent-file" type="file" accept=".torrent" hidden></label>
       <button type="submit" class="chip">Abrir torrent</button>
     </form>
-    <p class="muted small">Addons compatíveis com o protocolo do Stremio. Instale apenas fontes que você tem autorização para acessar.</p>
-    <div id="al" class="loading">Carregando…</div>`);
+    <p class="muted small">Addons compatíveis com o protocolo do Stremio. Instale apenas fontes que você tem autorização para acessar.</p>\`);
 
-  $('#af').onsubmit = async (e) => {
-    e.preventDefault();
-    const url = $('#au').value;
-    try {
-      const res = await call('install_addon', { url });
-      toast(`Addon instalado: ${res.name}`);
-      addonsPage();
-    } catch (err) {
-      logEvent('WARN', `instalar addon falhou: ${err.message}`);
-      toast(err.message);
-    }
+  const communityPanel = $('#community-panel'), installedPanel = $('#installed-panel');
+  const communityList = $('#community-list'), installedList = $('#al');
+  let activeFilter = 'all', installed = [];
+  const installedFor = (addon) => installed.some((entry) => entry.manifest?.id === addon.id || entry.transportUrl === addon.url);
+
+  const renderCommunity = () => {
+    const query = ($('#community-search')?.value || '').trim().toLocaleLowerCase();
+    const matches = COMMUNITY_ADDONS.filter((addon) => {
+      const categoryMatch = activeFilter === 'all' || addon.categories.includes(activeFilter);
+      const content = [addon.name, addon.description, ...addon.tags].join(' ').toLocaleLowerCase();
+      return categoryMatch && (!query || content.includes(query));
+    });
+    communityList.innerHTML = matches.length ? matches.map((addon) => {
+      const done = installedFor(addon), initial = esc(addon.name.slice(0, 1).toUpperCase());
+      return \`<article class="community-addon">
+        <div class="community-addon-head">
+          \${isWebUrl(addon.logo) ? \`<img src="\${esc(addon.logo)}" alt="" loading="lazy">\` : \`<span class="logo-fallback" aria-hidden="true">\${initial}</span>\`}
+          <div><h3>\${esc(addon.name)}</h3><span class="muted small">v\${esc(addon.version)}</span></div>
+        </div>
+        <p>\${esc(addon.description)}</p>
+        <div class="community-tags">\${addon.tags.map((tag) => \`<span>\${esc(tag)}</span>\`).join('')}</div>
+        <button type="button" class="community-install\${done ? ' installed' : ''}" data-community-install="\${esc(addon.id)}" \${done ? 'disabled' : ''}>\${done ? '✓ Instalado' : '＋ Instalar'}</button>
+      </article>\`;
+    }).join('') : '<p class="muted">Nenhum addon encontrado com esses filtros.</p>';
   };
 
-  $('#tf').onsubmit = async (e) => {
-    e.preventDefault();
-    const input = $('#torrent-file');
-    const magnet = $('#tm').value.trim();
+  const renderInstalled = () => {
+    installedList.className = '';
+    installedList.innerHTML = installed.length ? installed.map(addonHtml).join('') : '<p class="muted">Nenhum addon instalado.</p>';
+    installedList.querySelectorAll('button[data-url]').forEach((button) => {
+      button.onclick = async () => {
+        const ok = await askConfirm('Remover este addon? Os catálogos e fontes dele deixam de aparecer.', 'Remover');
+        if (!ok) return;
+        try { await call('remove_addon', { url: button.dataset.url }); await refreshInstalled(); toast('Addon removido.'); }
+        catch (err) { toast(err.message); }
+      };
+    });
+  };
+
+  const refreshInstalled = async () => {
+    installed = await call('list_addons');
+    renderInstalled();
+    renderCommunity();
+  };
+  const selectTab = (tab) => {
+    communityPanel.hidden = tab !== 'community';
+    installedPanel.hidden = tab !== 'installed';
+    document.querySelectorAll('[data-addon-tab]').forEach((button) => {
+      const selected = button.dataset.addonTab === tab;
+      button.classList.toggle('on', selected);
+      button.setAttribute('aria-selected', String(selected));
+    });
+  };
+  document.querySelectorAll('[data-addon-tab]').forEach((button) => { button.onclick = () => selectTab(button.dataset.addonTab); });
+  document.querySelectorAll('[data-addon-filter]').forEach((button) => {
+    button.onclick = () => {
+      activeFilter = button.dataset.addonFilter;
+      document.querySelectorAll('[data-addon-filter]').forEach((filter) => {
+        const selected = filter === button;
+        filter.classList.toggle('on', selected);
+        filter.setAttribute('aria-pressed', String(selected));
+      });
+      renderCommunity();
+    };
+  });
+  $('#community-search').addEventListener('input', renderCommunity);
+  communityList.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-community-install]');
+    if (!button || button.disabled) return;
+    const addon = COMMUNITY_ADDONS.find((entry) => entry.id === button.dataset.communityInstall);
+    if (!addon) return;
+    button.disabled = true; button.textContent = 'Instalando…';
+    try {
+      const result = await call('install_addon', { url: addon.url });
+      toast(\`Addon instalado: \${result.name}\`);
+      await refreshInstalled();
+    } catch (err) {
+      logEvent('WARN', \`instalar addon da comunidade falhou: \${err.message}\`);
+      toast(err.message || String(err));
+      button.disabled = false; button.textContent = '＋ Instalar';
+    }
+  });
+
+  $('#af').onsubmit = async (event) => {
+    event.preventDefault();
+    try {
+      const result = await call('install_addon', { url: $('#au').value });
+      toast(\`Addon instalado: \${result.name}\`);
+      $('#au').value = '';
+      await refreshInstalled();
+      selectTab('installed');
+    } catch (err) { logEvent('WARN', \`instalar addon falhou: \${err.message}\`); toast(err.message); }
+  };
+
+  $('#tf').onsubmit = async (event) => {
+    event.preventDefault();
+    const input = $('#torrent-file'), magnet = $('#tm').value.trim();
     try {
       if (input.files && input.files.length) {
         const file = input.files[0];
-        // Mesmo limite do backend (8 MiB), checado antes de enviar pelo IPC.
-        if (file.size > 8 * 1024 * 1024) {
-          toast('Arquivo .torrent maior que 8 MiB.');
-          return;
-        }
+        if (file.size > 8 * 1024 * 1024) { toast('Arquivo .torrent maior que 8 MiB.'); return; }
         const bytes = new Uint8Array(await file.arrayBuffer());
         const result = await withBusy(TORRENT_BUSY, call('torrent_open', { magnet: null, torrentBytes: Array.from(bytes), fileIndex: null }));
         await playOpenedTorrent(result, file.name);
         return;
       }
-      if (!magnet) {
-        toast('Cole um magnet ou selecione um .torrent.');
-        return;
-      }
+      if (!magnet) { toast('Cole um magnet ou selecione um .torrent.'); return; }
       const result = await withBusy(TORRENT_BUSY, call('torrent_open', { magnet, torrentBytes: null, fileIndex: null }));
       await playOpenedTorrent(result, 'Torrent');
-    } catch (err) {
-      toast(err.message || String(err));
-    }
+    } catch (err) { toast(err.message || String(err)); }
   };
 
-  const list = await call('list_addons');
-  const al = $('#al');
-  if (!al) return;
-  al.className = '';
-  al.innerHTML = list.length ? list.map(addonHtml).join('') : '<p class="muted">Nenhum addon instalado.</p>';
-  al.querySelectorAll('button[data-url]').forEach((b) => {
-    b.onclick = async () => {
-      const ok = await askConfirm('Remover este addon? Os catálogos e fontes dele deixam de aparecer.', 'Remover');
-      if (!ok) return;
-      try {
-        await call('remove_addon', { url: b.dataset.url });
-        addonsPage();
-      } catch (err) {
-        toast(err.message);
-      }
-    };
-  });
+  selectTab('community');
+  await refreshInstalled();
 }
-
 async function detailPage(kind, id, alive) {
   setView(`<div class="hero skel-hero" aria-hidden="true"></div>`);
   const { meta } = await call('meta', { kind, id });
