@@ -92,13 +92,31 @@ pub async fn home(state: State<'_, AppState>, kind: String) -> Result<Value, Str
     let mut jobs = Vec::new();
     for a in &addons {
         for c in &a.manifest.catalogs {
-            if c.kind == kind && !c.requires_extra() {
+            if catalog_matches_kind(a, c, &kind) && !c.requires_extra() {
                 jobs.push((a.clone(), c.clone()));
             }
         }
     }
     let rows = run_catalogs(&state, jobs, String::new()).await;
     Ok(json!({ "rows": rows }))
+}
+
+/// Addons de anime frequentemente publicam seus catálogos usando o tipo Stremio
+/// "series". Na aba Anime, inclui esses catálogos quando o próprio addon ou catálogo
+/// se identifica explicitamente como anime, mantendo a rota original "series".
+fn catalog_matches_kind(addon: &Installed, catalog: &CatalogDef, requested: &str) -> bool {
+    if catalog.kind == requested {
+        return true;
+    }
+    if requested != "anime" || catalog.kind != "series" {
+        return false;
+    }
+    let addon_name = addon.manifest.name.to_ascii_lowercase();
+    let catalog_name = catalog.name.as_deref().unwrap_or_default().to_ascii_lowercase();
+    let catalog_id = catalog.id.to_ascii_lowercase();
+    addon_name.contains("anime")
+        || catalog_name.contains("anime")
+        || catalog_id.contains("anime")
 }
 
 /// Tamanho máximo do texto de busca, em caracteres.
@@ -623,6 +641,58 @@ fn normalize_url(raw: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn anime_page_includes_series_catalogs_from_anime_addons() {
+        let addon = Installed {
+            transport_url: "https://anime.example/manifest.json".into(),
+            manifest: addon::Manifest {
+                id: "anime.catalogs".into(),
+                version: "1".into(),
+                name: "Anime Catalogs".into(),
+                description: None,
+                logo: None,
+                types: vec!["series".into()],
+                id_prefixes: None,
+                resources: vec![],
+                catalogs: vec![],
+            },
+        };
+        let catalog = CatalogDef {
+            kind: "series".into(),
+            id: "popular".into(),
+            name: Some("Mais populares".into()),
+            extra: vec![],
+        };
+        assert!(catalog_matches_kind(&addon, &catalog, "anime"));
+        assert!(!catalog_matches_kind(&addon, &catalog, "movie"));
+        assert!(catalog_matches_kind(&addon, &catalog, "series"));
+    }
+
+    #[test]
+    fn anime_page_does_not_include_unrelated_series_catalogs() {
+        let addon = Installed {
+            transport_url: "https://catalog.example/manifest.json".into(),
+            manifest: addon::Manifest {
+                id: "catalog.series".into(),
+                version: "1".into(),
+                name: "Series Catalog".into(),
+                description: None,
+                logo: None,
+                types: vec!["series".into()],
+                id_prefixes: None,
+                resources: vec![],
+                catalogs: vec![],
+            },
+        };
+        let catalog = CatalogDef {
+            kind: "series".into(),
+            id: "popular".into(),
+            name: Some("Mais populares".into()),
+            extra: vec![],
+        };
+        assert!(!catalog_matches_kind(&addon, &catalog, "anime"));
+    }
 
     #[test]
     fn normalizes_install_urls() {
