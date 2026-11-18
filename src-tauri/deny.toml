@@ -45,3 +45,5 @@ wildcards = "allow"
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# Patch de segurança do librqbit-utp, fixado em commit upstream verificado.
+allow-git = ["https://github.com/ikatson/librqbit-utp.git"]
