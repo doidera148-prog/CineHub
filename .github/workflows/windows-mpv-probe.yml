@@ -1,0 +1,67 @@
+name: Windows libmpv prototype check
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src-tauri/examples/windows_mpv_*.rs'
+      - 'src-tauri/Cargo.toml'
+      - '.github/workflows/windows-mpv-probe.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-mpv-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile-prototypes:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Install 7-Zip
+        run: choco install 7zip.install --no-progress -y
+      - name: Download pinned libmpv development package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $env:RUNNER_TEMP 'mpv-dev.7z'
+          $url = 'https://downloads.sourceforge.net/project/mpv-player-windows/libmpv/mpv-dev-x86_64-20261108-git-55d3feb45c.7z'
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $dest = Join-Path $env:RUNNER_TEMP 'mpv-dev'
+          & 'C:\Program Files\7-Zip\7z.exe' x $archive "-o$dest" -y
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao extrair o pacote libmpv.' }
+          $dll = Get-ChildItem $dest -Filter 'libmpv-2.dll' -Recurse | Select-Object -First 1
+          if (-not $dll) { throw 'libmpv-2.dll não foi encontrado no pacote.' }
+          $env:MPV_LIB_DIR = $dll.Directory.FullName
+          "MPV_LIB_DIR=$($dll.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "MPV_DLL=$($dll.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Create MSVC import library
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Generate mpv.lib from DLL exports
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lines = & dumpbin /nologo /exports $env:MPV_DLL
+          if ($LASTEXITCODE -ne 0) { throw 'dumpbin não conseguiu ler os exports do libmpv.' }
+          $symbols = foreach ($line in $lines) {
+            if ($line -match '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)\s*$') { $Matches[1] }
+          }
+          if (-not $symbols) { throw 'Nenhum símbolo exportado foi encontrado em libmpv-2.dll.' }
+          $def = Join-Path $env:MPV_LIB_DIR 'mpv.def'
+          @('LIBRARY libmpv-2.dll', 'EXPORTS') + $symbols | Set-Content -Encoding ascii $def
+          $importLib = Join-Path $env:MPV_LIB_DIR 'mpv.lib'
+          & lib /nologo "/def:$def" /machine:x64 "/out:$importLib"
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $importLib)) { throw 'Falha ao gerar mpv.lib.' }
+          "LIB=$env:MPV_LIB_DIR;$env:LIB" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "PATH=$env:MPV_LIB_DIR;$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Compile all libmpv examples
+        working-directory: src-tauri
+        run: cargo check --examples --features mpv --target x86_64-pc-windows-msvc
