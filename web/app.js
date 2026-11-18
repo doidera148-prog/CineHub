@@ -1312,7 +1312,13 @@ async function loadStreams(kind, id, label, meta) {
 
   const title = document.createElement('h3');
   title.textContent = 'Fontes';
-  box.append(title);
+  const refresh = document.createElement('button');
+  refresh.type = 'button';
+  refresh.className = 'chip small';
+  refresh.textContent = '↻ Atualizar fontes';
+  refresh.setAttribute('aria-label', 'Buscar fontes novamente nos addons');
+  refresh.onclick = () => loadStreams(kind, id, label, meta);
+  box.append(title, refresh);
 
   // Barra de filtro e ordenação (só aparece com 3 ou mais fontes, como no dxbi).
   const ui = { sort: 'default', quality: [], lang: [], addon: [] };
