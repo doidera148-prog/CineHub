@@ -108,7 +108,7 @@ fn catalog_matches_kind(addon: &Installed, catalog: &CatalogDef, requested: &str
     if catalog.kind == requested {
         return true;
     }
-    if requested != "anime" || catalog.kind != "series" {
+    if requested != "anime" || !matches!(catalog.kind.as_str(), "series" | "movie") {
         return false;
     }
     let addon_name = addon.manifest.name.to_ascii_lowercase();
