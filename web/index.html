@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="./android-tv.css">
 </head>
 <body>
-  <a class="skip-link" href="#view">Pular para o conteúdo</a>
+  <button class="skip-link" type="button">Pular para o conteúdo</button>
   <aside class="sidebar">
     <div class="logo">CineHub</div>
     <button id="toggle-sidebar" class="chip sidebar-toggle" aria-expanded="true" aria-controls="nav-main" title="Recolher menu">☰</button>
@@ -32,7 +32,7 @@
     <header class="topbar">
       <input id="q" type="search" enterkeyhint="search" placeholder="Pesquisar… (tecla /)" autocomplete="off" aria-label="Pesquisar" aria-keyshortcuts="/">
     </header>
-    <section id="view"></section>
+    <section id="view" tabindex="-1"></section>
   </main>
 
   <div id="offline" class="offline hidden" role="alert">Sem conexão com a internet. Algumas fontes podem não carregar.</div>
@@ -68,5 +68,6 @@
   <script src="./kodi.js"></script>
   <script src="./tv-mode.js"></script>
   <script src="./remote-navigation.js"></script>
+  <script src="./accessibility.js"></script>
 </body>
 </html>
