@@ -19,6 +19,12 @@
     return !isLocalTorrentStream(stream);
   }
 
+  function isTorrentSource(stream) {
+    const url = String(stream?.url ?? '').trim();
+    if (isLocalTorrentStream(stream)) return false;
+    return url.startsWith('magnet:?') || Boolean(stream?.infoHash) || Boolean(stream?.hash);
+  }
+
   // Só http(s) é aceito como link de imagem ou de página.
   function isWebUrl(u) {
     return typeof u === 'string' && /^https?:\/\//i.test(u);
@@ -172,6 +178,7 @@
     str,
     isLocalTorrentStream,
     shouldUseMediaProxy,
+    isTorrentSource,
     qualityLabel,
     filterStreams,
     sortStreamsBy,
