@@ -163,6 +163,7 @@ pub fn run() {
             commands::torrent_stats,
             commands::torrent_open,
             commands::torrent_select_file,
+            commands::torrent_close,
             commands::save_export,
             commands::write_export,
             kodi::kodi_addons,
