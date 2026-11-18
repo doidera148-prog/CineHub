@@ -64,6 +64,10 @@ jobs:
         run: python3 -m unittest discover -s tests/python -v
       - name: Validar metadados e dependências Rust
         run: cargo metadata --manifest-path src-tauri/Cargo.toml --locked --format-version 1 --no-deps > /dev/null
+      - name: Detectar dependências Rust não utilizadas
+        run: |
+          cargo install cargo-machete --locked
+          cargo machete --with-metadata
       - name: Verificação de compilação Rust (todos os targets)
         run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets --locked
       - name: Clippy (avisos viram erro)
@@ -84,6 +88,9 @@ jobs:
       - name: Instalar dependências do teste
         working-directory: tests/web
         run: npm ci
+      - name: Verificar árvore de dependências web
+        working-directory: tests/web
+        run: npm ls --all
       - name: Auditoria de vulnerabilidades das dependências web
         working-directory: tests/web
         run: npm audit --audit-level=high
