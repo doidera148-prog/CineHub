@@ -66,17 +66,11 @@ jobs:
         run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets --locked
       - name: Clippy (avisos viram erro)
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
-      - name: Licenças e fontes das dependências (cargo-deny)
+      - name: Segurança, avisos, licenças e fontes das dependências (cargo-deny)
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
           manifest-path: src-tauri/Cargo.toml
-          command: check licenses sources
-      - name: Auditoria de dependências
-        uses: rustsec/audit-check@v2
-        continue-on-error: true
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          working-directory: src-tauri
+          command: check advisories bans licenses sources
 
   web-smoke:
     runs-on: ubuntu-22.04
@@ -88,6 +82,9 @@ jobs:
       - name: Instalar dependências do teste
         working-directory: tests/web
         run: npm ci
+      - name: Auditoria de vulnerabilidades das dependências web
+        working-directory: tests/web
+        run: npm audit --audit-level=high
       - name: Instalar Chromium do Playwright
         working-directory: tests/web
         run: npx playwright install --with-deps chromium
