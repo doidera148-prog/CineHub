@@ -1,76 +1,121 @@
 # CineHub
 
-Aplicativo de streaming compatível com os addons do Stremio, para Windows, macOS, Linux, Android e Android TV.
+Aplicativo de mídia multiplataforma, escrito em Rust + Tauri 2, com interface em HTML/CSS/JavaScript. O CineHub consome addons compatíveis com o protocolo do Stremio e reúne catálogos, metadados, fontes de vídeo, legendas, reprodução por torrent e integração opcional com Kodi.
 
-- **Backend:** Rust (Tauri 2). Fala com os addons pelo protocolo oficial do Stremio: `manifest`, `catalog` (com busca), `meta`, `stream` e `subtitles`.
-- **Interface:** HTML, CSS e JavaScript, na pasta `web/`. Roda no WebView nativo de cada sistema.
-- **Player:** [Video.js](https://videojs.com/) (código aberto, licença Apache 2.0), com suporte a HLS (`.m3u8`) embutido. Empacotado em `web/vendor/`, funciona sem internet.
-- **Metadados:** o Cinemeta (addon oficial do Stremio) é instalado automaticamente na primeira execução. O idioma dos títulos depende do addon.
+> O CineHub não fornece nem hospeda conteúdo. O usuário é responsável por instalar addons e abrir fontes que tenha autorização para acessar.
 
-O app não traz fontes de conteúdo. Você instala os addons que tem autorização para usar, pela aba **Addons**.
+## Plataformas
 
-## Estrutura
+- **Android e Android TV:** APK único, com player nativo Media3/ExoPlayer. A interface detecta TVs Android de tela grande e ativa layout próprio para controle remoto.
+- **Windows:** pacote desktop Tauri; o workflow compila o player nativo libmpv.
+- **Linux e macOS:** pacotes desktop Tauri; reprodução pelo player disponível no WebView quando o player nativo não está habilitado.
+- **iOS:** não é alvo de build nem de teste.
+
+## Recursos
+
+### Catálogos e addons
+- Compatibilidade com o protocolo de addons do Stremio: `manifest`, `catalog` (incluindo busca), `meta`, `stream` e `subtitles`.
+- Cinemeta e Anime Catalogs são instalados automaticamente na primeira execução.
+- Abas separadas para filmes, séries e animes; a aba Animes usa os catálogos compatíveis com os tipos publicados pelo addon.
+- Catálogo de addons da comunidade, com verificação de disponibilidade do manifesto e indicadores de estado.
+- Instalação e gerenciamento de addons pela interface.
+- Fontes de addons podem fornecer metadados, streams, faixas de áudio e legendas, conforme o que cada addon publica.
+
+### Reprodução
+- **Android/Android TV:** player nativo baseado em AndroidX Media3/ExoPlayer, com seleção manual de áudio, seleção e desativação de legendas, preferência por português, controle por D-pad e ações para pular segmentos quando disponíveis.
+- **Windows:** player nativo libmpv compilado no workflow desktop.
+- **Outras plataformas:** player baseado em Video.js/WebView.
+- Proxy HTTP local para streams HTTP/HTTPS, com suporte a respostas em blocos, solicitações Range e reescrita de playlists HLS e seus recursos filhos.
+- A interface oferece recuperação para buscas de fontes sem resultado, incluindo tentar novamente, atualizar e limpar filtros quando essas ações estão disponíveis.
+
+### Torrents
+- Motor BitTorrent local baseado em librqbit; aceita links `magnet:` e arquivos `.torrent`.
+- Servidor HTTP local em loopback para reprodução progressiva e solicitações Range.
+- Identifica arquivos de vídeo de torrents com múltiplos episódios e permite selecionar o arquivo/episódio sem abrir outro magnet.
+- Tokens de streaming separados por seleção de episódio para evitar que requisições HTTP antigas passem a apontar para o episódio recém-selecionado.
+- Estatísticas de rede incluem estado, velocidade, peers e progresso.
+
+### Android TV e controle remoto
+- Layout de sala de estar com menu lateral, cartazes maiores e alvos de foco ampliados.
+- Navegação por setas/DPAD e ativação por OK.
+- Navegação direcional considera alinhamento e proximidade para reduzir saltos diagonais.
+- O botão Voltar fecha primeiro o teclado de busca, diálogos ou player antes de sair da tela/aplicativo.
+- O player nativo ExoPlayer oferece controles acessíveis pelo controle remoto.
+
+### Biblioteca e integrações
+- Biblioteca local, favoritos e progresso de reprodução.
+- Exportação e importação de dados da biblioteca.
+- Integração opcional com Kodi via JSON-RPC: conecta a uma instância configurada pelo usuário, lista addons de vídeo e solicita reprodução no próprio Kodi. Veja [docs/kodi.md](docs/kodi.md).
+
+## Arquitetura e estrutura
 
 ```
-web/                       interface (index.html, app.js, style.css, vendor/ com o Video.js)
+web/
+  index.html                 estrutura da interface
+  app.js                     rotas, telas, catálogos, detalhes e integração com addons
+  lib.js                     utilitários compartilhados
+  style.css                  estilos gerais
+  android-tv.css             layout para Android TV
+  remote-navigation.js       teclado, DPAD, foco e botão Voltar
+  accessibility.js           recursos de acessibilidade
+  tv-mode.js                 detecção do modo Android TV
+  torrent-playback.js        fluxo de reprodução por torrent
+  kodi.js                    interface de integração Kodi
+  vendor/                    bibliotecas web empacotadas
+  fonts/                     fontes locais
+
 src-tauri/
-  tauri.conf.json          configuração da janela e dos pacotes
-  capabilities/            permissões concedidas à interface
-  src/lib.rs               inicialização e registro dos comandos
-  src/commands.rs          comandos chamados pela interface (catálogos, metas, fontes, legendas,
-                           torrent, exportação de backup)
-  src/addon.rs             cliente do protocolo de addons do Stremio e regras de endereços seguros
-  src/store.rs             lista de addons instalados (JSON)
-  src/torrent.rs           motor BitTorrent local e servidor de reprodução (127.0.0.1)
-  tests/                   testes de integração com um addon falso
-  android-tv/              ajustes do manifesto para Android TV
-tests/web/                 teste de fumaça da interface (Playwright)
-tests/android/             scripts de instalação usados nos diagnósticos do APK
-.github/workflows/         builds automáticos para desktop e Android
+  src/
+    addon.rs                 cliente Stremio, validação de destinos e cache
+    commands.rs              comandos Tauri usados pela interface
+    media_proxy.rs           proxy HTTP/HLS local para fontes de vídeo
+    player.rs                integração desktop com libmpv
+    torrent.rs               motor BitTorrent e servidor local de streaming
+    kodi.rs                  cliente Kodi JSON-RPC
+    store.rs                 persistência dos addons instalados
+    skip.rs                  segmentos de reprodução
+    diag.rs                  diagnósticos
+  plugins/tauri-plugin-exoplayer/
+                             player Android/Android TV baseado em Media3
+  android-tv/
+    patch_manifest.py        ajustes do manifesto Android para Android TV
+    banner.png               banner do launcher de TV
+  capabilities/              permissões Tauri
+
+tests/
+  web/                       testes de fumaça Playwright
+src-tauri/tests/
+  addon_integration.rs       testes de integração do cliente de addons
+
+docs/
+  kodi.md                    configuração da integração Kodi
+  architecture.md            visão técnica dos fluxos e limites
+.github/
+  workflows/build.yml        testes, lint e builds desktop/Android
+  scripts/                   utilitários de build
 ```
 
-## Segurança e desempenho
+## Segurança
 
-- Respostas de addons são limitadas a 8 MiB, e legendas a 2 MiB.
-- Addons, legendas e os links de fonte só acessam endereços públicos. IPs locais, privados e reservados são recusados, inclusive quando um nome de domínio aponta para eles: o filtro é aplicado no momento da conexão.
-- Redirecionamentos são limitados e cada destino passa pela mesma regra.
-- Catálogos, metadados e fontes ficam em cache por 10 minutos, com limite de 500 entradas e de 8 MiB no total.
-- Metadados são consultados em paralelo em todos os addons. Um addon que não responde em 15 segundos é ignorado, e o erro aparece na lista de fontes.
-- Uma lista de addons ilegível não é sobrescrita: vai para `addons.json.corrupt`.
+- O cliente de addons e o proxy de mídia aceitam somente URLs HTTP/HTTPS com host válido e sem credenciais embutidas.
+- Destinos privados, loopback, locais e reservados são bloqueados no acesso a addons e pelo proxy de mídia; a resolução DNS usada na conexão também filtra IPs não públicos.
+- Redirecionamentos de addons e proxy são limitados e revalidados.
+- O proxy de mídia escuta somente em `127.0.0.1`, usa tokens aleatórios e limita o tempo de vida e a quantidade de sessões.
+- O proxy encaminha somente cabeçalhos selecionados de `proxyHeaders.request`: `authorization`, `cookie`, `origin`, `referer` e `user-agent`.
+- O proxy suporta HTTP progressivo e HLS. **DASH (.mpd) não está habilitado.**
+- O acesso a endereços privados é uma exceção separada e explícita na integração Kodi, que exige o endereço/IP informado pelo usuário e não faz descoberta da rede.
+- Respostas de addons têm limite de 8 MiB; legendas têm limite de 2 MiB. O cache de catálogo/metadados/fontes tem TTL de 10 minutos e limites de entradas/tamanho.
+- O armazenamento local de addons preserva dados corrompidos para diagnóstico em vez de sobrescrevê-los silenciosamente.
 
 ## Testes
 
-```bash
-cargo test --manifest-path src-tauri/Cargo.toml
-```
-
-Os testes de integração (`src-tauri/tests/addon_integration.rs`) sobem um addon falso em localhost e validam manifest, catálogo, meta, fontes, legendas, cache, os limites de tamanho, as faixas de endereço reservadas e a recusa de nomes que apontam para `localhost`.
-
-## Desenvolver no computador
-
-Pré-requisitos:
-
-- Rust estável (`rustup`)
-- Linux: `libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev`
-- Windows: WebView2 (normalmente já vem instalado no Windows 11 e em versões atualizadas do Windows 10)
-- macOS: Xcode Command Line Tools
-
-```bash
-cargo install tauri-cli --version "^2" --locked
-cd src-tauri
-cargo tauri dev        # abre a janela em modo de desenvolvimento
-cargo tauri build      # gera o instalador da sua plataforma
-```
-
-No Windows, o build de instalador espera `src-tauri/resources/mpv-2.dll` (libmpv, usado pelo player nativo). O CI baixa a DLL sozinho; localmente, copie a DLL de um pacote `mpv-dev` ou rode `.github/scripts/prepare-libmpv.ps1` antes do `cargo tauri build`. Para compilar o player nativo localmente, use `cargo build --features mpv` (exige libmpv instalada no sistema).
-
-Testes do backend:
+Testes Rust:
 
 ```bash
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-Teste de fumaça da interface (abre cada rota num Chromium, em celular e desktop, com o backend simulado):
+Teste de fumaça web:
 
 ```bash
 cd tests/web
@@ -79,85 +124,98 @@ npx playwright install --with-deps chromium
 npm test
 ```
 
-## Android
-
-Requer Android Studio (ou SDK + NDK), Java 17 e as variáveis `ANDROID_HOME` e `NDK_HOME`.
+Verificações de lint usadas no CI:
 
 ```bash
-rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
-cd src-tauri
-cargo tauri android init
-cargo tauri android dev          # roda no emulador ou celular conectado
-cargo tauri android build --apk  # gera o APK
+cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+node --check web/app.js
+node --check tests/web/smoke.mjs
 ```
 
-### Android TV
+Os testes de integração Rust usam um addon falso e validam rotas do protocolo, cache, limites de resposta e bloqueio de destinos de rede não permitidos. O Playwright abre as rotas da interface em Chromium com backend simulado.
 
-O mesmo APK roda no celular e na TV. O script `src-tauri/android-tv/patch_manifest.py` ajusta o manifesto gerado pelo `cargo tauri android init` para o Android TV:
+## Desenvolvimento
 
-- adiciona o `LEANBACK_LAUNCHER`, para o app aparecer na tela inicial da TV;
-- declara que o toque é opcional, para o app abrir sem tela sensível ao toque;
-- define o banner do launcher (`android-tv/banner.png`).
+### Requisitos gerais
+- Rust estável via rustup.
+- Tauri CLI 2.
+- Node.js 20 para os testes web.
 
-Depois de inicializar o projeto Android, rode:
+Instale o CLI:
+
+```bash
+cargo install tauri-cli --version "^2" --locked
+```
+
+### Linux
+Dependências do sistema usadas no CI:
+
+```bash
+sudo apt-get install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev
+```
+
+### Windows
+WebView2 (normalmente presente nas versões atuais do Windows). O build do player nativo exige a libmpv; o script `.github/scripts/prepare-libmpv.ps1` prepara a DLL usada pelo workflow.
+
+### macOS
+Xcode Command Line Tools.
+
+### Executar desktop
 
 ```bash
 cd src-tauri
+cargo tauri dev
+cargo tauri build
+```
+
+### Android e Android TV
+Requer Java 17, Android SDK/NDK e as variáveis `ANDROID_HOME` e `NDK_HOME`.
+
+```bash
+rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+cd src-tauri
+cargo tauri android init
 python3 android-tv/patch_manifest.py gen/android/app/src/main/AndroidManifest.xml
+cargo tauri android dev
 cargo tauri android build --apk
 ```
 
-O script para com erro se não conseguir fazer alguma das alterações, então um manifesto sem os ajustes de TV não passa despercebido.
+O patch de manifesto adiciona o launcher Leanback, declara toque opcional e configura o banner da TV. O CI executa esse patch antes de gerar os APKs.
 
-Na TV, a navegação é feita pelo controle remoto: as setas movem o foco e OK ativa o item. Para fechar o player, foque o botão ✕ e pressione OK.
+## Builds automáticos e releases
 
-No Android, o botão Voltar fecha o player antes de sair do app. Na TV, o foco inicial vai para o conteúdo ao trocar de seção pelo menu.
+O workflow [build.yml](.github/workflows/build.yml) roda em pushes para `main` (exceto alterações apenas em arquivos Markdown), pull requests e execução manual.
 
-## Builds na nuvem
+- **Testes:** suíte Rust.
+- **Lint:** rustfmt, Clippy e verificação de sintaxe JavaScript; auditorias adicionais de licenças e vulnerabilidades são executadas como etapas não bloqueantes.
+- **Web:** teste de fumaça Playwright.
+- **Desktop:** Linux, Windows e macOS.
+- **Android:** APKs separados por ABI para arm64-v8a, armeabi-v7a, x86 e x86_64.
+- **Release:** publica os artefatos quando testes, lint, smoke web e pelo menos um build de plataforma passam; mantém as 10 releases automáticas mais recentes.
 
-O workflow `.github/workflows/build.yml` gera, a cada push na `main`:
+Os artefatos de cada execução também ficam disponíveis na aba **Actions** do GitHub.
 
-- Windows (`.msi` / `.exe`), macOS (`.dmg` / `.app`), Linux (`.deb` / `.AppImage`)
-- Android (`.apk`), que serve para celular e Android TV
+### Assinatura Android
+Se os segredos de assinatura não estiverem configurados, o CI usa uma chave temporária. O APK instala, mas builds seguintes terão assinatura diferente e exigirão desinstalar a versão anterior. Para atualizações no local, configure em **Settings → Secrets and variables → Actions**:
 
-Os arquivos aparecem como artefatos na aba **Actions** do GitHub e, quando todos os testes passam, são publicados em **Releases** (as 10 publicações mais recentes são mantidas). O APK traz as arquiteturas arm64, armv7, x86 e x86_64. Antes de compilar, o workflow verifica formatação, Clippy (com avisos tratados como erro) e vulnerabilidades nas dependências.
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
 
-### Assinatura do APK
-
-Android só instala APK assinado. Sem os segredos abaixo, o CI assina com uma chave temporária: o APK instala, mas cada build tem uma assinatura diferente, então é preciso desinstalar a versão anterior antes de instalar a nova.
-
-Para ter atualizações normais, crie uma chave uma única vez e guarde-a com segurança (perdê-la impede atualizar o app):
-
-```bash
-keytool -genkeypair -v -keystore cinehub-release.jks -alias cinehub \
-  -keyalg RSA -keysize 2048 -validity 10000
-base64 -w0 cinehub-release.jks > cinehub-release.b64
-```
-
-Depois, em **Settings → Secrets and variables → Actions**, crie os segredos:
-
-- `ANDROID_KEYSTORE_BASE64`: conteúdo de `cinehub-release.b64`
-- `ANDROID_KEYSTORE_PASSWORD`: senha do keystore
-- `ANDROID_KEY_ALIAS`: `cinehub`
-- `ANDROID_KEY_PASSWORD`: senha da chave
-
-### Instalar no celular
-
-1. Baixe da release mais recente o APK da sua arquitetura. A maioria dos celulares atuais usa `arm64-v8a` (é o caso do Moto G8 Power Lite); `armeabi-v7a` é para aparelhos mais antigos de 32 bits.
-2. Permita a instalação de fontes desconhecidas para o navegador ou gerenciador de arquivos usado.
-3. Se já houver uma versão instalada com outra assinatura, desinstale-a primeiro.
+Guarde o keystore original em local seguro: perder a chave impede assinar atualizações compatíveis com instalações anteriores.
 
 ## Limitações conhecidas
 
-- **Formatos de vídeo:** o player é o do próprio sistema (WebView). MP4 e WebM funcionam em todas as plataformas; MKV depende do codec e pode não tocar no Android ou no macOS.
-- **HTTP sem criptografia:** o Android bloqueia `http://` por padrão. Fontes de addon com `http://` podem não tocar no celular.
-- **Legendas:** só português (SRT ou VTT), baixadas pelo backend e convertidas para VTT. O backend só baixa de endereços públicos e recusa redirecionamentos para a rede interna.
-- **Catálogos:** o botão "Carregar mais" depende de o addon aceitar o parâmetro `skip`. Addons que ignoram esse parâmetro simplesmente não mostram novos itens.
-- **Validação de DNS:** o nome do domínio é resolvido e os endereços internos são descartados na própria conexão. Ainda assim, a checagem de instalação e a conexão resolvem o nome em momentos diferentes; um servidor que muda de endereço entre as duas pode, em tese, contornar a primeira checagem.
-- **iOS:** não é alvo de build nem de teste neste projeto.
-- **Torrent e magnet:** o app inclui um motor BitTorrent local (librqbit) que reproduz fontes `magnet:` e arquivos `.torrent`, servidos por um endereço local (`127.0.0.1`). Quem usa é responsável pelo conteúdo que abre; a legalidade depende do conteúdo e do país.
-- **Dados da biblioteca:** biblioteca e progresso ficam no aparelho. Use **Exportar dados** na aba Biblioteca: o backup é salvo na pasta de dados do app e o caminho aparece na tela. No Android essa pasta é privada, então o arquivo não aparece no gerenciador de arquivos; para levá-lo a outro aparelho, é preciso um recurso de compartilhamento que ainda não foi adicionado. **Importar dados** aceita o arquivo gerado.
+- A reprodução depende dos formatos, codecs, cabeçalhos e disponibilidade fornecidos pela fonte e do suporte do player/dispositivo.
+- O proxy não oferece suporte a DASH (.mpd).
+- O Android pode bloquear fontes HTTP sem criptografia conforme a configuração de segurança do sistema.
+- A busca e paginação de catálogos dependem de cada addon implementar os parâmetros correspondentes.
+- O catálogo comunitário verifica manifestos e disponibilidade, mas isso não garante que todos os streams de um addon funcionarão nem constitui auditoria de segurança do código/serviço do addon.
+- A biblioteca e o progresso ficam no aparelho. No Android, os dados exportados ficam inicialmente no diretório privado do app; transferi-los para outro aparelho exige compartilhar o arquivo exportado por um meio externo.
+- A compatibilidade de formatos e codecs varia entre Android, WebView, libmpv e sistema operacional.
 
 ## Licença
 
-GPL-3.0-or-later. Veja [LICENSE](LICENSE) e [NOTICE.md](NOTICE.md), que trata das versões anteriores (MIT) e das partes derivadas do dxbi-stremio.
+GPL-3.0-or-later. Consulte [LICENSE](LICENSE) e [NOTICE.md](NOTICE.md) para avisos de direitos autorais, código anterior e fontes tipográficas.
