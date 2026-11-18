@@ -1785,8 +1785,14 @@ async function play(stream, label, id, meta, subs) {
   // No Windows, libmpv é o player principal para todos os formatos de mídia:
   // vídeo, áudio, contêineres e protocolos suportados pelo próprio mpv.
   // Não restringir por extensão: URLs sem extensão e streams também são válidos.
-  if (IS_WINDOWS && await playNative(stream, label, id, meta, subs, segments)) return;
-  if (!IS_WINDOWS && await playNative(stream, label, id, meta, subs, segments)) return;
+  if (IS_WINDOWS) {
+    if (await playNative(stream, label, id, meta, subs, segments)) return;
+    // Não cair no HTML5 após falha do mpv: isso gerava uma mensagem falsa de formato
+    // incompatível mesmo quando a causa era inicialização/configuração do player nativo.
+    toast(`O player nativo não conseguiu abrir esta fonte: ${nativeFailure || 'erro desconhecido'}`);
+    return;
+  }
+  if (await playNative(stream, label, id, meta, subs, segments)) return;
 
   saveProgress(true);
   const seq = ++playSeq;
