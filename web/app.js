@@ -183,20 +183,23 @@ async function openExternal(url) {
   }
 }
 
-function isTorrentStream(stream) {
+function isLocalTorrentStream(stream) {
   const url = String(stream?.url ?? '').trim();
-  // O backend serve torrents por loopback. A fonte original pode manter infoHash/hash
-  // após a URL ser substituída pela URL local; nesse caso não devemos reabrir o torrent
-  // nem enviar o endpoint local ao proxy de mídia.
   try {
     const parsed = new URL(url);
     const isLoopback = parsed.hostname === '127.0.0.1'
       || parsed.hostname === 'localhost'
       || parsed.hostname === '[::1]';
-    if (isLoopback && parsed.pathname.startsWith('/stream/')) return false;
+    return isLoopback && parsed.pathname.startsWith('/stream/');
   } catch {
-    // URLs não absolutas continuam sendo avaliadas pelas regras abaixo.
+    return false;
   }
+}
+
+function isTorrentStream(stream) {
+  const url = String(stream?.url ?? '').trim();
+  // URLs locais já são streams preparados pelo backend: não reabra o magnet.
+  if (isLocalTorrentStream(stream)) return false;
   return url.startsWith('magnet:?') || Boolean(stream?.infoHash) || Boolean(stream?.hash);
 }
 
@@ -1437,22 +1440,24 @@ async function play(stream, label, id, meta, subs) {
     return;
   }
   nativeFailure = null;
-  // Fontes HTTP/HTTPS passam pelo proxy local; playlists HLS e seus recursos filhos
-  // também são reescritos para manter cada requisição dentro do proxy.
-  try {
-    const originalUrl = stream.url;
-    stream = {
-      ...stream,
-      mimeType: stream.mimeType || (/\.m3u8(\?|$)/i.test(originalUrl) ? 'application/x-mpegURL' : ''),
-      url: await call('media_proxy_url', {
-        url: originalUrl,
-        behaviorHints: stream.behaviorHints || null,
-        mimeType: stream.mimeType || null,
-      }),
-    };
-  } catch (e) {
-    toast(`Fonte não pode ser reproduzida com segurança: ${describeError(e)}`);
-    return;
+  // Torrents já abertos são servidos pelo endpoint local do backend e nunca passam
+  // pelo proxy HTTP público. Apenas fontes HTTP/HTTPS externas usam o proxy de mídia.
+  if (!isLocalTorrentStream(stream)) {
+    try {
+      const originalUrl = stream.url;
+      stream = {
+        ...stream,
+        mimeType: stream.mimeType || (/\.m3u8(\?|$)/i.test(originalUrl) ? 'application/x-mpegURL' : ''),
+        url: await call('media_proxy_url', {
+          url: originalUrl,
+          behaviorHints: stream.behaviorHints || null,
+          mimeType: stream.mimeType || null,
+        }),
+      };
+    } catch (e) {
+      toast(`Fonte não pode ser reproduzida com segurança: ${describeError(e)}`);
+      return;
+    }
   }
   const segments = await skipSegmentsFor(id, meta);
   if (await playNative(stream, label, id, meta, subs, segments)) return;
