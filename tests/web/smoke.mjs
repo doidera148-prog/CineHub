@@ -158,9 +158,9 @@ async function checkBackupImport() {
   if (errors.length) failures.push(...errors);
 }
 
-async function checkTv() {
+async function checkTv(viewport, label) {
   const page = await browser.newPage({
-    viewport: { width: 1280, height: 720 },
+    viewport,
     userAgent: 'Mozilla/5.0 (Linux; Android 11; Android TV) AppleWebKit/537.36 Chrome/120.0 Safari/537.36',
   });
   await page.addInitScript(fixtures);
@@ -175,15 +175,16 @@ async function checkTv() {
   });
   await page.goto(`${base}/#/movies`);
   await page.waitForTimeout(350);
-  if (!(await page.locator('body').evaluate((el) => el.classList.contains('tv-mode')))) failures.push('[tv] interface dedicada não foi ativada');
-  if (await page.evaluate(() => document.querySelector('#nav-main a:last-child')?.getBoundingClientRect().bottom > innerHeight - 8)) failures.push('[tv] menu lateral ultrapassa a tela 720p');
+  if (!(await page.locator('body').evaluate((el) => el.classList.contains('tv-mode')))) failures.push(`[${label}] interface dedicada não foi ativada`);
+  if (await page.evaluate(() => document.querySelector('#nav-main a:last-child')?.getBoundingClientRect().bottom > innerHeight - 8)) failures.push(`[${label}] menu lateral ultrapassa a tela`);
+  if (await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)) failures.push(`[${label}] layout TV apresenta overflow horizontal`);
   const first = page.locator('#view .strip a').first();
   await first.focus();
   await page.keyboard.press('ArrowLeft');
-  if (await page.evaluate(() => document.activeElement?.closest('.strip') === document.querySelector('.strip'))) failures.push('[tv] controle ficou preso na borda do trilho');
+  if (await page.evaluate(() => document.activeElement?.closest('.strip') === document.querySelector('.strip'))) failures.push(`[${label}] controle ficou preso na borda do trilho`);
   await page.close();
 }
-try { await check({ width: 360, height: 800 }, 'celular'); await check({ width: 1280, height: 800 }, 'desktop'); await checkTv(); await checkBackupImport(); await checkWindowsPlayer(); await checkAndroidPlayer(); }
+try { await check({ width: 360, height: 800 }, 'celular'); await check({ width: 1280, height: 800 }, 'desktop'); await checkTv({ width: 1280, height: 720 }, 'Android TV 720p'); await checkTv({ width: 3840, height: 2160 }, 'Android TV 4K'); await checkBackupImport(); await checkWindowsPlayer(); await checkAndroidPlayer(); }
 finally { await browser.close(); server.close(); }
 if (failures.length) { console.error('Falhas:\n- ' + failures.join('\n- ')); process.exit(1); }
 console.log('Smoke test ok: rotas, acessibilidade e navegação em celular, desktop e Android TV.');
