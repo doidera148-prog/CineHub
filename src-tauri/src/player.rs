@@ -18,7 +18,19 @@ pub struct PlayerResult {
 
 /// Só aceita http/https: o mpv não pode abrir arquivos locais nem opções de linha de comando.
 pub fn is_playable_url(raw: &str) -> bool {
-    let Ok(url) = reqwest::Url::parse(raw.trim()) else {
+    let raw = raw.trim();
+    let Some((scheme, remainder)) = raw.split_once("://") else {
+        return false;
+    };
+    if !matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https") {
+        return false;
+    }
+    // Url::parse normaliza barras extras; rejeitar autoridade vazia antes do parse.
+    let authority = remainder.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.is_empty() {
+        return false;
+    }
+    let Ok(url) = reqwest::Url::parse(raw) else {
         return false;
     };
     matches!(url.scheme(), "http" | "https") && url.host_str().is_some()
