@@ -156,20 +156,21 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
                 ).build().show()
             }
         }
-        // Botão para selecionar/desativar legendas, incluindo faixas embutidas e externas.
+        // Controle direto de legendas: não depende do diálogo genérico de seleção.
+        // Isso permite desligar inclusive uma faixa externa que foi selecionada automaticamente.
+        var subtitlesDisabled = false
         val subtitleButton = Button(act).apply {
-            text = "Legendas"
+            text = "Desativar legendas"
             isAllCaps = false
             visibility = View.GONE
             isFocusable = true
             isFocusableInTouchMode = true
             setOnClickListener {
-                androidx.media3.ui.TrackSelectionDialogBuilder(
-                    act,
-                    "Legendas",
-                    player,
-                    C.TRACK_TYPE_TEXT
-                ).setShowDisableOption(true).build().show()
+                subtitlesDisabled = !subtitlesDisabled
+                player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, subtitlesDisabled)
+                    .build()
+                text = if (subtitlesDisabled) "Ativar legendas" else "Desativar legendas"
             }
         }
         var hasMultipleAudioTracks = false
@@ -185,9 +186,10 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
                     .sumOf { group ->
                         (0 until group.length).count { group.isTrackSupported(it) }
                     } > 1
+                // Considera as faixas de texto presentes mesmo quando o renderer não
+                // consegue classificá-las como suportadas antes da preparação completa.
                 hasSubtitleTracks = tracks.groups
-                    .filter { it.type == C.TRACK_TYPE_TEXT }
-                    .any { group -> (0 until group.length).any { group.isTrackSupported(it) } }
+                    .any { it.type == C.TRACK_TYPE_TEXT && it.length > 0 }
                 // Os seletores só aparecem junto com os controles do player.
                 updateTrackButtons(view.isControllerFullyVisible)
             }
