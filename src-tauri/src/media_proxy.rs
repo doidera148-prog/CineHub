@@ -386,6 +386,8 @@ async fn is_safe_proxy_url(state: &ProxyState, raw_url: &str) -> bool {
             .and_then(|host| host.parse::<std::net::IpAddr>().ok())
             .is_some_and(|ip| ip.is_loopback());
     }
+    #[cfg(not(test))]
+    let _ = state;
     crate::addon::is_safe_url(raw_url).await
 }
 
@@ -584,11 +586,11 @@ mod tests {
     }
 
     async fn master_playlist() -> &'static str {
-        "#EXTM3U\\n#EXT-X-STREAM-INF:BANDWIDTH=1200000\\nvariant.m3u8\\n"
+        "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1200000\nvariant.m3u8\n"
     }
 
     async fn variant_playlist() -> &'static str {
-        "#EXTM3U\\n#EXT-X-KEY:METHOD=AES-128,URI=\\\"key.bin\\\"\\n#EXTINF:4,\\nsegment.ts\\n#EXT-X-ENDLIST\\n"
+        "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"key.bin\"\n#EXTINF:4,\nsegment.ts\n#EXT-X-ENDLIST\n"
     }
 
     async fn test_segment(headers: HeaderMap) -> Response {
@@ -618,7 +620,7 @@ mod tests {
         seen.lock().unwrap().push(
             headers.contains_key(header::AUTHORIZATION) || headers.contains_key(header::COOKIE),
         );
-        "#EXTM3U\\nsegment.ts\\n"
+        "#EXTM3U\nsegment.ts\n"
     }
 
     async fn capture_redirected_segment_headers(
@@ -737,7 +739,7 @@ mod tests {
         assert!(variant_text.contains("#EXT-X-KEY:METHOD=AES-128"));
         let key_token = rewritten_token(
             variant_text
-                .split("URI=\\\"")
+                .split("URI=\"")
                 .nth(1)
                 .expect("AES-128 key URI missing"),
         );
