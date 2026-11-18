@@ -191,6 +191,17 @@ jobs:
         if: matrix.platform == 'windows-latest'
         working-directory: src-tauri
         run: cargo tauri build --config tauri.windows.conf.json --features mpv
+      - name: Verificar se o instalador desktop foi gerado
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Windows) package=$(find src-tauri/target/release/bundle -type f \\( -iname '*.msi' -o -iname '*.exe' \\) -print -quit) ;;
+            macOS) package=$(find src-tauri/target/release/bundle -type f \\( -iname '*.dmg' -o -name '*.app' \\) -print -quit) ;;
+            Linux) package=$(find src-tauri/target/release/bundle -type f \\( -iname '*.deb' -o -iname '*.AppImage' \\) -print -quit) ;;
+            *) echo "Plataforma não reconhecida: $RUNNER_OS"; exit 1 ;;
+          esac
+          test -n "$package" || { echo "Nenhum instalador foi gerado para $RUNNER_OS"; exit 1; }
+          echo "Pacote gerado: $package"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cinehub-${{ matrix.platform }}
@@ -260,6 +271,10 @@ jobs:
       - name: Gerar APK
         working-directory: src-tauri
         run: cargo tauri android build --apk --split-per-abi
+      - name: Verificar geração dos APKs
+        run: |
+          find src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -print
+          find src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -print -quit | grep -q .
       - name: Assinar APK
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
