@@ -94,4 +94,4 @@ async function checkTv() {
 try { await check({ width: 360, height: 800 }, 'celular'); await check({ width: 1280, height: 800 }, 'desktop'); await checkTv(); }
 finally { await browser.close(); server.close(); }
 if (failures.length) { console.error('Falhas:\n- ' + failures.join('\n- ')); process.exit(1); }
-console.log('Smoke test ok: rotas e navegação em celular e desktop.');
+console.log('Smoke test ok: rotas, acessibilidade e navegação em celular, desktop e Android TV.');
