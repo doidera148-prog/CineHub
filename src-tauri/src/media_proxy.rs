@@ -301,7 +301,10 @@ async fn proxy_request(
         }
         let playlist = String::from_utf8(bytes)
             .map_err(|_| (StatusCode::BAD_GATEWAY, "playlist HLS não é UTF-8".into()))?;
-        let rewritten = rewrite_playlist(&state, &url, &target.headers, &playlist).await?;
+        // Uma playlist alcançada por redirect cross-origin não pode herdar Authorization/Cookie
+        // da origem inicial ao registrar segmentos e playlists filhas.
+        let playlist_headers = headers_for_origin(&target.headers, url.origin() == original_origin);
+        let rewritten = rewrite_playlist(&state, &url, &playlist_headers, &playlist).await?;
         builder = builder.header(header::CONTENT_TYPE, "application/vnd.apple.mpegurl");
         builder = builder.header(header::CACHE_CONTROL, "no-store");
         builder = builder
@@ -367,6 +370,22 @@ async fn proxy_request(
     builder
         .body(body)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+
+/// Preserva cabeçalhos sensíveis somente quando o recurso continua na origem inicial.
+fn headers_for_origin(
+    headers: &[(header::HeaderName, HeaderValue)],
+    same_origin: bool,
+) -> Vec<(header::HeaderName, HeaderValue)> {
+    if same_origin {
+        return headers.to_vec();
+    }
+    headers
+        .iter()
+        .filter(|(name, _)| *name != header::AUTHORIZATION && *name != header::COOKIE)
+        .cloned()
+        .collect()
 }
 
 async fn rewrite_playlist(
@@ -473,5 +492,21 @@ mod tests {
     fn proxy_headers_rejects_invalid_values() {
         let hints = serde_json::json!({"proxyHeaders":{"request":{"Referer":42}}});
         assert!(parse_request_headers(Some(&hints)).is_err());
+    }
+
+    #[test]
+    fn redirected_hls_playlist_does_not_inherit_sensitive_headers() {
+        let headers = vec![
+            (header::AUTHORIZATION, HeaderValue::from_static("Bearer secret")),
+            (header::COOKIE, HeaderValue::from_static("session=secret")),
+            (header::REFERER, HeaderValue::from_static("https://origin.example/")),
+        ];
+
+        let same_origin = headers_for_origin(&headers, true);
+        assert_eq!(same_origin.len(), 3);
+
+        let redirected = headers_for_origin(&headers, false);
+        assert_eq!(redirected.len(), 1);
+        assert_eq!(redirected[0].0, header::REFERER);
     }
 }
