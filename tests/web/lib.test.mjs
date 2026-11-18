@@ -240,3 +240,44 @@ test('registros importados de progresso não mantêm tempos negativos', () => {
   assert.equal(result.progress['movie:1'].duration, 0);
   assert.equal(result.progress['movie:1'].updated, 0);
 });
+
+
+test('gravação em lote salva todas as chaves quando não há falha', () => {
+  const values = new Map([['favs', 'old-favs'], ['progress', 'old-progress']]);
+  const storage = {
+    getItem: (key) => values.has(key) ? values.get(key) : null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
+  };
+  assert.equal(L.writeStorageBatch(storage, { favs: ['new'], progress: { a: 1 } }), true);
+  assert.deepEqual(JSON.parse(values.get('favs')), ['new']);
+  assert.deepEqual(JSON.parse(values.get('progress')), { a: 1 });
+});
+
+test('gravação em lote restaura todas as chaves se uma delas falhar', () => {
+  const values = new Map([['favs', 'old-favs'], ['progress', 'old-progress']]);
+  const storage = {
+    getItem: (key) => values.has(key) ? values.get(key) : null,
+    setItem: (key, value) => {
+      if (key === 'progress' && value !== 'old-progress') throw new Error('quota excedida');
+      values.set(key, value);
+    },
+    removeItem: (key) => values.delete(key),
+  };
+  assert.equal(L.writeStorageBatch(storage, { favs: ['new'], progress: { a: 1 } }), false);
+  assert.equal(values.get('favs'), 'old-favs');
+  assert.equal(values.get('progress'), 'old-progress');
+});
+
+test('gravação em lote rejeita valores não serializáveis sem alterar o armazenamento', () => {
+  const values = new Map([['favs', 'old-favs']]);
+  const storage = {
+    getItem: (key) => values.has(key) ? values.get(key) : null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
+  };
+  const circular = {};
+  circular.self = circular;
+  assert.equal(L.writeStorageBatch(storage, { favs: ['new'], progress: circular }), false);
+  assert.equal(values.get('favs'), 'old-favs');
+});
