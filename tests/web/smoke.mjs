@@ -18,7 +18,7 @@ const server = createServer(async (req, res) => {
 });
 await new Promise((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
 const base = `http://127.0.0.1:${server.address().port}`;
-const fixtures = `window.__calls=[];window.__TAURI__={core:{invoke:async(cmd,args)=>{window.__calls.push({cmd,args});const metas=(n,p)=>Array.from({length:n},(_,i)=>({id:'tt'+p+i,type:'movie',name:p+' filme '+i,releaseInfo:'2026'}));switch(cmd){case'home':return{rows:[{title:'Populares',addon:'Teste',transportUrl:'https://test.invalid/manifest.json',type:args.kind,catalogId:'top',metas:metas(20,'home')}]};case'search':return{rows:[]};case'catalog_page':return{metas:[]};case'list_addons':return[];case'meta':return{meta:{id:args.id,type:'movie',name:window.__maliciousMetaName || 'Título de teste',description:'Descrição'}};case'streams':if(args.id==='tt2')throw Error('offline');return{streams:[{name:'Fonte MP4 de teste',title:'1080p',url:'https://stream.test/sample.mp4',mimeType:'video/mp4'}],subtitles:[{lang:'pt',url:'https://subs.test/sample.vtt'}],errors:[]};case'media_proxy_url':return'${base}/sample.mp4';case'subtitle':return'WEBVTT\\n\\n00:00:00.000 --> 00:00:01.000\\nLegenda de teste';case'skip_segments':return{segments:[]};case'plugin:exoplayer|play':if(window.__rejectNativePlayer)throw Error('falha nativa simulada');return{positionMs:0,durationMs:0};case'torrent_stats':return{active:true,state:'Live',downloadSpeedBytes:1250000,uploadSpeedBytes:64000,peers:8,peersSeen:14,downloadedBytes:500000000,totalBytes:1000000000,error:null};default:return{};}}}};`;
+const fixtures = `window.__calls=[];window.__TAURI__={core:{invoke:async(cmd,args)=>{window.__calls.push({cmd,args});const metas=(n,p)=>Array.from({length:n},(_,i)=>({id:'tt'+p+i,type:'movie',name:p+' filme '+i,releaseInfo:'2026'}));switch(cmd){case'home':return{rows:[{title:'Populares',addon:'Teste',transportUrl:'https://test.invalid/manifest.json',type:args.kind,catalogId:'top',metas:metas(20,'home')}]};case'search':return{rows:[]};case'catalog_page':return{metas:[]};case'list_addons':return[];case'meta':return{meta:{id:args.id,type:'movie',name:window.__maliciousMetaName || 'Título de teste',description:'Descrição'}};case'streams':if(args.id==='tt2')throw Error('offline');return{streams:[window.__streamForTest || {name:'Fonte MP4 de teste',title:'1080p',url:'https://stream.test/sample.mp4',mimeType:'video/mp4'}],subtitles:[{lang:'pt',url:'https://subs.test/sample.vtt'}],errors:[]};case'media_proxy_url':return window.__preserveMediaUrl?args.url:'${base}/sample.mp4';case'subtitle':return'WEBVTT\\n\\n00:00:00.000 --> 00:00:01.000\\nLegenda de teste';case'skip_segments':return{segments:[]};case'plugin:exoplayer|play':if(window.__rejectNativePlayer)throw Error('falha nativa simulada');return{positionMs:0,durationMs:0};case'torrent_stats':return{active:true,state:'Live',downloadSpeedBytes:1250000,uploadSpeedBytes:64000,peers:8,peersSeen:14,downloadedBytes:500000000,totalBytes:1000000000,error:null};default:return{};}}}};`;
 const routes = ['#/', '#/movies', '#/series', '#/animes', '#/search?q=filme', '#/library', '#/addons', '#/detail/movie/tt1'];
 const failures = [];
 const browser = await chromium.launch();
@@ -81,34 +81,45 @@ async function check(viewport, label) {
 }
 
 async function checkWindowsPlayer() {
-  const page = await browser.newPage({
-    viewport: { width: 1280, height: 800 },
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36',
-  });
-  const errors = [];
-  page.on('pageerror', (e) => errors.push(e.message));
-  await page.addInitScript(fixtures);
-  await page.route('**/sample.mp4', (route) => route.fulfill({ status: 200, contentType: 'video/mp4', body: Buffer.alloc(1024) }));
-  await page.goto(`${base}/#/detail/movie/tt1`);
-  await page.locator('.stream').waitFor({ state: 'visible' });
-  await page.locator('.stream').click();
-  await page.locator('#player:not(.hidden)').waitFor({ state: 'visible' });
-  await page.waitForFunction(() => window.__calls.some((call) => call.cmd === 'subtitle'));
-  const result = await page.evaluate(() => ({
-    title: document.querySelector('#player-title')?.textContent,
-    source: document.querySelector('video')?.currentSrc || document.querySelector('video')?.src,
-    calls: window.__calls.map((call) => call.cmd),
-    textTracks: document.querySelector('video')?.textTracks?.length || 0,
-  }));
-  if (result.title !== 'Título de teste') failures.push('[windows-player] título do player não foi atualizado');
-  if (!result.source?.includes('/sample.mp4')) failures.push('[windows-player] fonte não foi entregue ao vídeo HTML5');
-  if (result.calls.includes('player_play')) failures.push('[windows-player] Windows tentou iniciar o player nativo/libmpv');
-  if (!result.calls.includes('media_proxy_url')) failures.push('[windows-player] fonte externa não passou pelo proxy de mídia');
-  if (!result.calls.includes('subtitle')) failures.push('[windows-player] legenda não foi solicitada ao backend');
-  if (errors.length) failures.push(...errors.map((e) => `[windows-player] ${e}`));
-  await page.close();
+  const formats = [
+    ['MKV', 'https://stream.test/movie.mkv', 'video/x-matroska'],
+    ['MP4', 'https://stream.test/movie.mp4', 'video/mp4'],
+    ['WebM', 'https://stream.test/movie.webm', 'video/webm'],
+    ['AVI', 'https://stream.test/movie.avi', 'video/x-msvideo'],
+    ['MOV', 'https://stream.test/movie.mov', 'video/quicktime'],
+    ['MP3', 'https://stream.test/audio.mp3', 'audio/mpeg'],
+    ['FLAC', 'https://stream.test/audio.flac', 'audio/flac'],
+    ['HLS', 'https://stream.test/master.m3u8', 'application/x-mpegURL'],
+    ['sem extensão', 'https://stream.test/play?id=42', ''],
+  ];
+  for (const [label, url, mimeType] of formats) {
+    const page = await browser.newPage({
+      viewport: { width: 1280, height: 800 },
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36',
+    });
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    await page.addInitScript(fixtures);
+    await page.addInitScript(({ url, mimeType }) => {
+      window.__preserveMediaUrl = true;
+      window.__streamForTest = { name: 'Fonte ' + url, title: 'Teste ' + url, url, mimeType };
+    }, { url, mimeType });
+    await page.goto(`${base}/#/detail/movie/tt1`);
+    await page.locator('.stream').waitFor({ state: 'visible' });
+    await page.locator('.stream').click();
+    await page.waitForFunction(() => window.__calls.some((call) => call.cmd === 'player_play'));
+    const result = await page.evaluate(() => ({
+      native: window.__calls.find((call) => call.cmd === 'player_play'),
+      proxy: window.__calls.some((call) => call.cmd === 'media_proxy_url'),
+      htmlSource: document.querySelector('video')?.currentSrc || document.querySelector('video')?.src || '',
+    }));
+    if (result.native?.args?.url !== url) failures.push(`[windows-player] ${label}: URL não foi entregue ao libmpv`);
+    if (!result.proxy) failures.push(`[windows-player] ${label}: fonte externa não passou pelo proxy de mídia`);
+    if (result.htmlSource) failures.push(`[windows-player] ${label}: caiu indevidamente no player HTML5`);
+    if (errors.length) failures.push(...errors.map((e) => `[windows-player:${label}] ${e}`));
+    await page.close();
+  }
 }
-
 async function checkAndroidPlayer() {
   const page = await browser.newPage({
     viewport: { width: 1280, height: 720 },
