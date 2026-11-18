@@ -48,15 +48,15 @@ jobs:
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
       - name: Formatação YAML e JSON (Prettier)
         run: |
-          mapfile -d '' files < <(find .github src-tauri tests -type f \\
-            \\( -name '*.yml' -o -name '*.yaml' -o -name '*.json' \\) \\
+          mapfile -d '' files < <(find .github src-tauri tests -type f \
+            \( -name '*.yml' -o -name '*.yaml' -o -name '*.json' \) \
             -not -path '*/target/*' -not -path '*/gen/*' -print0)
           npx --yes prettier@3.6.2 --check "${files[@]}"
       - name: Verificar sintaxe de todos os arquivos JavaScript
         run: |
-          find web tests -type f \\
-            \\( -name '*.js' -o -name '*.mjs' \\) \\
-            -not -path 'web/vendor/*' -print0 \\
+          find web tests -type f \
+            \( -name '*.js' -o -name '*.mjs' \) \
+            -not -path 'web/vendor/*' -print0 \
             | xargs -0 -r -n1 node --check
       - name: Validar sintaxe Python
         run: python3 -m compileall -q android-tv
@@ -68,7 +68,6 @@ jobs:
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
       - name: Licenças e fontes das dependências (cargo-deny)
         uses: EmbarkStudios/cargo-deny-action@v2
-        continue-on-error: true
         with:
           manifest-path: src-tauri/Cargo.toml
           command: check licenses sources
