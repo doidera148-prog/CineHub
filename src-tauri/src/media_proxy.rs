@@ -372,7 +372,6 @@ async fn proxy_request(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
 
-
 /// Preserva cabeçalhos sensíveis somente quando o recurso continua na origem inicial.
 fn headers_for_origin(
     headers: &[(header::HeaderName, HeaderValue)],
@@ -497,9 +496,15 @@ mod tests {
     #[test]
     fn redirected_hls_playlist_does_not_inherit_sensitive_headers() {
         let headers = vec![
-            (header::AUTHORIZATION, HeaderValue::from_static("Bearer secret")),
+            (
+                header::AUTHORIZATION,
+                HeaderValue::from_static("Bearer secret"),
+            ),
             (header::COOKIE, HeaderValue::from_static("session=secret")),
-            (header::REFERER, HeaderValue::from_static("https://origin.example/")),
+            (
+                header::REFERER,
+                HeaderValue::from_static("https://origin.example/"),
+            ),
         ];
 
         let same_origin = headers_for_origin(&headers, true);
