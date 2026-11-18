@@ -1,8 +1,8 @@
 //! Proxy HTTP local autenticado para fontes de vídeo.
 //!
-//! A primeira etapa cobre HTTP progressivo e Range. HLS (reescrita de playlists e recursos
-//! filhos) é deliberadamente recusado até existir tratamento específico para cada URI.
-use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::{Duration, Instant}};
+//! HTTP progressivo mantém streaming em blocos e Range; playlists HLS e todos os recursos
+//! filhos são reescritos para URLs locais autenticadas. DASH permanece desabilitado.
+use std::{collections::HashMap, net::SocketAddr, str::FromStr, sync::Arc, time::{Duration, Instant}};
 
 use axum::{
     body::Body,
@@ -208,7 +208,7 @@ async fn proxy_request(
             match resp.chunk().await {
                 Ok(Some(bytes)) => Some((Ok::<_, std::io::Error>(bytes), resp)),
                 Ok(None) => None,
-                Err(e) => Some((Err(std::io::Error::other(e.to_string())), resp)),
+                Err(e) => Some((Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())), resp)),
             }
         });
         Body::from_stream(chunks)
