@@ -1738,6 +1738,117 @@ window.addEventListener('popstate', () => {
   if (!player.classList.contains('hidden')) closePlayer(true);
 });
 
+// ---------- Configurações do aplicativo ----------
+let torrentStatsTimer = null;
+function formatBytes(value) {
+  const n = Math.max(0, Number(value) || 0);
+  if (n < 1024) return `${n.toFixed(0)} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let v = n / 1024, i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(1)} ${units[i]}`;
+}
+function formatRate(value) { return `${formatBytes(value)}/s`; }
+async function settingsPage() {
+  if (torrentStatsTimer !== null) clearInterval(torrentStatsTimer);
+  torrentStatsTimer = null;
+  const enabled = store.get('showTorrentStats', false) === true;
+  setView(`
+    <section class="settings-page">
+      <header class="settings-heading">
+        <div><p class="eyebrow">CINEHUB</p><h1>Configurações</h1><p class="muted">Ajuste a experiência do aplicativo neste aparelho.</p></div>
+      </header>
+      <section class="settings-section">
+        <h2>Aparência</h2>
+        <label class="prefrow">Tema
+          <select id="theme-pref">
+            <option value="system"${themePref() === 'system' ? ' selected' : ''}>Automático</option>
+            <option value="dark"${themePref() === 'dark' ? ' selected' : ''}>Escuro</option>
+            <option value="light"${themePref() === 'light' ? ' selected' : ''}>Claro</option>
+          </select>
+        </label>
+      </section>
+      <section class="settings-section">
+        <h2>Reprodução</h2>
+        <label class="prefrow">Idioma das legendas
+          <select id="sub-lang">
+            <option value="pt"${subPref() === 'pt' ? ' selected' : ''}>Português</option>
+            <option value="en"${subPref() === 'en' ? ' selected' : ''}>Inglês</option>
+            <option value="off"${subPref() === 'off' ? ' selected' : ''}>Sem legenda</option>
+          </select>
+        </label>
+        <label class="prefrow">Pular abertura e créditos
+          <select id="skip-pref">
+            <option value="on"${skipPref() ? ' selected' : ''}>Ligado</option>
+            <option value="off"${skipPref() ? '' : ' selected'}>Desligado</option>
+          </select>
+        </label>
+      </section>
+      <section class="settings-section">
+        <h2>Rede e torrent</h2>
+        <label class="setting-toggle" for="torrent-stats-pref">
+          <span><strong>Estatísticas de rede do torrent</strong><small>Exibe velocidade de download e upload, peers conectados e progresso do torrent.</small></span>
+          <input id="torrent-stats-pref" type="checkbox"${enabled ? ' checked' : ''}>
+        </label>
+        <div id="torrent-stats-panel" class="torrent-stats-panel"${enabled ? '' : ' hidden'}>
+          <div class="stats-panel-head"><strong>Atividade do torrent</strong><button id="torrent-stats-refresh" class="chip small" type="button">Atualizar</button></div>
+          <div id="torrent-stats-content" class="muted small" role="status" aria-live="polite">Consultando motor torrent…</div>
+        </div>
+        <p class="muted small">As estatísticas são consultadas somente enquanto esta opção está ligada e a tela de configurações está aberta.</p>
+      </section>
+      <section class="settings-section">
+        <h2>Dados e privacidade</h2>
+        <p class="muted small">Biblioteca, progresso e preferências ficam armazenados localmente neste aparelho.</p>
+        <div class="dataactions">
+          <button id="open-library" class="chip" type="button">Abrir biblioteca</button>
+          <button id="export-diag" class="chip" type="button">Exportar diagnóstico</button>
+        </div>
+      </section>
+    </section>`);
+  $('#theme-pref').onchange = (e) => { store.set('theme', e.target.value); applyTheme(e.target.value); };
+  $('#sub-lang').onchange = (e) => store.set('subLang', e.target.value);
+  $('#skip-pref').onchange = (e) => store.set('skipSegments', e.target.value);
+  $('#open-library').onclick = () => { location.hash = '#/library'; };
+  $('#export-diag').onclick = exportDiagnostics;
+  const toggle = $('#torrent-stats-pref');
+  const panel = $('#torrent-stats-panel');
+  const content = $('#torrent-stats-content');
+  const refresh = async () => {
+    if (!toggle.checked || !content.isConnected) return;
+    try {
+      const s = await call('torrent_stats');
+      if (!content.isConnected || !toggle.checked) return;
+      if (!s.active) {
+        content.innerHTML = '<p>Nenhum torrent ativo no momento. Abra um torrent para acompanhar a rede.</p>';
+        return;
+      }
+      const pct = s.totalBytes > 0 ? Math.min(100, s.downloadedBytes / s.totalBytes * 100) : 0;
+      content.innerHTML = `
+        <div class="torrent-stat-grid">
+          <div><span>Download</span><strong>${esc(formatRate(s.downloadSpeedBytes))}</strong></div>
+          <div><span>Upload</span><strong>${esc(formatRate(s.uploadSpeedBytes))}</strong></div>
+          <div><span>Peers conectados</span><strong>${esc(s.peers)}</strong></div>
+          <div><span>Peers descobertos</span><strong>${esc(s.peersSeen)}</strong></div>
+          <div><span>Baixado</span><strong>${esc(formatBytes(s.downloadedBytes))} / ${esc(formatBytes(s.totalBytes))}</strong></div>
+          <div><span>Estado</span><strong>${esc(s.state || '—')}</strong></div>
+        </div>
+        <div class="stats-progress" role="progressbar" aria-label="Progresso do torrent" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct.toFixed(1)}"><span style="width:${pct.toFixed(1)}%"></span></div>
+        ${s.error ? `<p class="muted small">${esc(s.error)}</p>` : ''}`;
+    } catch (err) {
+      if (content.isConnected) content.textContent = `Não foi possível obter as estatísticas: ${err.message}`;
+    }
+  };
+  toggle.onchange = () => {
+    store.set('showTorrentStats', toggle.checked);
+    panel.hidden = !toggle.checked;
+    if (torrentStatsTimer !== null) clearInterval(torrentStatsTimer);
+    torrentStatsTimer = null;
+    if (toggle.checked) { refresh(); torrentStatsTimer = setInterval(refresh, 2000); }
+  };
+  $('#torrent-stats-refresh').onclick = refresh;
+  if (enabled) { refresh(); torrentStatsTimer = setInterval(refresh, 2000); }
+}
+
 // ---------- Biblioteca (favoritos no navegador) ----------
 
 function getFavs() {
@@ -1779,6 +1890,7 @@ const PAGE_TITLES = {
   search: 'Pesquisar',
   library: 'Biblioteca',
   addons: 'Addons',
+  settings: 'Configurações',
 };
 
 const NAV = {
@@ -1788,6 +1900,7 @@ const NAV = {
   animes: (alive) => catalogPage('anime', 'Animes', alive),
   search: () => searchPage(new URLSearchParams(location.hash.split('?')[1] || '').get('q') || ''),
   library: () => libraryPage(),
+  settings: () => settingsPage(),
   addons: () => addonsPage(),
 };
 
