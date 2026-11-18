@@ -252,6 +252,9 @@ jobs:
       - name: Ajustar manifesto para Android TV
         working-directory: src-tauri
         run: python3 android-tv/patch_manifest.py gen/android/app/src/main/AndroidManifest.xml
+      - name: Testes unitários do plugin ExoPlayer
+        working-directory: src-tauri/gen/android
+        run: ./gradlew testDebugUnitTest
       - name: Gerar APK
         working-directory: src-tauri
         run: cargo tauri android build --apk --split-per-abi
