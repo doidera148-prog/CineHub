@@ -50,7 +50,7 @@ fn redact_token(tok: &str) -> String {
     if is_hex_hash(core) {
         return "<hash>".into();
     }
-    if is_ipv4(core) {
+    if is_ip(core) {
         return "<ip>".into();
     }
     tok.to_string()
@@ -61,12 +61,8 @@ fn is_hex_hash(s: &str) -> bool {
     (s.len() == 40 || s.len() == 32) && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-fn is_ipv4(s: &str) -> bool {
-    let parts: Vec<&str> = s.split('.').collect();
-    parts.len() == 4
-        && parts
-            .iter()
-            .all(|p| !p.is_empty() && p.len() <= 3 && p.bytes().all(|b| b.is_ascii_digit()))
+fn is_ip(s: &str) -> bool {
+    s.parse::<std::net::IpAddr>().is_ok()
 }
 
 /// Grava uma linha no registro. O nível aceita só INFO, WARN ou ERROR.
@@ -177,6 +173,8 @@ mod tests {
             redact("conexão com 192.168.0.10 caiu"),
             "conexão com <ip> caiu"
         );
+        assert_eq!(redact("conexão com 2001:db8::1 caiu"), "conexão com <ip> caiu");
+        assert_eq!(redact("conexão com [2001:db8::1] caiu"), "conexão com <ip> caiu");
         assert_eq!(redact("erro apikey=abc123 x"), "erro apikey=<redigido> x");
     }
 
