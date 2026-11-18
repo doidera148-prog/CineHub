@@ -160,7 +160,7 @@ mod imp {
             init.set_option("osc", "yes")?;
             // osc-visibility e osc-idle são opções do script OSC, não opções globais do mpv.
             // Passá-las diretamente a set_option causa MPV_ERROR_OPTION_NOT_FOUND (-5).
-            init.set_option("script-opts", "osc-visibility=always,osc-idle=yes")?;
+            init.set_option("script-opts", "osc-visibility=always,osc-idlescreen=yes")?;
             init.set_option("input-default-bindings", "yes")?;
             init.set_option("input-vo-keyboard", "yes")?;
             init.set_option("osd-level", "3")?;
@@ -422,7 +422,7 @@ mod tests {
             init.set_option("vo", "null")?;
             init.set_option("ao", "null")?;
             init.set_option("osc", "yes")?;
-            init.set_option("script-opts", "osc-visibility=always,osc-idle=yes")?;
+            init.set_option("script-opts", "osc-visibility=always,osc-idlescreen=yes")?;
             Ok(())
         });
         assert!(
