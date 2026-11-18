@@ -142,7 +142,26 @@ jobs:
           $lines = & dumpbin /nologo /exports $env:MPV_DLL
           if ($LASTEXITCODE -ne 0) { throw 'dumpbin não conseguiu ler libmpv.' }
           $symbols = foreach ($line in $lines) {
-            if ($line -match '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)\s*
+            $parts = $line.Trim() -split '\s+'
+            $ordinal = 0
+            if ($parts.Length -ge 4 -and [int]::TryParse($parts[0], [ref]$ordinal)) { $parts[-1] }
+          }
+          if (-not $symbols) { throw 'Nenhum símbolo exportado foi encontrado.' }
+          $def = Join-Path $env:MPV_LIB_DIR 'mpv.def'
+          @('LIBRARY libmpv-2.dll', 'EXPORTS') + $symbols | Set-Content -Encoding ascii $def
+          $importLib = Join-Path $env:MPV_LIB_DIR 'mpv.lib'
+          & lib /nologo "/def:$def" /machine:x64 "/out:$importLib"
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $importLib)) { throw 'Falha ao gerar mpv.lib.' }
+          "LIB=$env:MPV_LIB_DIR;$env:LIB" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "PATH=$env:MPV_LIB_DIR;$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Gerar pacotes (macOS/Linux)
+        if: matrix.platform != 'windows-latest'
+        working-directory: src-tauri
+        run: cargo tauri build
+      - name: Gerar pacote Windows com suporte MKV
+        if: matrix.platform == 'windows-latest'
+        working-directory: src-tauri
+        run: cargo tauri build --features mpv
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cinehub-${{ matrix.platform }}
