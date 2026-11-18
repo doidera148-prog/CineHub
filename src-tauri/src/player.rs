@@ -21,24 +21,48 @@ pub struct PlayerCutout {
 
 /// Recorta retângulos de controle aos limites da caixa do vídeo, evitando
 /// regiões Win32 negativas, vazias ou fora da superfície nativa.
-fn clipped_cutouts(width: u32, height: u32, cutouts: &[PlayerCutout]) -> Vec<(i32, i32, i32, i32)> {
+fn clipped_cutouts(
+    width: u32,
+    height: u32,
+    cutouts: &[PlayerCutout],
+) -> Vec<(i32, i32, i32, i32)> {
     let max_x = width.min(i32::MAX as u32) as i32;
     let max_y = height.min(i32::MAX as u32) as i32;
-    cutouts.iter().filter_map(|cutout| {
-        let left = cutout.x.clamp(0, max_x);
-        let top = cutout.y.clamp(0, max_y);
-        let right = cutout.x.saturating_add(cutout.width.min(i32::MAX as u32) as i32).clamp(0, max_x);
-        let bottom = cutout.y.saturating_add(cutout.height.min(i32::MAX as u32) as i32).clamp(0, max_y);
-        (right > left && bottom > top).then_some((left, top, right, bottom))
-    }).collect()
+    cutouts
+        .iter()
+        .filter_map(|cutout| {
+            let left = cutout.x.clamp(0, max_x);
+            let top = cutout.y.clamp(0, max_y);
+            let right = cutout
+                .x
+                .saturating_add(cutout.width.min(i32::MAX as u32) as i32)
+                .clamp(0, max_x);
+            let bottom = cutout
+                .y
+                .saturating_add(cutout.height.min(i32::MAX as u32) as i32)
+                .clamp(0, max_y);
+            (right > left && bottom > top).then_some((left, top, right, bottom))
+        })
+        .collect()
 }
 
 #[tauri::command]
-pub fn player_set_geometry(x: i32, y: i32, width: u32, height: u32, cutouts: Vec<PlayerCutout>) -> bool {
+pub fn player_set_geometry(
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    cutouts: Vec<PlayerCutout>,
+) -> bool {
     #[cfg(all(windows, feature = "mpv"))]
-    win::set_shape(x, y, width, height, &cutouts)
+    {
+        win::set_shape(x, y, width, height, &cutouts)
+    }
     #[cfg(not(all(windows, feature = "mpv")))]
-    { let _ = (x, y, width, height, cutouts); false }
+    {
+        let _ = (x, y, width, height, cutouts);
+        false
+    }
 }
 
 #[tauri::command]
@@ -383,15 +407,25 @@ mod win {
 
     /// Recorta a janela nativa para a caixa de vídeo e subtrai as áreas dos
     /// controles HTML. A região Win32 afeta desenho e hit-testing.
-    pub fn set_shape(x: i32, y: i32, width: u32, height: u32, cutouts: &[super::PlayerCutout]) -> bool {
+    pub fn set_shape(
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+        cutouts: &[super::PlayerCutout],
+    ) -> bool {
         let video = VIDEO.load(std::sync::atomic::Ordering::SeqCst);
-        if video == 0 || width == 0 || height == 0 { return false; }
+        if video == 0 || width == 0 || height == 0 {
+            return false;
+        }
         // SAFETY: os handles de região são criados e liberados nesta função.
         unsafe {
             let right_edge = x.saturating_add(width.min(i32::MAX as u32) as i32);
             let bottom_edge = y.saturating_add(height.min(i32::MAX as u32) as i32);
             let region = CreateRectRgn(x, y, right_edge, bottom_edge);
-            if region.is_null() { return false; }
+            if region.is_null() {
+                return false;
+            }
             for (left, top, right, bottom) in super::clipped_cutouts(width, height, cutouts) {
                 let hole = CreateRectRgn(x + left, y + top, x + right, y + bottom);
                 if !hole.is_null() {
@@ -399,7 +433,12 @@ mod win {
                     DeleteObject(hole);
                 }
             }
-            if SetWindowRgn(video as usize as Hwnd, region, 1) == 0 { DeleteObject(region); false } else { true }
+            if SetWindowRgn(video as usize as Hwnd, region, 1) == 0 {
+                DeleteObject(region);
+                false
+            } else {
+                true
+            }
         }
     }
 
@@ -468,10 +507,17 @@ mod tests {
 
     #[test]
     fn player_cutouts_deserialize_and_keep_signed_offsets() {
-        let cutout: super::PlayerCutout = serde_json::from_str(
-            r#"{"x":-4,"y":12,"width":80,"height":32}"#,
-        ).unwrap();
-        assert_eq!(cutout, super::PlayerCutout { x: -4, y: 12, width: 80, height: 32 });
+        let cutout: super::PlayerCutout =
+            serde_json::from_str(r#"{"x":-4,"y":12,"width":80,"height":32}"#).unwrap();
+        assert_eq!(
+            cutout,
+            super::PlayerCutout {
+                x: -4,
+                y: 12,
+                width: 80,
+                height: 32
+            }
+        );
     }
 
     #[test]
