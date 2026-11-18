@@ -100,7 +100,7 @@ impl MediaProxy {
         if url.path().to_ascii_lowercase().ends_with(".mpd") {
             return Err("DASH ainda não está habilitado no proxy".into());
         }
-        if !is_safe_proxy_url(&state, url.as_str()).await {
+        if !is_safe_proxy_url(&self.state, url.as_str()).await {
             return Err("fonte bloqueada: o proxy só aceita destinos públicos".into());
         }
         let headers = parse_request_headers(hints)?;
@@ -198,7 +198,7 @@ async fn proxy_request(
     for _ in 0..=MAX_REDIRECTS {
         if !url.username().is_empty()
             || url.password().is_some()
-            || !crate::addon::is_safe_url(url.as_str()).await
+            || !is_safe_proxy_url(&state, url.as_str()).await
         {
             return Err((StatusCode::FORBIDDEN, "redirecionamento bloqueado".into()));
         }
@@ -382,12 +382,9 @@ async fn is_safe_proxy_url(state: &ProxyState, raw_url: &str) -> bool {
     if state.allow_loopback_targets {
         return Url::parse(raw_url)
             .ok()
-            .and_then(|url| url.host().map(|host| host.to_owned()))
-            .is_some_and(|host| match host {
-                url::Host::Ipv4(ip) => ip.is_loopback(),
-                url::Host::Ipv6(ip) => ip.is_loopback(),
-                url::Host::Domain(_) => false,
-            });
+            .and_then(|url| url.host_str().map(str::to_owned))
+            .and_then(|host| host.parse::<std::net::IpAddr>().ok())
+            .is_some_and(|ip| ip.is_loopback());
     }
     crate::addon::is_safe_url(raw_url).await
 }
