@@ -45,8 +45,14 @@ impl MediaProxy {
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .await.map_err(|e| format!("proxy de mídia: {e}"))?;
         let address = listener.local_addr().map_err(|e| e.to_string())?;
-        // Reutiliza o cliente sem redirects automáticos e com resolvedor DNS público do backend.
-        let client = crate::addon::client_no_redirect();
+        // Sem timeout total: streams podem durar horas. DNS continua fixado em IPs públicos.
+        let client = Client::builder()
+            .connect_timeout(Duration::from_secs(12))
+            .timeout(None)
+            .redirect(reqwest::redirect::Policy::none())
+            .user_agent("CineHub/0.2 media-proxy")
+            .dns_resolver(Arc::new(crate::addon::PublicResolver))
+            .build().map_err(|e| format!("cliente do proxy: {e}"))?;
         let state = ProxyState { client, sessions: Arc::new(RwLock::new(HashMap::new())) };
         let app = Router::new().route("/media/{token}", any(proxy_request)).with_state(state.clone());
         tauri::async_runtime::spawn(async move {
