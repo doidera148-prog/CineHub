@@ -36,25 +36,31 @@ pub struct AppState {
     pub media_proxy: tokio::sync::OnceCell<Result<Arc<media_proxy::MediaProxy>, String>>,
 }
 
-/// Addon de metadados oficial do Stremio, instalado na primeira execução.
+/// Addons padrão instalados automaticamente quando ainda não estão na lista.
 const DEFAULT_ADDON: &str = "https://v3-cinemeta.strem.io/manifest.json";
+const DEFAULT_ANIME_ADDON: &str = "https://1fe84bc728af-stremio-anime-catalogs.baby-beamup.club/%7B%22search%22%3A%22on%22%7D/manifest.json";
 
-/// Instala o Cinemeta com novas tentativas (espera crescente), pois a rede pode não estar pronta
-/// logo ao abrir o app.
-async fn install_default_addon(handle: tauri::AppHandle) {
+/// Instala um addon padrão com novas tentativas (espera crescente), pois a rede pode não
+/// estar pronta logo ao abrir o app. A verificação é individual para não sobrescrever addons
+/// instalados pelo usuário nem duplicar uma instalação existente.
+async fn install_default_addon(
+    handle: tauri::AppHandle,
+    addon_url: &'static str,
+    addon_name: &'static str,
+) {
     let state = handle.state::<AppState>();
     let mut delay = std::time::Duration::from_secs(2);
     for attempt in 1..=5 {
-        match addon::fetch_manifest(&state.http, DEFAULT_ADDON).await {
+        match addon::fetch_manifest(&state.http, addon_url).await {
             Ok(manifest) => {
                 let _save = state.save_lock.lock().await;
                 let snapshot = {
                     let mut list = state.addons.write().await;
-                    if list.iter().any(|a| a.transport_url == DEFAULT_ADDON) {
+                    if list.iter().any(|a| a.transport_url == addon_url) {
                         return;
                     }
                     list.push(Installed {
-                        transport_url: DEFAULT_ADDON.into(),
+                        transport_url: addon_url.into(),
                         manifest,
                     });
                     list.clone()
@@ -65,7 +71,7 @@ async fn install_default_addon(handle: tauri::AppHandle) {
                 return;
             }
             Err(e) => {
-                eprintln!("Cinemeta: tentativa {attempt} falhou ({e}).");
+                eprintln!("{addon_name}: tentativa {attempt} falhou ({e}).");
                 tokio::time::sleep(delay).await;
                 delay *= 2;
             }
@@ -113,7 +119,10 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             let store_path = data_dir.join("addons.json");
             let installed = store::load(&store_path);
-            let needs_default = installed.is_empty();
+            let needs_cinemeta = !installed.iter().any(|a| a.transport_url == DEFAULT_ADDON);
+            let needs_anime = !installed
+                .iter()
+                .any(|a| a.transport_url == DEFAULT_ANIME_ADDON);
             let torrent_dir = data_dir.join("torrents");
             let torrent = match torrent::TorrentEngine::new(torrent_dir) {
                 Ok(engine) => {
@@ -143,9 +152,21 @@ pub fn run() {
                 media_proxy: tokio::sync::OnceCell::new(),
             });
 
-            if needs_default {
+            if needs_cinemeta {
                 let handle = app.handle().clone();
-                tauri::async_runtime::spawn(install_default_addon(handle));
+                tauri::async_runtime::spawn(install_default_addon(
+                    handle,
+                    DEFAULT_ADDON,
+                    "Cinemeta",
+                ));
+            }
+            if needs_anime {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(install_default_addon(
+                    handle,
+                    DEFAULT_ANIME_ADDON,
+                    "Anime Catalogs",
+                ));
             }
             Ok(())
         })
