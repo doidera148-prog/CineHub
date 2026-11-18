@@ -108,22 +108,24 @@ jobs:
       - name: Instalar Tauri CLI
         if: steps.tauri-cache.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version "^2" --locked --force
+      - name: Instalar 7-Zip
+        if: matrix.platform == 'windows-latest'
+        run: choco install 7zip.install --no-progress -y
       - name: Preparar libmpv para o player MKV do Windows
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          choco install 7zip.install --no-progress -y
           $archive = Join-Path $env:RUNNER_TEMP 'mpv-dev.7z'
           $url = 'https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-x86_64-20261108-git-55d3feb45c.7z/download'
           curl.exe --location --fail --retry 3 --output $archive $url
-          if ($LASTEXITCODE -ne 0 -or (Get-Item $archive).Length -lt 1000000) { throw 'Download do pacote libmpv falhou.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Download do pacote libmpv falhou.' }
+          if ((Get-Item $archive).Length -lt 1000000) { throw 'O servidor retornou uma página de erro em vez do pacote libmpv.' }
           $dest = Join-Path $env:RUNNER_TEMP 'mpv-dev'
           & 'C:\Program Files\7-Zip\7z.exe' x $archive "-o$dest" -y
-          if ($LASTEXITCODE -ne 0) { throw 'Falha ao extrair libmpv.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao extrair o pacote libmpv.' }
           $dll = Get-ChildItem $dest -Filter 'libmpv-2.dll' -Recurse | Select-Object -First 1
           if (-not $dll) { throw 'libmpv-2.dll não foi encontrado.' }
-          $env:MPV_LIB_DIR = $dll.Directory.FullName
           $resources = Join-Path $env:GITHUB_WORKSPACE 'src-tauri/resources/mpv'
           New-Item -ItemType Directory -Force -Path $resources | Out-Null
           Get-ChildItem $dll.Directory.FullName -Filter '*.dll' | Copy-Item -Destination $resources -Force
@@ -140,13 +142,11 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $lines = & dumpbin /nologo /exports $env:MPV_DLL
-          if ($LASTEXITCODE -ne 0) { throw 'dumpbin não conseguiu ler libmpv.' }
+          if ($LASTEXITCODE -ne 0) { throw 'dumpbin não conseguiu ler os exports do libmpv.' }
           $symbols = foreach ($line in $lines) {
-            $parts = $line.Trim() -split '\s+'
-            $ordinal = 0
-            if ($parts.Length -ge 4 -and [int]::TryParse($parts[0], [ref]$ordinal)) { $parts[-1] }
+            if ($line -match '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)\s*$') { $Matches[1] }
           }
-          if (-not $symbols) { throw 'Nenhum símbolo exportado foi encontrado.' }
+          if (-not $symbols) { throw 'Nenhum símbolo exportado foi encontrado em libmpv-2.dll.' }
           $def = Join-Path $env:MPV_LIB_DIR 'mpv.def'
           @('LIBRARY libmpv-2.dll', 'EXPORTS') + $symbols | Set-Content -Encoding ascii $def
           $importLib = Join-Path $env:MPV_LIB_DIR 'mpv.lib'
@@ -158,7 +158,7 @@ jobs:
         if: matrix.platform != 'windows-latest'
         working-directory: src-tauri
         run: cargo tauri build
-      - name: Gerar pacote Windows com suporte MKV
+      - name: Gerar pacote Windows com player libmpv
         if: matrix.platform == 'windows-latest'
         working-directory: src-tauri
         run: cargo tauri build --features mpv
