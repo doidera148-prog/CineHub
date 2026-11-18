@@ -102,7 +102,6 @@ async function checkBackupImport() {
   await page.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('Não consegui importar:'));
   const afterInvalid = await page.evaluate(() => ({ favs: JSON.parse(localStorage.getItem('favs') || '[]'), progress: JSON.parse(localStorage.getItem('progress') || '{}') }));
   if (JSON.stringify(afterInvalid) !== JSON.stringify(saved)) errors.push('[backup] backup inválido alterou os dados existentes');
-  errors.push(...errors.map((e) => '[backup] ' + e));
   await page.close();
   if (errors.length) failures.push(...errors);
 }
