@@ -112,11 +112,13 @@ fn catalog_matches_kind(addon: &Installed, catalog: &CatalogDef, requested: &str
         return false;
     }
     let addon_name = addon.manifest.name.to_ascii_lowercase();
-    let catalog_name = catalog.name.as_deref().unwrap_or_default().to_ascii_lowercase();
+    let catalog_name = catalog
+        .name
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     let catalog_id = catalog.id.to_ascii_lowercase();
-    addon_name.contains("anime")
-        || catalog_name.contains("anime")
-        || catalog_id.contains("anime")
+    addon_name.contains("anime") || catalog_name.contains("anime") || catalog_id.contains("anime")
 }
 
 /// Tamanho máximo do texto de busca, em caracteres.
