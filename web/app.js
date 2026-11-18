@@ -993,7 +993,7 @@ async function detailPage(kind, id, alive) {
   }
 
   document.title = `${meta.name || 'Título'} · CineHub`;
-  const bg = meta.background || meta.poster || '';
+  const bg = isWebUrl(meta.background) ? meta.background : '';
   const info = [meta.releaseInfo, (meta.genres || []).join(', ')].filter(Boolean).join(' · ');
   const rating = meta.imdbRating ? `<span class="rating" title="Nota IMDb">IMDb ${esc(meta.imdbRating)}</span>` : '';
   setView(`
