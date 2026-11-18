@@ -1382,7 +1382,19 @@ async function loadStreams(kind, id, label, meta) {
   const paintList = (shown) => {
     list.innerHTML = '';
     if (!shown.length) {
-      list.innerHTML = '<p class="muted small">Nenhuma fonte com estes filtros.</p>';
+      list.innerHTML = '';
+      const message = document.createElement('p');
+      message.className = 'muted small';
+      message.textContent = 'Nenhuma fonte corresponde aos filtros selecionados.';
+      const clear = document.createElement('button');
+      clear.type = 'button';
+      clear.className = 'chip';
+      clear.textContent = 'Limpar filtros e mostrar todas';
+      clear.onclick = () => {
+        Object.assign(ui, { sort: 'default', quality: [], lang: [], addon: [] });
+        paintBar();
+      };
+      list.append(message, clear);
       primary.hidden = true;
       return;
     }
