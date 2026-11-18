@@ -20,11 +20,11 @@ pub struct PlayerCutout {
 }
 
 #[tauri::command]
-pub fn player_set_geometry(x: i32, y: i32, width: u32, height: u32, cutouts: Vec<PlayerCutout>) {
+pub fn player_set_geometry(x: i32, y: i32, width: u32, height: u32, cutouts: Vec<PlayerCutout>) -> bool {
     #[cfg(all(windows, feature = "mpv"))]
-    win::set_shape(x, y, width, height, &cutouts);
+    win::set_shape(x, y, width, height, &cutouts)
     #[cfg(not(all(windows, feature = "mpv")))]
-    let _ = (x, y, width, height, cutouts);
+    { let _ = (x, y, width, height, cutouts); false }
 }
 
 #[tauri::command]
@@ -309,13 +309,16 @@ mod win {
 
     type Hwnd = *mut c_void;
     type Bool = i32;
-    type EnumProc = unsafe extern "system" fn(Hwnd, isize) -> Bool;
 
-    #[link(name = "user32")]
+    #[link(name = "gdi32")]
     extern "system" {
         fn CreateRectRgn(left: i32, top: i32, right: i32, bottom: i32) -> Hwnd;
         fn CombineRgn(dest: Hwnd, src1: Hwnd, src2: Hwnd, mode: i32) -> i32;
         fn DeleteObject(object: Hwnd) -> Bool;
+    }
+
+    #[link(name = "user32")]
+    extern "system" {
         fn SetWindowRgn(hwnd: Hwnd, region: Hwnd, redraw: Bool) -> i32;
         fn SetWindowPos(
             hwnd: Hwnd,
@@ -366,15 +369,15 @@ mod win {
 
     /// Recorta a janela nativa para a caixa de vídeo e subtrai as áreas dos
     /// controles HTML. A região Win32 afeta desenho e hit-testing.
-    pub fn set_shape(x: i32, y: i32, width: u32, height: u32, cutouts: &[super::PlayerCutout]) {
+    pub fn set_shape(x: i32, y: i32, width: u32, height: u32, cutouts: &[super::PlayerCutout]) -> bool {
         let video = VIDEO.load(std::sync::atomic::Ordering::SeqCst);
-        if video == 0 || width == 0 || height == 0 { return; }
+        if video == 0 || width == 0 || height == 0 { return false; }
         // SAFETY: os handles de região são criados e liberados nesta função.
         unsafe {
             let right_edge = x.saturating_add(width.min(i32::MAX as u32) as i32);
             let bottom_edge = y.saturating_add(height.min(i32::MAX as u32) as i32);
             let region = CreateRectRgn(x, y, right_edge, bottom_edge);
-            if region.is_null() { return; }
+            if region.is_null() { return false; }
             for cutout in cutouts {
                 let left = x.saturating_add(cutout.x).max(x);
                 let top = y.saturating_add(cutout.y).max(y);
@@ -387,7 +390,7 @@ mod win {
                     DeleteObject(hole);
                 }
             }
-            if SetWindowRgn(video as usize as Hwnd, region, 1) == 0 { DeleteObject(region); }
+            if SetWindowRgn(video as usize as Hwnd, region, 1) == 0 { DeleteObject(region); false } else { true }
         }
     }
 
