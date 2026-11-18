@@ -63,7 +63,7 @@
         incoming.t = Math.max(0, incoming.t);
         incoming.duration = Math.max(0, incoming.duration);
         incoming.updated = Math.max(0, incoming.updated);
-        if (!Object.hasOwn(progress, key) || incoming.updated > progress[key].updated) progress[key] = incoming;
+        if (!Object.prototype.hasOwnProperty.call(progress, key) || incoming.updated > progress[key].updated) progress[key] = incoming;
       }
     };
     mergeProgress(currentProgress);
