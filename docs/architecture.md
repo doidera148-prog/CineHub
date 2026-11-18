@@ -89,7 +89,7 @@ A integração em `kodi.rs` e `web/kodi.js` usa JSON-RPC HTTP para conectar a um
 ## Testes e automação
 
 - `src-tauri/tests/addon_integration.rs`: testes de integração com um addon HTTP falso.
-- `tests/web/`: testes de fumaça da interface com Playwright/Chromium.
+- `tests/web/`: testes de fumaça da interface com Playwright/Chromium, incluindo um cenário Windows (user-agent Windows) que verifica o caminho Video.js/HTML5, proxy de mídia, solicitação de legenda e ausência de chamada ao player nativo. Esse cenário valida a integração da interface com APIs simuladas; não comprova decodificação de codecs nem reprodução real no WebView2 do Windows.
 - `.github/workflows/build.yml`: testes Rust, lint, smoke web, builds desktop e Android e publicação de releases.
 - `.github/workflows/cleanup-actions.yml`: limpeza semanal de execuções concluídas do GitHub Actions com mais de 30 dias; permite execução manual com retenção configurável (1–365 dias) e simulação sem exclusão.
 
