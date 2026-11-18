@@ -8,7 +8,7 @@ O aplicativo é dividido em três camadas:
 
 1. **Interface web** em `web/`: renderiza páginas, gerencia navegação, foco, catálogos e interações com o usuário.
 2. **Backend Rust/Tauri** em `src-tauri/src/`: valida e consulta addons, persiste configurações, cria o proxy de mídia e controla torrents e integrações.
-3. **Players nativos**: Media3/ExoPlayer no Android; libmpv no build Windows; Video.js/WebView como caminho web/fallback nas demais configurações.
+3. **Players**: Media3/ExoPlayer no Android; Video.js/HTML5 integrado ao WebView2 no Windows; Video.js/WebView nas demais plataformas.
 
 A interface chama comandos Tauri. URLs de vídeo são entregues ao player nativo ou ao player web; quando necessário, o backend cria uma URL local do proxy para adaptar a conexão com a fonte.
 
@@ -62,9 +62,13 @@ O servidor de torrent não é o proxy de mídia de addons: os dois servidores t�
 
 O plugin `tauri-plugin-exoplayer` usa AndroidX Media3/ExoPlayer em tela cheia. O player configura tempos de conexão/leitura maiores para fontes com buffering demorado, prefere áudio e legendas em português e oferece seleção manual de áudio e legendas, incluindo a opção de desativá-las. Também recebe segmentos opcionais para pular abertura, recapitulação, prévia e créditos.
 
-### Desktop
+### Windows
 
-O módulo `player.rs` integra libmpv quando a feature `mpv` é habilitada. O workflow Windows prepara a biblioteca e compila essa feature. Sem a feature nativa, a interface usa o player web.
+No Windows, `app.js` identifica o sistema e não tenta iniciar `player_play`/libmpv. A reprodução segue diretamente pelo Video.js/HTML5 dentro do WebView2, mantendo o vídeo e os controles na janela principal do CineHub. O workflow desktop não prepara DLL de libmpv nem habilita a feature `mpv` para Windows.
+
+### Linux e macOS
+
+A interface usa Video.js/WebView quando o player nativo não está habilitado. O módulo `player.rs` permanece no backend como integração opcional com libmpv para compilações que habilitem explicitamente a feature `mpv`; isso não faz parte do build padrão Windows.
 
 ### WebView
 
@@ -87,6 +91,7 @@ A integração em `kodi.rs` e `web/kodi.js` usa JSON-RPC HTTP para conectar a um
 - `src-tauri/tests/addon_integration.rs`: testes de integração com um addon HTTP falso.
 - `tests/web/`: testes de fumaça da interface com Playwright/Chromium.
 - `.github/workflows/build.yml`: testes Rust, lint, smoke web, builds desktop e Android e publicação de releases.
+- `.github/workflows/cleanup-actions.yml`: limpeza semanal de execuções concluídas do GitHub Actions com mais de 30 dias; permite execução manual com retenção configurável (1–365 dias) e simulação sem exclusão.
 
 O CI não substitui testes em dispositivos físicos. Especialmente em Android TV, controle remoto, codecs, rede e desempenho precisam ser validados no aparelho.
 
