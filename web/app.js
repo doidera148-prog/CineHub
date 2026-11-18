@@ -19,6 +19,16 @@ function scheduleSearch(input, callback) {
   clearTimeout(debounceTimer);
   debounceTimer = setTimeout(() => callback(input.value), SEARCH_DEBOUNCE_MS);
 }
+function queueSearchInput(input, callback, clearWhenEmpty = false) {
+  if (composingSearchInputs.has(input)) return;
+  if (clearWhenEmpty && !normalizeSearchQuery(input.value)) {
+    clearTimeout(debounceTimer);
+    debounceTimer = null;
+    callback('');
+    return;
+  }
+  scheduleSearch(input, callback);
+}
 function flushSearch(input, callback) {
   if (composingSearchInputs.has(input)) return;
   clearTimeout(debounceTimer);
@@ -484,8 +494,8 @@ async function catalogPage(kind, title, alive) {
     const submit = (event) => { event?.preventDefault(); flushSearch(input, (value) => runAnimeSearch(value)); };
     $('#anime-search-form').onsubmit = submit;
     input.addEventListener('compositionstart', () => composingSearchInputs.add(input));
-    input.addEventListener('input', () => scheduleSearch(input, (value) => runAnimeSearch(value)));
-    input.addEventListener('compositionend', () => { composingSearchInputs.delete(input); scheduleSearch(input, (value) => runAnimeSearch(value)); });
+    input.addEventListener('input', () => queueSearchInput(input, (value) => runAnimeSearch(value), true));
+    input.addEventListener('compositionend', () => { composingSearchInputs.delete(input); queueSearchInput(input, (value) => runAnimeSearch(value), true); });
     const { rows } = await call('home', { kind });
     if (!alive()) return;
     renderRows(rows, 'Nenhum catálogo disponível. Use a pesquisa acima para consultar addons que exigem um termo de busca.');
@@ -553,8 +563,8 @@ function searchPage(raw) {
     flushSearch(input, (value) => setSearch(value));
   };
   input.addEventListener('compositionstart', () => composingSearchInputs.add(input));
-  input.addEventListener('input', () => scheduleSearch(input, (value) => setSearch(value)));
-  input.addEventListener('compositionend', () => { composingSearchInputs.delete(input); scheduleSearch(input, (value) => setSearch(value)); });
+  input.addEventListener('input', () => queueSearchInput(input, (value) => setSearch(value), true));
+  input.addEventListener('compositionend', () => { composingSearchInputs.delete(input); queueSearchInput(input, (value) => setSearch(value), true); });
   runSearch(q);
 }
 
@@ -2316,8 +2326,8 @@ function focusContent() {
 
 topQ.maxLength = SEARCH_MAX_CHARS;
 topQ.addEventListener('compositionstart', () => composingSearchInputs.add(topQ));
-topQ.addEventListener('input', () => scheduleSearch(topQ, (value) => setSearch(value)));
-topQ.addEventListener('compositionend', () => { composingSearchInputs.delete(topQ); scheduleSearch(topQ, (value) => setSearch(value)); });
+topQ.addEventListener('input', () => queueSearchInput(topQ, (value) => { if (normalizeSearchQuery(value) || sectionOf() === 'search') setSearch(value); }, true));
+topQ.addEventListener('compositionend', () => { composingSearchInputs.delete(topQ); queueSearchInput(topQ, (value) => { if (normalizeSearchQuery(value) || sectionOf() === 'search') setSearch(value); }, true); });
 topQ.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.isComposing && event.keyCode !== 229) {
     event.preventDefault();
