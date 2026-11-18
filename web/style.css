@@ -591,7 +591,10 @@ h2 { font-size: 1.25rem; }
   display: flex;
   align-items: flex-end;
   padding: 0 var(--gutter) 1.75rem;
-  background: var(--poster) center 20% / cover no-repeat;
+  background-color: var(--bg-raised);
+  background-position: center top;
+  background-size: auto 100%;
+  background-repeat: no-repeat;
   overflow: hidden;
   isolation: isolate;
   animation: dx-fade 0.9s var(--ease) both;
