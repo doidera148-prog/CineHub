@@ -142,15 +142,20 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
                 ).build().show()
             }
         }
+        var hasMultipleAudioTracks = false
         player.addListener(object : Player.Listener {
             override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
-                val audioTrackCount = tracks.groups
+                hasMultipleAudioTracks = tracks.groups
                     .filter { it.type == C.TRACK_TYPE_AUDIO }
                     .sumOf { group ->
                         (0 until group.length).count { group.isTrackSupported(it) }
-                    }
-                audioButton.visibility = if (audioTrackCount > 1) View.VISIBLE else View.GONE
+                    } > 1
+                // O seletor só aparece junto com os controles do player.
+                audioButton.visibility = if (hasMultipleAudioTracks && view.isControllerFullyVisible) View.VISIBLE else View.GONE
             }
+        })
+        view.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
+            audioButton.visibility = if (hasMultipleAudioTracks && visibility == View.VISIBLE) View.VISIBLE else View.GONE
         })
 
         // Pular abertura, recapitulação e créditos: um botão sobre o vídeo enquanto o trecho toca.
