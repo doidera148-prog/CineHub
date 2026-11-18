@@ -160,18 +160,17 @@
     return /dublad|dual|pt-?br|portugu/i.test(String(text || ''));
   }
 
-  // Identifica o contêiner declarado pela fonte, sem confundir extensão com codec.
-  // URLs sem extensão continuam desconhecidas; MKV é bloqueado porque o player-alvo não o suporta.
+  // Identifica o contêiner pelo MIME ou nome/URL da fonte.
   function streamContainer(s) {
     const mime = String(s?.mimeType || s?.mime || '').toLowerCase();
-    if (/matroska|x-matroska/.test(mime)) return 'mkv';
-    if (/video\\/mp4/.test(mime)) return 'mp4';
-    if (/video\\/webm/.test(mime)) return 'webm';
+    if (mime.includes('matroska')) return 'mkv';
+    if (mime.includes('video/mp4')) return 'mp4';
+    if (mime.includes('video/webm')) return 'webm';
     const values = [s?.url, s?.fileName, s?.name, s?.title].filter(Boolean);
     for (const value of values) {
       let path = String(value);
       try { path = new URL(path).pathname; } catch { /* nome de arquivo ou rótulo do addon */ }
-      const match = path.match(/\\.(mkv|mp4|m4v|webm)(?:$|[?#])/i) || String(value).match(/\\b(matroska|mkv)\\b/i);
+      const match = path.toLowerCase().match(/\.(mkv|mp4|m4v|webm)$/) || String(value).toLowerCase().match(/\b(matroska|mkv)\b/);
       if (!match) continue;
       const ext = String(match[1]).toLowerCase();
       return ext === 'matroska' ? 'mkv' : ext === 'm4v' ? 'mp4' : ext;
@@ -182,8 +181,7 @@
     return streamContainer(s) === 'mkv';
   }
 
-  // MP4/WebM têm prioridade; MKV é descartado no carregamento das fontes.
-  // Mantém preferência por português e torrents, sem permitir que ela supere o formato compatível.
+  // MP4/WebM têm leve prioridade por compatibilidade com WebView; MKV permanece disponível.
   function sortStreams(list) {
     const score = (s) => {
       const text = `${s.name || ''} ${s.title || ''}`;
