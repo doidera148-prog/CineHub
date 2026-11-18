@@ -750,7 +750,7 @@ const COMMUNITY_ADDONS = [
 ];
 
 async function addonsPage() {
-  setView(\`
+  setView(`
     <div class="addons-heading"><div><h1>Addons</h1><p class="muted small">Amplie os catálogos e recursos do CineHub.</p></div></div>
     <div class="addon-tabs" role="tablist" aria-label="Seções de addons">
       <button type="button" class="chip on" data-addon-tab="community" role="tab" aria-selected="true">Comunidade</button>
@@ -783,7 +783,7 @@ async function addonsPage() {
       <label class="torrentfile"><span>Selecionar .torrent</span><input id="torrent-file" type="file" accept=".torrent" hidden></label>
       <button type="submit" class="chip">Abrir torrent</button>
     </form>
-    <p class="muted small">Addons compatíveis com o protocolo do Stremio. Instale apenas fontes que você tem autorização para acessar.</p>\`);
+    <p class="muted small">Addons compatíveis com o protocolo do Stremio. Instale apenas fontes que você tem autorização para acessar.</p>`);
 
   const communityPanel = $('#community-panel'), installedPanel = $('#installed-panel');
   const communityList = $('#community-list'), installedList = $('#al');
@@ -799,15 +799,15 @@ async function addonsPage() {
     });
     communityList.innerHTML = matches.length ? matches.map((addon) => {
       const done = installedFor(addon), initial = esc(addon.name.slice(0, 1).toUpperCase());
-      return \`<article class="community-addon">
+      return `<article class="community-addon">
         <div class="community-addon-head">
-          \${isWebUrl(addon.logo) ? \`<img src="\${esc(addon.logo)}" alt="" loading="lazy">\` : \`<span class="logo-fallback" aria-hidden="true">\${initial}</span>\`}
-          <div><h3>\${esc(addon.name)}</h3><span class="muted small">v\${esc(addon.version)}</span></div>
+          ${isWebUrl(addon.logo) ? `<img src="${esc(addon.logo)}" alt="" loading="lazy">` : `<span class="logo-fallback" aria-hidden="true">${initial}</span>`}
+          <div><h3>${esc(addon.name)}</h3><span class="muted small">v${esc(addon.version)}</span></div>
         </div>
-        <p>\${esc(addon.description)}</p>
-        <div class="community-tags">\${addon.tags.map((tag) => \`<span>\${esc(tag)}</span>\`).join('')}</div>
-        <button type="button" class="community-install\${done ? ' installed' : ''}" data-community-install="\${esc(addon.id)}" \${done ? 'disabled' : ''}>\${done ? '✓ Instalado' : '＋ Instalar'}</button>
-      </article>\`;
+        <p>${esc(addon.description)}</p>
+        <div class="community-tags">${addon.tags.map((tag) => `<span>${esc(tag)}</span>`).join('')}</div>
+        <button type="button" class="community-install${done ? ' installed' : ''}" data-community-install="${esc(addon.id)}" ${done ? 'disabled' : ''}>${done ? '✓ Instalado' : '＋ Instalar'}</button>
+      </article>`;
     }).join('') : '<p class="muted">Nenhum addon encontrado com esses filtros.</p>';
   };
 
@@ -859,10 +859,10 @@ async function addonsPage() {
     button.disabled = true; button.textContent = 'Instalando…';
     try {
       const result = await call('install_addon', { url: addon.url });
-      toast(\`Addon instalado: \${result.name}\`);
+      toast(`Addon instalado: ${result.name}`);
       await refreshInstalled();
     } catch (err) {
-      logEvent('WARN', \`instalar addon da comunidade falhou: \${err.message}\`);
+      logEvent('WARN', `instalar addon da comunidade falhou: ${err.message}`);
       toast(err.message || String(err));
       button.disabled = false; button.textContent = '＋ Instalar';
     }
@@ -872,11 +872,11 @@ async function addonsPage() {
     event.preventDefault();
     try {
       const result = await call('install_addon', { url: $('#au').value });
-      toast(\`Addon instalado: \${result.name}\`);
+      toast(`Addon instalado: ${result.name}`);
       $('#au').value = '';
       await refreshInstalled();
       selectTab('installed');
-    } catch (err) { logEvent('WARN', \`instalar addon falhou: \${err.message}\`); toast(err.message); }
+    } catch (err) { logEvent('WARN', `instalar addon falhou: ${err.message}`); toast(err.message); }
   };
 
   $('#tf').onsubmit = async (event) => {
