@@ -5,8 +5,9 @@
 //! cargo run --manifest-path src-tauri/Cargo.toml --features mpv --example windows_mpv_directcomposition_probe -- "https://servidor/video.mkv" 0x123456
 //!
 //! O HWND pode ser obtido com uma ferramenta como Spy++/Inspect. O protótipo
-//! desenha a composição na camada topmost da janela; portanto, pode cobrir a
-//! WebView inteira. Não é uma integração de controles HTML.
+//! desenha a composição atrás dos filhos da janela. Para que o vídeo apareça, a WebView2
+//! precisa estar com fundo transparente e a página precisa deixar transparente a área
+//! do player. Este probe valida somente a camada de vídeo; não altera o app em produção.
 
 #[cfg(not(windows))]
 fn main() {
@@ -126,7 +127,7 @@ mod windows_probe {
             create_target(
                 dcomp_device.as_ptr(),
                 hwnd as usize as *mut c_void,
-                1, // topmost: sobre os filhos da janela (incluindo a WebView).
+                0, // não-topmost: composição atrás dos filhos HWND, para a WebView transparente ficar por cima.
                 &mut target.0,
             ),
             "IDCompositionDevice::CreateTargetForHwnd",
@@ -162,7 +163,7 @@ mod windows_probe {
 
         println!("DIRECTCOMPOSITION_ATTACHED=1");
         println!("DIRECTCOMPOSITION_HWND=0x{:x}", hwnd as usize);
-        println!("DIRECTCOMPOSITION_TOPMOST=1");
+        println!("DIRECTCOMPOSITION_TOPMOST=0");
         Ok((dcomp_device, target, visual))
     }
 
