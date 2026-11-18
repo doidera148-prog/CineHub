@@ -41,10 +41,6 @@ async function check(viewport, label) {
   await cards.first().focus();
   await page.keyboard.press('ArrowRight');
   if (await page.evaluate(() => document.activeElement?.getAttribute('aria-label')) !== await cards.nth(1).getAttribute('aria-label')) failures.push(`[${label}] setas não navegam entre cards`);
-  // Na borda esquerda, o foco deve poder sair do trilho em vez de saltar para o último card.
-  await cards.first().focus();
-  await page.keyboard.press('ArrowLeft');
-  if (await page.evaluate(() => document.activeElement?.closest('.strip') === document.querySelector('.strip'))) failures.push(`[${label}] controle ficou preso no início do trilho`);
   await cards.first().focus();
   await page.keyboard.press('Enter');
   await page.waitForTimeout(350);
@@ -65,7 +61,32 @@ async function check(viewport, label) {
   failures.push(...errors.map((e) => `[${label}] ${e}`));
   await page.close();
 }
-try { await check({ width: 360, height: 800 }, 'celular'); await check({ width: 1280, height: 800 }, 'desktop'); }
+
+async function checkTv() {
+  const page = await browser.newPage({
+    viewport: { width: 1280, height: 720 },
+    userAgent: 'Mozilla/5.0 (Linux; Android 11; Android TV) AppleWebKit/537.36 Chrome/120.0 Safari/537.36',
+  });
+  await page.addInitScript(fixtures);
+  await page.addInitScript(() => {
+    const original = window.matchMedia.bind(window);
+    window.matchMedia = (query) => {
+      if (query.includes('(pointer: none)') || query.includes('(hover: none)')) {
+        return { matches: true, media: query, onchange: null, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; } };
+      }
+      return original(query);
+    };
+  });
+  await page.goto(`${base}/#/movies`);
+  await page.waitForTimeout(350);
+  if (!(await page.locator('body').evaluate((el) => el.classList.contains('tv-mode')))) failures.push('[tv] interface dedicada não foi ativada');
+  const first = page.locator('#view .strip a').first();
+  await first.focus();
+  await page.keyboard.press('ArrowLeft');
+  if (await page.evaluate(() => document.activeElement?.closest('.strip') === document.querySelector('.strip'))) failures.push('[tv] controle ficou preso na borda do trilho');
+  await page.close();
+}
+try { await check({ width: 360, height: 800 }, 'celular'); await check({ width: 1280, height: 800 }, 'desktop'); await checkTv(); }
 finally { await browser.close(); server.close(); }
 if (failures.length) { console.error('Falhas:\n- ' + failures.join('\n- ')); process.exit(1); }
 console.log('Smoke test ok: rotas e navegação em celular e desktop.');
