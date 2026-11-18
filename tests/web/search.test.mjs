@@ -60,6 +60,10 @@ try {
   await page.goto(`${base}/#/search?q=inicial`);
   await waitForQuery('inicial', null);
   assert.equal(await page.locator('#sq').getAttribute('maxlength'), '200');
+  assert.equal(await page.locator('#sf').getAttribute('role'), 'search');
+  assert.equal(await page.locator('#sq').getAttribute('aria-label'), 'Pesquisar título');
+  assert.equal(await page.locator('#search-status').getAttribute('role'), 'status');
+  assert.equal(await page.locator('#search-status').getAttribute('aria-live'), 'polite');
   await page.locator('#sq').fill('  matrix  ');
   await waitForQuery('matrix', null);
   await page.waitForFunction(() => document.querySelector('#search-status')?.textContent === '1 resultado');
