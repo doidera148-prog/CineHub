@@ -336,17 +336,15 @@ fn annotate(s: &mut Value, addon_name: &str) {
         .is_some_and(|u| u.starts_with("magnet:?"));
 
     // Só links web: qualquer outro esquema (javascript:, file:, intent:…) é descartado.
-    let external = external
-        .filter(|u| is_http_url(u))
-        .or_else(|| {
-            yt_id
-                .as_ref()
-                .filter(|id| {
-                    id.chars()
-                        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-                })
-                .map(|id| format!("https://www.youtube.com/watch?v={id}"))
-        });
+    let external = external.filter(|u| is_http_url(u)).or_else(|| {
+        yt_id
+            .as_ref()
+            .filter(|id| {
+                id.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            })
+            .map(|id| format!("https://www.youtube.com/watch?v={id}"))
+    });
 
     let note: Option<&str> = if !url.is_empty() && !is_app_url(&url) {
         Some("link não suportado pelo app")
@@ -393,8 +391,7 @@ fn is_http_url(raw: &str) -> bool {
 /// Esquemas que o app reproduz: HTTP(S) com autoridade válida e magnet para o motor torrent.
 fn is_app_url(raw: &str) -> bool {
     if raw.trim().starts_with("magnet:?") {
-        return reqwest::Url::parse(raw.trim())
-            .is_ok_and(|url| url.scheme() == "magnet");
+        return reqwest::Url::parse(raw.trim()).is_ok_and(|url| url.scheme() == "magnet");
     }
     is_http_url(raw)
 }
@@ -407,7 +404,6 @@ pub async fn subtitle(state: State<'_, AppState>, url: String) -> Result<String,
     Ok(srt_to_vtt(&String::from_utf8_lossy(&bytes)))
 }
 
-
 /// Cria uma URL local temporária para uma fonte HTTP progressiva.
 /// Torrent não passa por este comando; HLS é recusado até a reescrita integral das playlists.
 #[tauri::command]
@@ -417,10 +413,15 @@ pub async fn media_proxy_url(
     behavior_hints: Option<Value>,
     mime_type: Option<String>,
 ) -> Result<String, String> {
-    let proxy = state.media_proxy.get_or_init(|| async {
-        crate::media_proxy::MediaProxy::start().await
-    }).await.as_ref().map_err(Clone::clone)?;
-    proxy.register(&url, behavior_hints.as_ref(), mime_type.as_deref()).await
+    let proxy = state
+        .media_proxy
+        .get_or_init(|| async { crate::media_proxy::MediaProxy::start().await })
+        .await
+        .as_ref()
+        .map_err(Clone::clone)?;
+    proxy
+        .register(&url, behavior_hints.as_ref(), mime_type.as_deref())
+        .await
 }
 
 /// Retorna estatísticas do torrent ativo, sem iniciar uma sessão nova.
@@ -664,7 +665,9 @@ mod tests {
         assert!(is_app_url("https://cdn.example/video.m3u8?token=a"));
         assert!(is_app_url("http://192.168.1.20:8080/video.mp4"));
         assert!(is_app_url("http://127.0.0.1:9000/stream/token"));
-        assert!(is_app_url("magnet:?xt=urn:btih:0123456789012345678901234567890123456789"));
+        assert!(is_app_url(
+            "magnet:?xt=urn:btih:0123456789012345678901234567890123456789"
+        ));
         assert!(!is_app_url("https:///missing-host/video.mp4"));
         assert!(!is_app_url("http://"));
         assert!(!is_app_url("file:///video.mp4"));
