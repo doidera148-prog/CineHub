@@ -565,14 +565,9 @@ mod tests {
         token: String,
         headers: HeaderMap,
     ) -> Response {
-        proxy_request(
-            State(state.clone()),
-            Path(token),
-            Method::GET,
-            headers,
-        )
-        .await
-        .unwrap()
+        proxy_request(State(state.clone()), Path(token), Method::GET, headers)
+            .await
+            .unwrap()
     }
 
     fn rewritten_token(text: &str) -> String {
@@ -678,8 +673,7 @@ mod tests {
             },
         );
 
-        let playlist_response =
-            request_test_resource(&state, token, HeaderMap::new()).await;
+        let playlist_response = request_test_resource(&state, token, HeaderMap::new()).await;
         assert_eq!(playlist_response.status(), StatusCode::OK);
         let playlist_body = axum::body::to_bytes(playlist_response.into_body(), 1024 * 1024)
             .await
@@ -692,8 +686,7 @@ mod tests {
                 .expect("redirected segment URI missing"),
         );
 
-        let segment_response =
-            request_test_resource(&state, segment_token, HeaderMap::new()).await;
+        let segment_response = request_test_resource(&state, segment_token, HeaderMap::new()).await;
         assert_eq!(segment_response.status(), StatusCode::OK);
         assert_eq!(
             &axum::body::to_bytes(segment_response.into_body(), 1024)
@@ -712,15 +705,19 @@ mod tests {
             .route("/segment.ts", axum::routing::get(test_segment))
             .route(
                 "/key.bin",
-                axum::routing::get(|| async { ([(header::CONTENT_TYPE, "application/octet-stream")], "0123456789abcdef") }),
+                axum::routing::get(|| async {
+                    (
+                        [(header::CONTENT_TYPE, "application/octet-stream")],
+                        "0123456789abcdef",
+                    )
+                }),
             );
         let origin_address = start_test_server(origin).await;
         let state = local_test_state();
         let master_url = Url::parse(&format!("http://{origin_address}/master.m3u8")).unwrap();
         let master_token = add_test_target(&state, master_url, true).await;
 
-        let master_response =
-            request_test_resource(&state, master_token, HeaderMap::new()).await;
+        let master_response = request_test_resource(&state, master_token, HeaderMap::new()).await;
         assert_eq!(master_response.status(), StatusCode::OK);
         let master_body = axum::body::to_bytes(master_response.into_body(), 1024 * 1024)
             .await
@@ -729,8 +726,7 @@ mod tests {
         assert!(master_text.contains("#EXTM3U"));
         let variant_token = rewritten_token(&master_text);
 
-        let variant_response =
-            request_test_resource(&state, variant_token, HeaderMap::new()).await;
+        let variant_response = request_test_resource(&state, variant_token, HeaderMap::new()).await;
         assert_eq!(variant_response.status(), StatusCode::OK);
         let variant_body = axum::body::to_bytes(variant_response.into_body(), 1024 * 1024)
             .await
@@ -759,11 +755,13 @@ mod tests {
 
         let mut range_headers = HeaderMap::new();
         range_headers.insert(header::RANGE, HeaderValue::from_static("bytes=1-3"));
-        let segment_response =
-            request_test_resource(&state, segment_token, range_headers).await;
+        let segment_response = request_test_resource(&state, segment_token, range_headers).await;
         assert_eq!(segment_response.status(), StatusCode::PARTIAL_CONTENT);
         assert_eq!(
-            segment_response.headers().get(header::CONTENT_RANGE).unwrap(),
+            segment_response
+                .headers()
+                .get(header::CONTENT_RANGE)
+                .unwrap(),
             "bytes 1-3/6"
         );
         let segment_body = axum::body::to_bytes(segment_response.into_body(), 1024)
