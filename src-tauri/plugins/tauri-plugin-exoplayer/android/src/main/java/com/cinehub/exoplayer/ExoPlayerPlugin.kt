@@ -107,9 +107,10 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
             .setEnableDecoderFallback(true)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
         val player = ExoPlayer.Builder(act, renderers).build()
+        // Prioriza português brasileiro; usa português genérico como fallback.
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-            .setPreferredAudioLanguage("pt")
-            .setPreferredTextLanguage("pt")
+            .setPreferredAudioLanguages("pt-BR", "pt")
+            .setPreferredTextLanguages("pt-BR", "pt")
             .build()
 
         val view = PlayerView(act).apply {
@@ -124,6 +125,33 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
             setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
         }
         val dialog = Dialog(act, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+
+        // Permite trocar manualmente a faixa de áudio em arquivos com múltiplos idiomas.
+        val audioButton = Button(act).apply {
+            text = "Áudio"
+            isAllCaps = false
+            visibility = View.GONE
+            isFocusable = true
+            isFocusableInTouchMode = true
+            setOnClickListener {
+                androidx.media3.ui.TrackSelectionDialogBuilder(
+                    act,
+                    "Faixa de áudio",
+                    player,
+                    C.TRACK_TYPE_AUDIO
+                ).build().show()
+            }
+        }
+        player.addListener(object : Player.Listener {
+            override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+                val audioTrackCount = tracks.groups
+                    .filter { it.type == C.TRACK_TYPE_AUDIO }
+                    .sumOf { group ->
+                        (0 until group.length).count { group.isTrackSupported(it) }
+                    }
+                audioButton.visibility = if (audioTrackCount > 1) View.VISIBLE else View.GONE
+            }
+        })
 
         // Pular abertura, recapitulação e créditos: um botão sobre o vídeo enquanto o trecho toca.
         val skips = parseSkips(args.segments)
@@ -163,6 +191,13 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         val margin = (24 * density).toInt()
         buttonParams.setMargins(margin, margin, 0, 0)
         frame.addView(skipButton, buttonParams)
+        val audioButtonParams = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.TOP or Gravity.END
+        )
+        audioButtonParams.setMargins(0, margin, margin, 0)
+        frame.addView(audioButton, audioButtonParams)
         dialog.setContentView(frame, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
         var errorMessage: String? = null
