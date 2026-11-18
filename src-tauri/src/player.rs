@@ -377,6 +377,7 @@ mod win {
     const HWND_TOP: Hwnd = std::ptr::null_mut();
     const SWP_NOSIZE: u32 = 0x0001;
     const SWP_NOMOVE: u32 = 0x0002;
+    const SWP_NOACTIVATE: u32 = 0x0010;
     const SWP_SHOWWINDOW: u32 = 0x0040;
     const RGN_DIFF: i32 = 4;
 
@@ -421,6 +422,17 @@ mod win {
         }
         // SAFETY: os handles de região são criados e liberados nesta função.
         unsafe {
+            // A WebView pode recuperar o z-order depois de receber um clique nos recortes.
+            // Recoloca o vídeo no topo sem roubar o foco da interface.
+            SetWindowPos(
+                video as usize as Hwnd,
+                HWND_TOP,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            );
             let right_edge = x.saturating_add(width.min(i32::MAX as u32) as i32);
             let bottom_edge = y.saturating_add(height.min(i32::MAX as u32) as i32);
             let region = CreateRectRgn(x, y, right_edge, bottom_edge);
