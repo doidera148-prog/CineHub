@@ -27,7 +27,8 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets --locked
+      - name: Testes Rust (inclui geometria da sobreposição do player Windows)
+        run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets --locked
 
   lint:
     runs-on: ubuntu-22.04
@@ -203,10 +204,6 @@ jobs:
         if: matrix.platform == 'windows-latest'
         working-directory: src-tauri
         run: cargo test --features mpv --lib mpv_osc_script_options_are_valid
-      - name: Testar recortes dos controles HTML sobre o vídeo nativo
-        if: matrix.platform == 'windows-latest'
-        working-directory: src-tauri
-        run: cargo test --features mpv --lib player_cutouts_are_clipped_to_the_video_box
       - name: Verificar se o instalador desktop foi gerado
         shell: bash
         run: |
