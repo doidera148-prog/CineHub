@@ -1263,7 +1263,18 @@ async function loadStreams(kind, id, label, meta) {
     logEvent('WARN', `buscar fontes falhou: ${err.message}`);
     if (seq === streamsSeq) {
       const box = $('#streams') || $('#body');
-      if (box) box.innerHTML = `<p class="muted">Não consegui buscar as fontes: ${esc(err.message)}</p>`;
+      if (box) {
+        box.innerHTML = '';
+        const message = document.createElement('p');
+        message.className = 'muted';
+        message.textContent = `Não consegui buscar as fontes: ${err.message}`;
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'chip';
+        retry.textContent = 'Tentar novamente';
+        retry.onclick = () => loadStreams(kind, id, label, meta);
+        box.append(message, retry);
+      }
     }
     return;
   }
@@ -1286,7 +1297,15 @@ async function loadStreams(kind, id, label, meta) {
   };
 
   if (!streams.length) {
-    box.innerHTML = '<p class="muted">Nenhuma fonte encontrada. Instale um addon de streams compatível na aba Addons.</p>';
+    const message = document.createElement('p');
+    message.className = 'muted';
+    message.textContent = 'Nenhuma fonte encontrada. Verifique os addons instalados ou tente novamente.';
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'chip';
+    retry.textContent = 'Buscar fontes novamente';
+    retry.onclick = () => loadStreams(kind, id, label, meta);
+    box.append(message, retry);
     showErrors();
     return;
   }
