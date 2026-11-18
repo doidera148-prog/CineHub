@@ -2,7 +2,7 @@
 (() => {
   const SELECTOR = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [role="button"], [tabindex]:not([tabindex="-1"])';
   const DIRS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', DpadUp: 'up', DpadDown: 'down', DpadLeft: 'left', DpadRight: 'right' };
-  const GROUPS = '.strip, .episodes, .seasons, #streams, #nav-main, .dataactions, .kodi-results, #kodi-listing, .dialog-actions';
+  const GROUPS = '.strip, .episodes, .seasons, #streams, #nav-main, .dataactions, .kodi-results, #kodi-listing, .dialog-actions, .tp-list';
   let remoteMode = false;
   let focusBeforePlayer = null;
 
@@ -143,15 +143,19 @@
     const direction = DIRS[event.key];
     if (!direction || event.altKey || event.ctrlKey || event.metaKey || document.querySelector('#confirm[open]')) return;
     if (playerOpen()) return;
-    if (isTextEntry(document.activeElement) && (direction === 'left' || direction === 'right')) return;
-    const items = visibleFocusables();
+    const current = document.activeElement;
+    // Em diálogos (como a escolha de episódio do torrent), nunca navega para trás da janela.
+    const activeDialog = document.querySelector('dialog[open]');
+    if (current?.matches?.('select, input[type="range"]')) return;
+    if (isTextEntry(current) && (direction === 'left' || direction === 'right')) return;
+    const scope = activeDialog || document;
+    const items = visibleFocusables(scope);
     if (!items.length) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     remoteMode = true;
-    const current = document.activeElement;
     if (!items.includes(current)) {
-      focus(document.querySelector('#view a[href], #view button:not([disabled]), #view input:not([disabled]), #view select:not([disabled])') || items[0]);
+      focus(items[0]);
       return;
     }
     const group = current.closest(GROUPS);
