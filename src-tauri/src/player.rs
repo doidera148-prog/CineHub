@@ -19,6 +19,7 @@ pub struct PlayerCutout {
     pub height: u32,
 }
 
+#[cfg(any(all(windows, feature = "mpv"), test))]
 /// Recorta retângulos de controle aos limites da caixa do vídeo, evitando
 /// regiões Win32 negativas, vazias ou fora da superfície nativa.
 fn clipped_cutouts(
