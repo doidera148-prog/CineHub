@@ -16,7 +16,11 @@
           el.getAttribute('aria-disabled') === 'true' || el.tabIndex < 0 || el.disabled) return false;
       const rect = el.getBoundingClientRect();
       const style = getComputedStyle(el);
-      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      const opacity = Number.parseFloat(style.opacity || '1');
+      // Slides inativos e elementos transparentes não podem receber foco via DPAD.
+      if (el.closest('.billboard-slide:not(.is-active), [aria-hidden="true"], [inert]')) return false;
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' &&
+        style.display !== 'none' && opacity > 0.05;
     });
   }
   function isTextEntry(el) {
@@ -55,9 +59,12 @@
       const crossGap = Math.max(0, bCrossStart - aCrossEnd, aCrossStart - bCrossEnd);
       const mainGap = Math.max(0, bMainStart - aMainEnd, aMainStart - bMainEnd);
       const crossOverlap = crossGap === 0;
-      // Um item na mesma coluna/linha sempre vence um item apenas diagonal.
-      const score = (crossOverlap ? 0 : 10000 + crossGap * 8) + mainGap * 2 +
-        Math.abs(((bCrossStart + bCrossEnd) - (aCrossStart + aCrossEnd)) / 2);
+      // Primeiro prioriza o avanço na direção pressionada; depois a proximidade
+      // lateral. A penalidade diagonal é moderada para não saltar para uma coluna
+      // distante só porque ela compartilha alguns pixels do eixo perpendicular.
+      const crossCenterDelta = Math.abs(((bCrossStart + bCrossEnd) - (aCrossStart + aCrossEnd)) / 2);
+      const score = mainGap * 4 + crossGap * 2 + crossCenterDelta * 0.35 -
+        (crossOverlap ? Math.min(aCrossEnd - aCrossStart, bCrossEnd - bCrossStart) * 0.08 : 0);
       if (score < bestScore) { best = el; bestScore = score; }
     }
     return best;
