@@ -450,12 +450,45 @@ function renderBillboard(rows) {
 }
 
 async function catalogPage(kind, title, alive) {
+  if (kind === 'anime') {
+    setView('<h1>Animes</h1><form id="anime-search-form" role="search"><input id="anime-search-input" type="search" placeholder="Pesquisar animes…" autocomplete="off" aria-label="Pesquisar animes"></form><p id="anime-search-status" class="muted small" role="status" aria-live="polite">Pesquise para encontrar títulos nos addons de anime.</p><div id="anime-search-results"></div><h2 class="section-heading">Catálogos</h2><div id="rows">' + skeleton() + skeleton() + '</div>');
+    const input = $('#anime-search-input');
+    const submit = (event) => { event?.preventDefault(); clearTimeout(debounceTimer); runAnimeSearch(input.value.trim()); };
+    $('#anime-search-form').onsubmit = submit;
+    input.addEventListener('input', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(() => runAnimeSearch(input.value.trim()), 450); });
+    const { rows } = await call('home', { kind });
+    if (!alive()) return;
+    renderRows(rows, 'Nenhum catálogo disponível. Use a pesquisa acima para consultar addons que exigem um termo de busca.');
+    return;
+  }
   setView(`<h1>${title}</h1><div id="rows">${skeleton()}${skeleton()}</div>`);
   const { rows } = await call('home', { kind });
   if (!alive()) return;
   renderRows(rows, 'Nenhum catálogo disponível para este tipo.');
 }
 
+let animeSearchSeq = 0;
+async function runAnimeSearch(q) {
+  const seq = ++animeSearchSeq;
+  const stillHere = () => seq === animeSearchSeq && sectionOf() === 'animes';
+  const box = $('#anime-search-results');
+  const status = $('#anime-search-status');
+  if (!box) return;
+  if (!q) { box.innerHTML = ''; if (status) status.textContent = 'Pesquise para encontrar títulos nos addons de anime.'; return; }
+  box.innerHTML = skeleton(3);
+  if (status) status.textContent = 'Pesquisando animes…';
+  try {
+    const { rows = [] } = await call('search', { q, kind: 'anime' });
+    if (!stillHere()) return;
+    renderRows(rows, 'Nenhum anime encontrado para essa pesquisa.', { pageable: false, targetId: 'anime-search-results' });
+    const total = rows.reduce((count, row) => count + (row.metas || []).length, 0);
+    if (status) status.textContent = total ? `${total} resultado${total === 1 ? '' : 's'}` : 'Nenhum resultado';
+  } catch (error) {
+    if (!stillHere()) return;
+    box.innerHTML = `<p class="muted">Erro na pesquisa: ${esc(error.message)}</p>`;
+    if (status) status.textContent = 'Erro na pesquisa de animes';
+  }
+}
 // Pesquisa: a busca roda enquanto o usuário digita (com espera de 450 ms) e ignora respostas antigas.
 let debounceTimer = null;
 let searchSeq = 0;
@@ -820,8 +853,8 @@ async function detailPage(kind, id, alive) {
 
 // ---------- Componentes ----------
 
-function renderRows(rows, emptyMsg, { pageable = true } = {}) {
-  const box = $('#rows');
+function renderRows(rows, emptyMsg, { pageable = true, targetId = 'rows' } = {}) {
+  const box = $(`#${targetId}`);
   if (!box) return;
   box.className = '';
   box.innerHTML = '';
