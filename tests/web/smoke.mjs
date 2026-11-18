@@ -79,6 +79,34 @@ async function check(viewport, label) {
   await page.close();
 }
 
+async function checkBackupImport() {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.addInitScript(fixtures);
+  await page.goto(`${base}/#/library`);
+  await page.waitForTimeout(200);
+  const valid = JSON.stringify({
+    app: 'CineHub', version: 1, exportedAt: '2026-11-18T00:00:00.000Z',
+    favs: [{ id: 'backup:movie', type: 'movie', name: 'Backup de teste', poster: '', releaseInfo: '' }],
+    progress: { 'backup:movie': { t: 30, duration: 100, updated: 10, name: 'Backup de teste' } },
+  });
+  await page.locator('#import-file').setInputFiles({ name: 'backup.json', mimeType: 'application/json', buffer: Buffer.from(valid) });
+  await page.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('Dados importados.'));
+  const saved = await page.evaluate(() => ({ favs: JSON.parse(localStorage.getItem('favs') || '[]'), progress: JSON.parse(localStorage.getItem('progress') || '{}') }));
+  if (!saved.favs.some((item) => item.id === 'backup:movie')) errors.push('[backup] favorito não foi persistido após importação');
+  if (saved.progress['backup:movie']?.t !== 30) errors.push('[backup] progresso não foi persistido após importação');
+
+  const invalid = JSON.stringify({ app: 'CineHub', version: 999, favs: [], progress: {} });
+  await page.locator('#import-file').setInputFiles({ name: 'backup-invalido.json', mimeType: 'application/json', buffer: Buffer.from(invalid) });
+  await page.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('Não consegui importar:'));
+  const afterInvalid = await page.evaluate(() => ({ favs: JSON.parse(localStorage.getItem('favs') || '[]'), progress: JSON.parse(localStorage.getItem('progress') || '{}') }));
+  if (JSON.stringify(afterInvalid) !== JSON.stringify(saved)) errors.push('[backup] backup inválido alterou os dados existentes');
+  errors.push(...errors.map((e) => '[backup] ' + e));
+  await page.close();
+  if (errors.length) failures.push(...errors);
+}
+
 async function checkTv() {
   const page = await browser.newPage({
     viewport: { width: 1280, height: 720 },
@@ -104,7 +132,7 @@ async function checkTv() {
   if (await page.evaluate(() => document.activeElement?.closest('.strip') === document.querySelector('.strip'))) failures.push('[tv] controle ficou preso na borda do trilho');
   await page.close();
 }
-try { await check({ width: 360, height: 800 }, 'celular'); await check({ width: 1280, height: 800 }, 'desktop'); await checkTv(); }
+try { await check({ width: 360, height: 800 }, 'celular'); await check({ width: 1280, height: 800 }, 'desktop'); await checkTv(); await checkBackupImport(); }
 finally { await browser.close(); server.close(); }
 if (failures.length) { console.error('Falhas:\n- ' + failures.join('\n- ')); process.exit(1); }
 console.log('Smoke test ok: rotas, acessibilidade e navegação em celular, desktop e Android TV.');
