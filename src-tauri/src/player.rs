@@ -154,12 +154,15 @@ mod imp {
         let mpv = Mpv::with_initializer(|init| {
             init.set_option("vo", "gpu")?;
             init.set_option("hwdec", "auto-safe")?;
-            // O OSC do mpv fornece controles clicáveis enquanto a WebView ainda não pode
-            // ser composta sobre a swapchain DirectComposition.
+            // O OSC do mpv é a interface de controles no Windows: a janela de vídeo
+            // nativa cobre a WebView, portanto os controles HTML do CineHub não ficam visíveis.
+            // Não deixar em "auto": o usuário precisa ter controles acessíveis durante o vídeo.
             init.set_option("osc", "yes")?;
+            init.set_option("osc-visibility", "always")?;
+            init.set_option("osc-idle", "yes")?;
             init.set_option("input-default-bindings", "yes")?;
             init.set_option("input-vo-keyboard", "yes")?;
-            init.set_option("osd-level", "1")?;
+            init.set_option("osd-level", "3")?;
             init.set_option("border", "no")?;
             // Sem yt-dlp: a URL é sempre um vídeo direto vindo de um addon ou do torrent local.
             init.set_option("ytdl", "no")?;
@@ -186,6 +189,10 @@ mod imp {
         let _ = mpv.command("keybind", &["DOWN", "add volume -5"]);
         let _ = mpv.command("keybind", &["M", "cycle mute"]);
         let _ = mpv.command("keybind", &["F", "cycle fullscreen"]);
+        // Atalhos explícitos para as opções de faixa e legenda, inclusive desativar legendas.
+        let _ = mpv.command("keybind", &["V", "cycle sub"]);
+        let _ = mpv.command("keybind", &["I", "cycle sub-visibility"]);
+        let _ = mpv.command("keybind", &["A", "cycle audio"]);
         let _ = mpv.command("keybind", &["ESC", "quit"]);
         let _ = mpv.command("keybind", &["MBTN_RIGHT", "quit"]);
 
