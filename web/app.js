@@ -105,18 +105,35 @@ syncTopbar();
 // Fica visível até a operação terminar, com o tempo decorrido; não depende de toque, então
 // funciona também com controle remoto de TV.
 const busyEl = $('#busy');
+const busyTasks = [];
+let busyTimer = null;
+function renderBusy() {
+  if (!busyEl || !busyTasks.length) return;
+  // Mostra a operação mais recente; a anterior continua contando até terminar.
+  const task = busyTasks[busyTasks.length - 1];
+  const secs = Math.floor((Date.now() - task.started) / 1000);
+  busyEl.innerHTML = `<span class="spinner" aria-hidden="true"></span><span>${esc(task.text)} <span class="muted small">${secs} s</span></span>`;
+}
 function withBusy(text, promise) {
-  const started = Date.now();
-  const render = () => {
-    const secs = Math.floor((Date.now() - started) / 1000);
-    busyEl.innerHTML = `<span class="spinner" aria-hidden="true"></span><span>${esc(text)} <span class="muted small">${secs} s</span></span>`;
-  };
-  render();
-  busyEl.classList.remove('hidden');
-  const timer = setInterval(render, 1000);
-  return promise.finally(() => {
-    clearInterval(timer);
-    busyEl.classList.add('hidden');
+  const task = { text: String(text), started: Date.now() };
+  busyTasks.push(task);
+  if (busyEl) {
+    busyEl.classList.remove('hidden');
+    busyEl.setAttribute('aria-busy', 'true');
+  }
+  renderBusy();
+  if (busyTimer === null) busyTimer = setInterval(renderBusy, 1000);
+  return Promise.resolve(promise).finally(() => {
+    const index = busyTasks.indexOf(task);
+    if (index !== -1) busyTasks.splice(index, 1);
+    if (!busyTasks.length) {
+      if (busyTimer !== null) clearInterval(busyTimer);
+      busyTimer = null;
+      busyEl?.classList.add('hidden');
+      busyEl?.setAttribute('aria-busy', 'false');
+    } else {
+      renderBusy();
+    }
   });
 }
 const TORRENT_BUSY = 'Preparando torrent (pode levar até 1 minuto)';
