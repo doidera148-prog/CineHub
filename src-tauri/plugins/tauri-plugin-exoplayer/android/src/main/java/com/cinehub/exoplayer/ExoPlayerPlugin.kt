@@ -49,6 +49,20 @@ class PlayArgs {
     var segments: String? = null
 }
 
+/** Validação isolada para permitir testes unitários sem iniciar a Activity/player. */
+internal object ExoPlayerUrlValidator {
+    fun isPlayableUrl(raw: String): Boolean {
+        return try {
+            val uri = Uri.parse(raw.trim())
+            (uri.scheme.equals("http", ignoreCase = true) ||
+                uri.scheme.equals("https", ignoreCase = true)) &&
+                !uri.host.isNullOrBlank()
+        } catch (_: Exception) {
+            false
+        }
+    }
+}
+
 /** Trecho a pular (abertura, recapitulação, créditos), em segundos. */
 private data class Skip(val kind: String, val start: Double, val end: Double) {
     val label: String
@@ -92,23 +106,11 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
             invoke.reject("argumentos inválidos para o player nativo")
             return
         }
-        if (!isPlayableUrl(args.url)) {
+        if (!ExoPlayerUrlValidator.isPlayableUrl(args.url)) {
             invoke.reject("endereço de vídeo inválido")
             return
         }
         act.runOnUiThread { openPlayer(invoke, args) }
-    }
-
-    /** Aceita HTTP(S) com host válido, preservando streams locais de torrent e LAN. */
-    private fun isPlayableUrl(raw: String): Boolean {
-        return try {
-            val uri = Uri.parse(raw.trim())
-            (uri.scheme.equals("http", ignoreCase = true) ||
-                uri.scheme.equals("https", ignoreCase = true)) &&
-                !uri.host.isNullOrBlank()
-        } catch (_: Exception) {
-            false
-        }
     }
 
     private fun openPlayer(invoke: Invoke, args: PlayArgs) {
