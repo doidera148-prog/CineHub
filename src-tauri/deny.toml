@@ -5,6 +5,17 @@
 [advisories]
 version = 2
 yanked = "warn"
+ignore = [
+  # Dependência de build do GTK 0.18, transitiva do Tauri no Linux; não integra o app final.
+  # Remover quando o ecossistema GTK/Tauri substituir proc-macro-error.
+  { id = "RUSTSEC-2024-0370", reason = "somente build-time via GTK/Tauri no Linux; acompanhar atualização do upstream" },
+  # zvariant foi incorporado ao zbus 6; Tauri opener ainda usa zbus 5.x e não há upgrade seguro isolado.
+  { id = "RUSTSEC-2026-0370", reason = "transitivo de tauri-plugin-opener/zbus 5; remover quando Tauri migrar para zbus 6" },
+  { id = "RUSTSEC-2026-0371", reason = "transitivo de tauri-plugin-opener/zbus 5; remover quando Tauri migrar para zbus 6" },
+  { id = "RUSTSEC-2026-0372", reason = "transitivo de tauri-plugin-opener/zbus 5; remover quando Tauri migrar para zbus 6" },
+  # chrono é usado por librqbit-dht; o advisory afeta todas as versões e recomenda migração upstream.
+  { id = "RUSTSEC-2026-0543", reason = "transitivo de librqbit-dht 9.1.0; todas as versões chrono afetadas, aguardar migração upstream para time/jiff" },
+]
 
 [licenses]
 version = 2
