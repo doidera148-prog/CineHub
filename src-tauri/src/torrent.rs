@@ -372,15 +372,24 @@ impl TorrentEngine {
             .update_only_files(&torrent, &HashSet::from([chosen.index]))
             .await
             .map_err(|e| format!("não foi possível selecionar o arquivo: {e:#}"))?;
+        // Cada seleção recebe um token próprio e imutável. Assim, requisições HTTP
+        // iniciadas para o episódio anterior nunca passam a ler o novo arquivo por engano.
+        let next_token = Uuid::new_v4().simple().to_string();
         let mut files = self.files.write().await;
-        let entry = files.get_mut(token).ok_or(GONE)?;
-        entry.file_index = chosen.index;
-        entry.size = chosen.size;
-        entry.mime_type = chosen.mime;
+        files.remove(token).ok_or(GONE)?;
+        files.insert(
+            next_token.clone(),
+            StreamFile {
+                torrent: torrent.clone(),
+                file_index: chosen.index,
+                size: chosen.size,
+                mime_type: chosen.mime,
+                videos: videos.clone(),
+            },
+        );
         Ok(TorrentPlayback {
-            // O índice na URL faz o player recarregar o arquivo novo, e não reaproveitar o antigo.
-            stream_url: format!("{}/stream/{token}?file={}", self.base_url, chosen.index),
-            token: token.to_string(),
+            stream_url: format!("{}/stream/{next_token}", self.base_url),
+            token: next_token,
             name: torrent.name().unwrap_or_else(|| "Torrent".into()),
             file_name: chosen.name.clone(),
             mime_type: chosen.mime.into(),
