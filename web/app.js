@@ -737,7 +737,7 @@ async function importData(file) {
 const COMMUNITY_ADDONS = [
   { id: 'community.anime.kitsu', name: 'Anime Kitsu', version: '0.0.10',
     description: 'Catálogos de animes populares, em exibição e mais bem avaliados, com metadados do Kitsu.',
-    url: 'https://anime-kitsu.strem.fun/manifest.json', logo: 'https://i.imgur.com/7N6XGoO.png',
+    url: 'https://anime-kitsu.strem.fun/manifest.json', logo: '',
     categories: ['anime', 'catalog'], tags: ['Anime', 'Catálogos', 'Metadados'] },
   { id: 'com.stremio.torrentio.catalog.addon', name: 'Torrent Catalogs', version: '1.0.2',
     description: 'Catálogos de filmes, séries e animes organizados por torrents populares. Para catálogos de anime, requer o Anime Kitsu.',
