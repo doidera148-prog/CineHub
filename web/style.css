@@ -1109,32 +1109,52 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.7); }
 .preview-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.2rem; }
 .preview-actions .btn-link { height: 2.3rem; padding: 0 1rem; font-size: 0.9rem; }
 
-/* Filmes em telas largas: fontes num painel à direita da imagem de fundo. */
+/* Filmes em telas largas: detalhe e fontes em colunas separadas, sem sobreposição. */
 @media (min-width: 1100px) {
-  #view.detail-with-panel { display: grid; grid-template-columns: minmax(0, 1fr) minmax(24rem, 30vw); }
-  #view.detail-with-panel > .hero {
-    grid-column: 1 / -1;
-    grid-row: 1;
-    /* Reserva a coluna das fontes para o texto do filme não ficar por baixo do painel. */
-    padding-right: calc(var(--gutter) + clamp(24rem, 30vw, 30rem));
+  #view.detail-with-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(24rem, 32vw);
+    align-items: stretch;
+    column-gap: clamp(1rem, 2vw, 2rem);
   }
-  #view.detail-with-panel > .hero .hero-info { width: 100%; max-width: 48rem; }
+  #view.detail-with-panel > .hero {
+    grid-column: 1;
+    grid-row: 1;
+    margin: calc(-1 * var(--nav-h) - 0.75rem) 0 0;
+    min-width: 0;
+    padding: 0 var(--gutter) 1.75rem;
+  }
+  #view.detail-with-panel > .hero .hero-info {
+    width: 100%;
+    max-width: 48rem;
+    padding-right: 0;
+  }
   #view.detail-with-panel > #body {
     grid-column: 2;
     grid-row: 1;
-    align-self: center;
+    align-self: start;
     position: relative;
     z-index: 2;
     min-width: 0;
-    margin-right: var(--gutter);
+    margin: 0;
+    padding-top: 1rem;
   }
   #view.detail-with-panel #streams {
     margin: 0;
     max-width: none;
-    max-height: 72vh;
+    max-height: min(76vh, 760px);
     overflow-y: auto;
-    padding: 0.5rem 0.25rem 0.75rem;
+    overscroll-behavior: contain;
+    padding: 0.75rem 0.5rem;
     animation: dx-slide-in 0.5s var(--ease-out) both;
+  }
+  #view.detail-with-panel #streams .stream {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.25rem;
+    overflow-wrap: anywhere;
+  }
+  #view.detail-with-panel #streams .stream em {
+    grid-column: 1;
   }
 }
 @keyframes dx-slide-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
