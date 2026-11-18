@@ -167,7 +167,7 @@ function askConfirm(msg, okLabel) {
 }
 
 // Funções puras (URLs seguras, ordenação de fontes, próximo episódio) vêm de lib.js, testadas com node.
-const { isWebUrl, cssUrl, str, num, cleanFav, cleanProgress, mergeBackupData, writeStorageBatch, progressPercent, sortStreams, nextEpisode, torrentLanguage, isSeriesLike, typeLabel, qualityLabel, filterStreams, sortStreamsBy } = window.CineHubLib;
+const { isWebUrl, cssUrl, str, num, cleanFav, cleanProgress, mergeBackupData, createBackupData, writeStorageBatch, progressPercent, sortStreams, nextEpisode, torrentLanguage, isSeriesLike, typeLabel, qualityLabel, filterStreams, sortStreamsBy } = window.CineHubLib;
 
 const STREAM_LANG = { pt: 'Português', en: 'Inglês', other: 'Outros' };
 const STREAM_SORTS = [
@@ -565,13 +565,7 @@ async function saveText({ content, defaultName, filterName, ext, label, fallback
 // Exporta biblioteca e progresso (backup .json). O backend grava o arquivo e informa o caminho.
 // (Download por blob não funciona no WebView do Android.)
 async function exportData() {
-  const payload = {
-    app: 'CineHub',
-    version: 1,
-    exportedAt: new Date().toISOString(),
-    favs: getFavs(),
-    progress: store.get('progress', {}),
-  };
+  const payload = createBackupData(getFavs(), store.get('progress', {}));
   const content = JSON.stringify(payload, null, 2);
   try {
     await saveText({
