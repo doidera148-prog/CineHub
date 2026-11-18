@@ -260,12 +260,15 @@ async function openTorrentSource(stream, label, id, meta, subs) {
     openedToken = result.token;
     activeTorrentToken = result.token;
     const chosen = await pickTorrentVideo(result);
+    // A seleção de episódio pode devolver um token novo para isolar leituras HTTP antigas.
+    openedToken = chosen.token || result.token;
+    activeTorrentToken = openedToken;
     const fixed = {
       ...stream,
       url: chosen.streamUrl,
       mimeType: chosen.mimeType,
       name: chosen.name || stream?.name || label,
-      torrentToken: result.token,
+      torrentToken: openedToken,
     };
     await play(fixed, label, id, meta, subs);
   } catch (err) {
@@ -350,9 +353,12 @@ function pickTorrentVideo(result) {
 
 // Reproduz um torrent recém-aberto pelo backend (magnet ou arquivo .torrent).
 async function playOpenedTorrent(input, fallbackName) {
-  activeTorrentToken = input.token || null;
+  let openedToken = input.token || null;
+  activeTorrentToken = openedToken;
   try {
     const result = await pickTorrentVideo(input);
+    openedToken = result.token || openedToken;
+    activeTorrentToken = openedToken;
     const name = result.name || fallbackName;
     const id = `torrent:${Date.now()}`;
     const fake = {
@@ -360,11 +366,11 @@ async function playOpenedTorrent(input, fallbackName) {
       name,
       fileName: result.fileName,
       mimeType: result.mimeType,
-      torrentToken: result.token || input.token,
+      torrentToken: openedToken,
     };
     await play(fake, name, id, { id, label: name, name, type: 'movie' }, []);
   } catch (err) {
-    if (input.token && activeTorrentToken === input.token) await closeTorrentToken(input.token);
+    if (openedToken && activeTorrentToken === openedToken) await closeTorrentToken(openedToken);
     throw err;
   }
 }
