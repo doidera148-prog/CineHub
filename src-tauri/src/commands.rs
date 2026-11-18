@@ -407,6 +407,22 @@ pub async fn subtitle(state: State<'_, AppState>, url: String) -> Result<String,
     Ok(srt_to_vtt(&String::from_utf8_lossy(&bytes)))
 }
 
+
+/// Cria uma URL local temporária para uma fonte HTTP progressiva.
+/// Torrent não passa por este comando; HLS é recusado até a reescrita integral das playlists.
+#[tauri::command]
+pub async fn media_proxy_url(
+    state: State<'_, AppState>,
+    url: String,
+    behavior_hints: Option<Value>,
+) -> Result<String, String> {
+    let proxy = state.media_proxy.get_or_init(|| async {
+        crate::media_proxy::MediaProxy::start().await
+            .expect("não foi possível iniciar o proxy local de mídia")
+    }).await;
+    proxy.register(&url, behavior_hints.as_ref()).await
+}
+
 /// Retorna estatísticas do torrent ativo, sem iniciar uma sessão nova.
 #[tauri::command]
 pub async fn torrent_stats(
