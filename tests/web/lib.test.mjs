@@ -55,6 +55,33 @@ test('cssUrl escapa aspas e parênteses', () => {
   assert.equal(L.cssUrl("https://a.example/x(1)'.jpg"), "url('https://a.example/x%281%29%27.jpg')");
 });
 
+test('URLs externas rejeitam esquemas executáveis, locais e formatos malformados', () => {
+  for (const url of [
+    'javascript:alert(1)',
+    'data:text/html,<script>alert(1)</script>',
+    'file:///etc/passwd',
+    'ftp://example.com/video.mp4',
+    '//example.com/image.jpg',
+    'https:/missing-host/image.jpg',
+    '',
+    null,
+    42,
+  ]) {
+    assert.equal(L.isWebUrl(url), false, String(url));
+    assert.equal(L.cssUrl(url), '', String(url));
+  }
+  assert.equal(L.isWebUrl('HTTP://cdn.example/image.jpg'), true);
+  assert.equal(L.isWebUrl('https://cdn.example/image.jpg'), true);
+});
+
+test('metadados hostis não são aceitos como números ou contêineres', () => {
+  const hostile = '<img src=x onerror=alert(1)>';
+  assert.equal(L.seasonOf({ season: hostile }), 0);
+  assert.equal(L.episodeOf({ episode: hostile }), null);
+  assert.equal(L.streamContainer({ url: 'javascript:alert(1)' }), 'unknown');
+  assert.equal(L.isMkvStream({ name: hostile }), false);
+});
+
 test('progresso fica entre 0 e 100 e aceita duração desconhecida', () => {
   assert.equal(L.progressPercent({ t: 50, duration: 100 }), 50);
   assert.equal(L.progressPercent({ t: 300, duration: 100 }), 100);
