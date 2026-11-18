@@ -145,12 +145,23 @@
     }
   }, true);
 
-  // OK no campo de busca abre o teclado virtual; Enter confirma e libera as setas.
+  // OK no campo de busca abre o teclado virtual; Enter/ação de pesquisa
+  // confirma o formulário e tira o foco para fechar o IME do Android TV.
   document.addEventListener('keydown', (event) => {
     const target = document.activeElement;
-    if (!target || target.id !== 'q' || event.altKey || event.ctrlKey || event.metaKey) return;
-    if (event.key === 'Enter') { event.preventDefault(); target.blur(); return; }
-    if (isOk(event)) { event.preventDefault(); target.click(); }
+    if (!isTextEntry(target) || event.altKey || event.ctrlKey || event.metaKey) return;
+    const isImeSubmit = event.key === 'Enter' || event.key === 'Search' ||
+      event.key === 'Go' || event.key === 'Done' || event.keyCode === 66;
+    if (isImeSubmit) {
+      event.preventDefault();
+      if (target.form) target.form.requestSubmit();
+      target.blur();
+      return;
+    }
+    if (target.id === 'q' && isOk(event)) {
+      event.preventDefault();
+      target.click();
+    }
   }, true);
 
   document.addEventListener('keydown', (event) => {
