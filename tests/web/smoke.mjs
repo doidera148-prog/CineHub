@@ -10,7 +10,7 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
 const server = createServer(async (req, res) => {
   const path = normalize(decodeURIComponent(new URL(req.url, 'http://x').pathname));
   const file = join(WEB, path === '/' ? 'index.html' : path);
-  if (!file.startsWith(WEB)) return res.writeHead(403).end();
+  if (!file.startsWith(WEB)) { console.error(`Recurso bloqueado pelo servidor de teste: ${req.url} -> ${file}`); return res.writeHead(403).end(); }
   let body;
   try { body = await readFile(file); } catch { return res.writeHead(404).end(); }
   res.writeHead(200, { 'Content-Type': TYPES[extname(file)] || 'application/octet-stream' });
