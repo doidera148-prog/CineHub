@@ -7,7 +7,7 @@ Aplicativo de mídia multiplataforma, escrito em Rust + Tauri 2, com interface e
 ## Plataformas
 
 - **Android e Android TV:** APK único, com player nativo Media3/ExoPlayer. A interface detecta TVs Android de tela grande e ativa layout próprio para controle remoto.
-- **Windows:** pacote desktop Tauri; o workflow compila o player nativo libmpv.
+- **Windows:** pacote desktop Tauri com reprodução integrada no WebView2, usando Video.js/HTML5. O vídeo permanece dentro da janela do CineHub; o build Windows não depende de libmpv.
 - **Linux e macOS:** pacotes desktop Tauri; reprodução pelo player disponível no WebView quando o player nativo não está habilitado.
 - **iOS:** não é alvo de build nem de teste.
 
@@ -23,8 +23,8 @@ Aplicativo de mídia multiplataforma, escrito em Rust + Tauri 2, com interface e
 
 ### Reprodução
 - **Android/Android TV:** player nativo baseado em AndroidX Media3/ExoPlayer, com seleção manual de áudio, seleção e desativação de legendas, preferência por português, controle por D-pad e ações para pular segmentos quando disponíveis.
-- **Windows:** player nativo libmpv compilado no workflow desktop.
-- **Outras plataformas:** player baseado em Video.js/WebView.
+- **Windows:** player integrado ao WebView2, baseado em Video.js/HTML5, sem abrir janela externa do mpv.
+- **Linux e macOS:** player baseado em Video.js/WebView; o player nativo só é usado se estiver habilitado em uma compilação específica.
 - Proxy HTTP local para streams HTTP/HTTPS, com suporte a respostas em blocos, solicitações Range e reescrita de playlists HLS e seus recursos filhos.
 - A interface oferece recuperação para buscas de fontes sem resultado, incluindo tentar novamente, atualizar e limpar filtros quando essas ações estão disponíveis.
 
@@ -71,7 +71,7 @@ src-tauri/
     addon.rs                 cliente Stremio, validação de destinos e cache
     commands.rs              comandos Tauri usados pela interface
     media_proxy.rs           proxy HTTP/HLS local para fontes de vídeo
-    player.rs                integração desktop com libmpv
+    player.rs                integração opcional desktop com libmpv
     torrent.rs               motor BitTorrent e servidor local de streaming
     kodi.rs                  cliente Kodi JSON-RPC
     store.rs                 persistência dos addons instalados
@@ -94,6 +94,7 @@ docs/
   architecture.md            visão técnica dos fluxos e limites
 .github/
   workflows/build.yml        testes, lint e builds desktop/Android
+  workflows/cleanup-actions.yml limpeza semanal do histórico do Actions
   scripts/                   utilitários de build
 ```
 
@@ -158,7 +159,7 @@ sudo apt-get install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-
 ```
 
 ### Windows
-WebView2 (normalmente presente nas versões atuais do Windows). O build do player nativo exige a libmpv; o script `.github/scripts/prepare-libmpv.ps1` prepara a DLL usada pelo workflow.
+WebView2 (normalmente presente nas versões atuais do Windows). A reprodução usa Video.js/HTML5 dentro do WebView2; não é necessário instalar libmpv nem preparar DLLs adicionais.
 
 ### macOS
 Xcode Command Line Tools.
@@ -187,12 +188,12 @@ O patch de manifesto adiciona o launcher Leanback, declara toque opcional e conf
 
 ## Builds automáticos e releases
 
-O workflow [build.yml](.github/workflows/build.yml) roda em pushes para `main` (exceto alterações apenas em arquivos Markdown), pull requests e execução manual.
+O workflow [build.yml](.github/workflows/build.yml) roda em pushes para `main` (exceto alterações apenas em arquivos Markdown), pull requests e execução manual. O workflow [cleanup-actions.yml](.github/workflows/cleanup-actions.yml) remove semanalmente execuções concluídas com mais de 30 dias; também pode ser iniciado manualmente com período de retenção configurável e modo de simulação.
 
 - **Testes:** suíte Rust.
 - **Lint:** rustfmt, Clippy e verificação de sintaxe JavaScript; auditorias adicionais de licenças e vulnerabilidades são executadas como etapas não bloqueantes.
 - **Web:** teste de fumaça Playwright.
-- **Desktop:** Linux, Windows e macOS.
+- **Desktop:** Linux, Windows e macOS. No Windows, o player integrado usa WebView2/Video.js; o workflow não compila nem distribui libmpv.
 - **Android:** APKs separados por ABI para arm64-v8a, armeabi-v7a, x86 e x86_64.
 - **Release:** publica os artefatos quando testes, lint, smoke web e pelo menos um build de plataforma passam; mantém as 10 releases automáticas mais recentes.
 
