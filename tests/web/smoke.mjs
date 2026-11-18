@@ -18,7 +18,7 @@ const server = createServer(async (req, res) => {
 });
 await new Promise((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
 const base = `http://127.0.0.1:${server.address().port}`;
-const fixtures = `window.__TAURI__={core:{invoke:async(cmd,args)=>{const metas=(n,p)=>Array.from({length:n},(_,i)=>({id:'tt'+p+i,type:'movie',name:p+' filme '+i,releaseInfo:'2026'}));switch(cmd){case'home':return{rows:[{title:'Populares',addon:'Teste',transportUrl:'https://test.invalid/manifest.json',type:args.kind,catalogId:'top',metas:metas(20,'home')}]};case'search':return{rows:[]};case'catalog_page':return{metas:[]};case'list_addons':return[];case'meta':return{meta:{id:args.id,type:'movie',name:'Título de teste',description:'Descrição'}};case'streams':if(args.id==='tt2')throw Error('offline');return{streams:[],subtitles:[],errors:[]};case'subtitle':return'WEBVTT';default:return{};}}}};`;
+const fixtures = `window.__TAURI__={core:{invoke:async(cmd,args)=>{const metas=(n,p)=>Array.from({length:n},(_,i)=>({id:'tt'+p+i,type:'movie',name:p+' filme '+i,releaseInfo:'2026'}));switch(cmd){case'home':return{rows:[{title:'Populares',addon:'Teste',transportUrl:'https://test.invalid/manifest.json',type:args.kind,catalogId:'top',metas:metas(20,'home')}]};case'search':return{rows:[]};case'catalog_page':return{metas:[]};case'list_addons':return[];case'meta':return{meta:{id:args.id,type:'movie',name:'Título de teste',description:'Descrição'}};case'streams':if(args.id==='tt2')throw Error('offline');return{streams:[],subtitles:[],errors:[]};case'subtitle':return'WEBVTT';case'torrent_stats':return{active:true,state:'Live',downloadSpeedBytes:1250000,uploadSpeedBytes:64000,peers:8,peersSeen:14,downloadedBytes:500000000,totalBytes:1000000000,error:null};default:return{};}}}};`;
 const routes = ['#/', '#/movies', '#/series', '#/animes', '#/search?q=filme', '#/library', '#/addons', '#/detail/movie/tt1'];
 const failures = [];
 const browser = await chromium.launch();
@@ -34,6 +34,18 @@ async function check(viewport, label) {
     const text = await page.locator('#view').innerText();
     if (/Erro:/.test(text)) failures.push(`[${label}] ${hash}: erro visível`);
     if (await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)) failures.push(`[${label}] ${hash}: overflow horizontal`);
+  }
+  await page.goto(`${base}/#/settings`);
+  await page.waitForTimeout(150);
+  if (!(await page.locator('#view h1').innerText()).includes('Configurações')) failures.push(`[${label}] rota de configurações não abriu`);
+  const statsToggle = page.locator('#torrent-stats-pref');
+  if (!(await statsToggle.count())) failures.push(`[${label}] opção de estatísticas torrent ausente`);
+  else {
+    await statsToggle.check();
+    await page.waitForTimeout(150);
+    if (!(await page.locator('#torrent-stats-content').innerText()).includes('1.2 MB/s')) failures.push(`[${label}] estatísticas torrent não foram exibidas`);
+    await statsToggle.uncheck();
+    if (!(await page.locator('#torrent-stats-panel').isHidden())) failures.push(`[${label}] painel não foi ocultado ao desligar a opção`);
   }
   await page.goto(`${base}/#/movies`);
   await page.waitForTimeout(300);
