@@ -85,6 +85,7 @@ async function checkTv() {
   await page.goto(`${base}/#/movies`);
   await page.waitForTimeout(350);
   if (!(await page.locator('body').evaluate((el) => el.classList.contains('tv-mode')))) failures.push('[tv] interface dedicada não foi ativada');
+  if (await page.evaluate(() => document.querySelector('#nav-main a:last-child')?.getBoundingClientRect().bottom > innerHeight - 8)) failures.push('[tv] menu lateral ultrapassa a tela 720p');
   const first = page.locator('#view .strip a').first();
   await first.focus();
   await page.keyboard.press('ArrowLeft');
