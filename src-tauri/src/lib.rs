@@ -33,7 +33,7 @@ pub struct AppState {
     /// Garante que as gravações de addons.json aconteçam uma de cada vez.
     pub save_lock: tokio::sync::Mutex<()>,
     /// Proxy HTTP progressivo, iniciado sob demanda e restrito ao loopback.
-    pub media_proxy: tokio::sync::OnceCell<Arc<media_proxy::MediaProxy>>,
+    pub media_proxy: tokio::sync::OnceCell<Result<Arc<media_proxy::MediaProxy>, String>>,
 }
 
 /// Addon de metadados oficial do Stremio, instalado na primeira execução.
