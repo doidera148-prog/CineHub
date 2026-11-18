@@ -106,3 +106,30 @@ ou quando os exemplos, o manifesto Rust ou o próprio workflow mudam.
 Esse teste valida compilação e ligação dos exemplos, mas não testa apresentação
 de vídeo: para isso ainda é necessário executar o probe em uma sessão Windows
 com GPU/D3D11 e uma URL de mídia acessível.
+
+
+## Etapa 3 — composição sob a WebView2
+
+A inspeção das APIs do runtime Wry/Tauri 2 confirmou que o handle Windows exposto por
+`with_webview` é um `ICoreWebView2Controller` convencional, não um
+`ICoreWebView2CompositionController`. Portanto, não é correto assumir que o app já
+pode conectar diretamente a árvore visual da WebView ao DirectComposition.
+
+A rota de menor impacto a validar é manter o controller HWND atual e usar o recurso
+documentado de fundo transparente do WebView2 (`DefaultBackgroundColor` com alpha 0).
+A swapchain do mpv fica em um destino DirectComposition não-topmost no HWND principal,
+atrás dos filhos; a WebView permanece acima e desenha os controles. Isso depende de
+toda a cadeia de elementos da página na área do player ter fundo transparente durante
+a reprodução. O probe foi ajustado para testar essa ordem Z sem ativar a mudança em
+produção.
+
+Referências:
+- [Wry — WebView2 controller e transparência](https://github.com/tauri-apps/wry/blob/dev/src/webview2/mod.rs)
+- [Tauri — acesso ao controller com with_webview](https://v2.tauri.app/reference/webview/)
+- [WebView2 — DefaultBackgroundColor transparente](https://learn.microsoft.com/en-us/microsoft-edge/webview2/reference/win32/icorewebview2controller2)
+
+Próximo critério: executar o probe no Windows com o HWND do CineHub e confirmar
+visualmente que o vídeo aparece atrás da WebView quando o fundo dela está transparente.
+Só depois disso integrar a criação/liberação do destino DirectComposition ao ciclo de
+`player_play`, atualizar o tamanho da swapchain e ligar os controles HTML ao estado
+do mpv. O player de produção continua inalterado até essa prova visual.
