@@ -8,7 +8,7 @@ O aplicativo é dividido em três camadas:
 
 1. **Interface web** em `web/`: renderiza páginas, gerencia navegação, foco, catálogos e interações com o usuário.
 2. **Backend Rust/Tauri** em `src-tauri/src/`: valida e consulta addons, persiste configurações, cria o proxy de mídia e controla torrents e integrações.
-3. **Players**: Media3/ExoPlayer no Android; Video.js/HTML5 integrado ao WebView2 no Windows; Video.js/WebView nas demais plataformas.
+3. **Players**: Media3/ExoPlayer no Android; libmpv/FFmpeg com janela nativa recortada no Windows; Video.js/WebView nas demais plataformas.
 
 A interface chama comandos Tauri. URLs de vídeo são entregues ao player nativo ou ao player web; quando necessário, o backend cria uma URL local do proxy para adaptar a conexão com a fonte.
 
