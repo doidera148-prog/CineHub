@@ -36,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     })?;
 
-    mpv.command("loadfile", &[&url, "replace"])?;
+    mpv.command("loadfile", &[url.as_str(), "replace"])?;
 
     // A swapchain pode só existir depois que o VO/GPU for inicializado.
     let mut started = false;
