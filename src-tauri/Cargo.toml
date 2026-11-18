@@ -56,3 +56,8 @@ tauri-plugin-dialog = "2"
 [package.metadata.cargo-machete]
 # Dependências utilizadas exclusivamente por scripts de build.
 ignored = ["tauri-build"]
+
+# librqbit-utp 0.7.0 publicado ainda referencia ringbuf 0.4.x.
+# Este commit oficial já usa ringbuf 0.5.2+, corrigindo RUSTSEC-2026-0293.
+[patch.crates-io]
+librqbit-utp = { git = "https://github.com/ikatson/librqbit-utp.git", rev = "06e1c53c8df6edb2830d6aab64a6d4bed8479908" }
