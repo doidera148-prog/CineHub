@@ -53,6 +53,9 @@ const store = {
       /* sem armazenamento: nada a fazer */
     }
   },
+  setMany(entries) {
+    return writeStorageBatch(localStorage, entries);
+  },
 };
 
 const setView = (html) => {
@@ -633,8 +636,9 @@ async function importData(file) {
   try {
     const data = JSON.parse(await file.text());
     const merged = mergeBackupData(getFavs(), store.get('progress', {}), data, MAX_FAVS, MAX_PROGRESS);
-    store.set('favs', merged.favs);
-    store.set('progress', merged.progress);
+    if (!store.setMany({ favs: merged.favs, progress: merged.progress })) {
+      throw new Error('não foi possível salvar os dados; verifique o espaço disponível no aparelho');
+    }
 
     toast('Dados importados.');
     libraryPage();
