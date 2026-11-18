@@ -159,6 +159,7 @@ pub fn run() {
             commands::meta,
             commands::streams,
             commands::subtitle,
+            commands::media_proxy_url,
             commands::torrent_stats,
             commands::torrent_open,
             commands::torrent_select_file,
