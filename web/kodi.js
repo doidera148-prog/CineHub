@@ -4,7 +4,6 @@
   const view = document.querySelector('#view');
   if (!view || !window.__TAURI__?.core?.invoke) return;
 
-  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const invoke = (command, args) => window.__TAURI__.core.invoke(command, args);
   let credentials = { endpoint: '', username: null, password: null };
   let currentDirectory = '';
