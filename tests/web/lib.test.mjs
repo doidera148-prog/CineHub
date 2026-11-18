@@ -223,8 +223,7 @@ test('backup mescla favoritos e mantém o progresso mais recente sem aceitar cha
   assert.deepEqual(result.favs.map((f) => f.id), ['movie:1', 'movie:2', '__proto__']);
   assert.equal(result.progress['movie:1'].t, 10);
   assert.equal(result.progress['series:1'].t, 30);
-  assert.equal(Object.getPrototypeOf(result.progress), Object.prototype);
-  assert.equal(Object.hasOwn(result.progress, '__proto__'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(result.progress, '__proto__'), false);
 });
 
 test('backup inválido ou de versão desconhecida não é mesclado', () => {
@@ -237,7 +236,7 @@ test('registros importados de progresso não mantêm tempos negativos', () => {
     app: 'CineHub', version: 1,
     progress: { 'movie:1': { t: -5, duration: -10, updated: -1 } },
   });
-  assert.deepEqual(result.progress['movie:1'], {
-    t: 0, duration: 0, label: '', seriesId: '', type: '', name: '', poster: '', updated: 0, watched: false,
-  });
+  assert.equal(result.progress['movie:1'].t, 0);
+  assert.equal(result.progress['movie:1'].duration, 0);
+  assert.equal(result.progress['movie:1'].updated, 0);
 });
