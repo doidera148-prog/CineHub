@@ -1425,6 +1425,20 @@ async function play(stream, label, id, meta, subs) {
     return;
   }
   nativeFailure = null;
+  // Toda fonte HTTP progressiva passa pelo proxy local; HLS é recusado até que
+  // playlists, segmentos e chaves também possam ser reescritos com segurança.
+  try {
+    stream = {
+      ...stream,
+      url: await call('media_proxy_url', {
+        url: stream.url,
+        behaviorHints: stream.behaviorHints || null,
+      }),
+    };
+  } catch (e) {
+    toast(`Fonte não pode ser reproduzida com segurança: ${describeError(e)}`);
+    return;
+  }
   const segments = await skipSegmentsFor(id, meta);
   if (await playNative(stream, label, id, meta, subs, segments)) return;
 
