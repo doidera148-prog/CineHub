@@ -142,7 +142,28 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
                 ).build().show()
             }
         }
+        // Botão para selecionar/desativar legendas, incluindo faixas embutidas e externas.
+        val subtitleButton = Button(act).apply {
+            text = "Legendas"
+            isAllCaps = false
+            visibility = View.GONE
+            isFocusable = true
+            isFocusableInTouchMode = true
+            setOnClickListener {
+                androidx.media3.ui.TrackSelectionDialogBuilder(
+                    act,
+                    "Legendas",
+                    player,
+                    C.TRACK_TYPE_TEXT
+                ).setShowDisableOption(true).build().show()
+            }
+        }
         var hasMultipleAudioTracks = false
+        var hasSubtitleTracks = false
+        fun updateTrackButtons(visible: Boolean) {
+            audioButton.visibility = if (hasMultipleAudioTracks && visible) View.VISIBLE else View.GONE
+            subtitleButton.visibility = if (hasSubtitleTracks && visible) View.VISIBLE else View.GONE
+        }
         player.addListener(object : Player.Listener {
             override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
                 hasMultipleAudioTracks = tracks.groups
@@ -150,12 +171,15 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
                     .sumOf { group ->
                         (0 until group.length).count { group.isTrackSupported(it) }
                     } > 1
-                // O seletor só aparece junto com os controles do player.
-                audioButton.visibility = if (hasMultipleAudioTracks && view.isControllerFullyVisible) View.VISIBLE else View.GONE
+                hasSubtitleTracks = tracks.groups
+                    .filter { it.type == C.TRACK_TYPE_TEXT }
+                    .any { group -> (0 until group.length).any { group.isTrackSupported(it) } }
+                // Os seletores só aparecem junto com os controles do player.
+                updateTrackButtons(view.isControllerFullyVisible)
             }
         })
         view.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
-            audioButton.visibility = if (hasMultipleAudioTracks && visibility == View.VISIBLE) View.VISIBLE else View.GONE
+            updateTrackButtons(visibility == View.VISIBLE)
         })
 
         // Pular abertura, recapitulação e créditos: um botão sobre o vídeo enquanto o trecho toca.
@@ -203,6 +227,13 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         )
         audioButtonParams.setMargins(0, margin, margin, 0)
         frame.addView(audioButton, audioButtonParams)
+        val subtitleButtonParams = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.TOP or Gravity.END
+        )
+        subtitleButtonParams.setMargins(0, margin + (56 * density).toInt(), margin, 0)
+        frame.addView(subtitleButton, subtitleButtonParams)
         dialog.setContentView(frame, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
         var errorMessage: String? = null
