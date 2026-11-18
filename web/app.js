@@ -772,6 +772,11 @@ const COMMUNITY_ADDONS = [
     url: 'https://27a5b2bfe3c0-stremio-brazilian-addon.baby-beamup.club/manifest.json',
     logo: 'https://i.ibb.co/YyPbHVT/icon.png',
     categories: ['catalog'], tags: ['Brasil', 'Português', 'Filmes', 'Dublado'] },
+  { id: 'tmdb-addon', name: 'The Movie Database Addon', version: '3.1.7',
+    description: 'Metadados e catálogos de filmes e séries com busca, tendências, lançamentos, filtros por gênero, ano e idioma. Integrações extras são opcionais.',
+    url: 'https://94c8cb9f702d-tmdb-addon.baby-beamup.club/manifest.json',
+    logo: 'https://94c8cb9f702d-tmdb-addon.baby-beamup.club/logo.png',
+    categories: ['catalog'], tags: ['Filmes', 'Séries', 'Metadados', 'TMDB', 'Português'] },
 ];
 
 async function addonsPage() {
