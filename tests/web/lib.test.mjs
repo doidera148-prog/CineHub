@@ -217,12 +217,7 @@ test('backup mescla favoritos e mantém o progresso mais recente sem aceitar cha
     {
       app: 'CineHub', version: 1,
       favs: [{ id: 'movie:1', name: 'Duplicado' }, { id: 'movie:2', name: 'Novo' }, { id: '__proto__' }],
-      progress: {
-        'movie:1': { t: 80, duration: 100, updated: 15 },
-        'series:1': { t: 30, duration: 50, updated: 30 },
-        '__proto__': { t: 999, duration: 1000, updated: 999 },
-        constructor: { t: 999, duration: 1000, updated: 999 },
-      },
+      progress: JSON.parse('{"movie:1":{"t":80,"duration":100,"updated":15},"series:1":{"t":30,"duration":50,"updated":30},"__proto__":{"t":999,"duration":1000,"updated":999},"constructor":{"t":999,"duration":1000,"updated":999}}'),
     },
   );
   assert.deepEqual(result.favs.map((f) => f.id), ['movie:1', 'movie:2', '__proto__']);
