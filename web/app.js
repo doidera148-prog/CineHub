@@ -762,6 +762,16 @@ const COMMUNITY_ADDONS = [
     url: 'https://jackettio.elfhosted.com/manifest.json',
     logo: 'https://docs.elfhosted.com/images/logo.png',
     categories: ['streams'], tags: ['Filmes', 'Séries', 'Jackett', 'Debrid', 'Torrents'] },
+  { id: 'pw.ers.netflix-catalog', name: 'Streaming Catalogs', version: '1.1.1',
+    description: 'Catálogos de tendências de Netflix, HBO Max, Disney+, Prime Video e Apple TV+. A seleção de serviços pode ser configurada no addon.',
+    url: 'https://7a82163c306e-stremio-netflix-catalog-addon.baby-beamup.club/manifest.json',
+    logo: 'https://play-lh.googleusercontent.com/TBRwjS_qfJCSj1m7zZB93FnpJM5fSpMA_wUlFDLxWAb45T9RmwBvQd5cWR5viJJOhkI',
+    categories: ['catalog'], tags: ['Filmes', 'Séries', 'Catálogos', 'Streaming'] },
+  { id: 'brazilian-addon', name: 'Mico-Leão Dublado 🇧🇷', version: '1.0.0',
+    description: 'Catálogo de filmes dublados em português, com gêneros e busca. Desenvolvido para conteúdo brasileiro.',
+    url: 'https://27a5b2bfe3c0-stremio-brazilian-addon.baby-beamup.club/manifest.json',
+    logo: 'https://i.ibb.co/YyPbHVT/icon.png',
+    categories: ['catalog'], tags: ['Brasil', 'Português', 'Filmes', 'Dublado'] },
 ];
 
 async function addonsPage() {
