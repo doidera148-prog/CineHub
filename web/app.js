@@ -339,6 +339,12 @@ function pickTorrentVideo(result) {
       { once: true },
     );
     dlg.showModal();
+    // No Android TV o foco inicial do dialog pode cair no filtro de idioma.
+    // Leva-o diretamente ao primeiro arquivo para que o DPAD percorra os episódios.
+    requestAnimationFrame(() => {
+      const firstItem = dlg.querySelector('.tp-item');
+      if (firstItem && dlg.open) firstItem.focus({ preventScroll: true });
+    });
   });
 }
 
