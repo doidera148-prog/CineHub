@@ -421,21 +421,35 @@ async fn rewrite_playlist(
     Ok(format!("{}\n", output.join("\n")))
 }
 
+/// Resolve uma referência HLS e rejeita esquemas, hosts e credenciais que não sejam HTTP(S).
+/// A validação DNS/IP é feita separadamente por is_safe_url antes do registro.
+fn resolve_playlist_reference(base: &Url, reference: &str) -> Result<Url, String> {
+    let url = base
+        .join(reference)
+        .map_err(|_| "referência HLS inválida".to_string())?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err("referência HLS não permitida".into());
+    }
+    Ok(url)
+}
+
 async fn register_child(
     state: &ProxyState,
     base: &Url,
     reference: &str,
     headers: &[(header::HeaderName, HeaderValue)],
 ) -> Result<String, (StatusCode, String)> {
-    let url = base.join(reference).map_err(|_| {
+    let url = resolve_playlist_reference(base, reference).map_err(|_| {
         (
             StatusCode::BAD_GATEWAY,
             "URI filha inválida na playlist".into(),
         )
     })?;
-    if !url.username().is_empty()
-        || url.password().is_some()
-        || !crate::addon::is_safe_url(url.as_str()).await
+    if !crate::addon::is_safe_url(url.as_str()).await
     {
         return Err((
             StatusCode::FORBIDDEN,
@@ -491,6 +505,41 @@ mod tests {
     fn proxy_headers_rejects_invalid_values() {
         let hints = serde_json::json!({"proxyHeaders":{"request":{"Referer":42}}});
         assert!(parse_request_headers(Some(&hints)).is_err());
+    }
+
+    #[test]
+    fn hls_relative_references_resolve_against_playlist_directory() {
+        let base = Url::parse("https://cdn.example/live/master.m3u8").unwrap();
+        let resolved = resolve_playlist_reference(&base, "720p/variant.m3u8").unwrap();
+        assert_eq!(resolved.as_str(), "https://cdn.example/live/720p/variant.m3u8");
+    }
+
+    #[test]
+    fn hls_root_relative_and_protocol_relative_references_resolve() {
+        let base = Url::parse("https://cdn.example/live/master.m3u8").unwrap();
+        assert_eq!(
+            resolve_playlist_reference(&base, "/segments/one.ts").unwrap().as_str(),
+            "https://cdn.example/segments/one.ts"
+        );
+        assert_eq!(
+            resolve_playlist_reference(&base, "//media.example/segment.ts").unwrap().as_str(),
+            "https://media.example/segment.ts"
+        );
+    }
+
+    #[test]
+    fn hls_query_only_reference_keeps_current_resource_path() {
+        let base = Url::parse("https://cdn.example/live/index.m3u8?token=old").unwrap();
+        let resolved = resolve_playlist_reference(&base, "?token=new").unwrap();
+        assert_eq!(resolved.as_str(), "https://cdn.example/live/index.m3u8?token=new");
+    }
+
+    #[test]
+    fn hls_references_reject_non_http_schemes_and_embedded_credentials() {
+        let base = Url::parse("https://cdn.example/live/master.m3u8").unwrap();
+        assert!(resolve_playlist_reference(&base, "javascript:alert(1)").is_err());
+        assert!(resolve_playlist_reference(&base, "data:text/plain,test").is_err());
+        assert!(resolve_playlist_reference(&base, "https://user:pass@cdn.example/segment.ts").is_err());
     }
 
     #[test]
