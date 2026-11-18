@@ -185,6 +185,18 @@ async function openExternal(url) {
 
 function isTorrentStream(stream) {
   const url = String(stream?.url ?? '').trim();
+  // O backend serve torrents por loopback. A fonte original pode manter infoHash/hash
+  // após a URL ser substituída pela URL local; nesse caso não devemos reabrir o torrent
+  // nem enviar o endpoint local ao proxy de mídia.
+  try {
+    const parsed = new URL(url);
+    const isLoopback = parsed.hostname === '127.0.0.1'
+      || parsed.hostname === 'localhost'
+      || parsed.hostname === '[::1]';
+    if (isLoopback && parsed.pathname.startsWith('/stream/')) return false;
+  } catch {
+    // URLs não absolutas continuam sendo avaliadas pelas regras abaixo.
+  }
   return url.startsWith('magnet:?') || Boolean(stream?.infoHash) || Boolean(stream?.hash);
 }
 
