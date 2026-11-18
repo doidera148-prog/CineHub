@@ -25,6 +25,7 @@ const SESSION_TTL: Duration = Duration::from_secs(4 * 60 * 60);
 struct Target {
     url: Url,
     headers: Vec<(header::HeaderName, HeaderValue)>,
+    force_hls: bool,
     expires: Instant,
 }
 
@@ -64,7 +65,7 @@ impl MediaProxy {
     }
 
     /// Registra uma URL validada e retorna uma URL local imprevisível.
-    pub async fn register(&self, raw_url: &str, hints: Option<&Value>) -> Result<String, String> {
+    pub async fn register(&self, raw_url: &str, hints: Option<&Value>, mime_type: Option<&str>) -> Result<String, String> {
         let url = Url::parse(raw_url.trim()).map_err(|_| "URL de mídia inválida".to_string())?;
         if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none()
             || !url.username().is_empty() || url.password().is_some() {
@@ -83,7 +84,9 @@ impl MediaProxy {
         if sessions.len() >= 128 {
             return Err("limite de sessões do proxy atingido".into());
         }
-        sessions.insert(token.clone(), Target { url, headers, expires: Instant::now() + SESSION_TTL });
+        let force_hls = mime_type.is_some_and(|m| m.to_ascii_lowercase().contains("mpegurl"))
+            || url.path().to_ascii_lowercase().ends_with(".m3u8");
+        sessions.insert(token.clone(), Target { url, headers, force_hls, expires: Instant::now() + SESSION_TTL });
         Ok(format!("http://{}:{}/media/{}", self.address.ip(), self.address.port(), token))
     }
 }
@@ -167,7 +170,7 @@ async fn proxy_request(
     if content_type.contains("application/dash+xml") || url.path().to_ascii_lowercase().ends_with(".mpd") {
         return Err((StatusCode::UNSUPPORTED_MEDIA_TYPE, "manifestos DASH ainda não são suportados pelo proxy seguro".into()));
     }
-    let is_hls = content_type.contains("mpegurl") || url.path().to_ascii_lowercase().ends_with(".m3u8");
+    let is_hls = target.force_hls || content_type.contains("mpegurl") || url.path().to_ascii_lowercase().ends_with(".m3u8");
     let mut builder = Response::builder().status(status);
     if is_hls && status.is_success() && method != Method::HEAD {
         // Limita durante a leitura: não usar bytes() aqui, pois poderia alocar uma resposta
@@ -266,6 +269,7 @@ async fn register_child(
     if sessions.len() >= 4096 {
         return Err((StatusCode::TOO_MANY_REQUESTS, "limite de recursos HLS atingido".into()));
     }
+    let force_hls = url.path().to_ascii_lowercase().ends_with(".m3u8");
     let child_headers = if url.origin() == base.origin() {
         headers.to_vec()
     } else {
@@ -275,6 +279,7 @@ async fn register_child(
     sessions.insert(token.clone(), Target {
         url,
         headers: child_headers,
+        force_hls,
         expires: Instant::now() + SESSION_TTL,
     });
     Ok(format!("/media/{token}"))
