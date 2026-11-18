@@ -5,7 +5,7 @@
 use std::{collections::HashMap, net::SocketAddr, str::FromStr, sync::Arc, time::{Duration, Instant}};
 
 use axum::{
-    body::Body,
+    body::{Body, Bytes},
     extract::{Path, State},
     http::{header, HeaderMap, HeaderValue, Method, StatusCode},
     response::Response,
@@ -169,13 +169,29 @@ async fn proxy_request(
     if content_type.contains("application/dash+xml") || url.path().to_ascii_lowercase().ends_with(".mpd") {
         return Err((StatusCode::UNSUPPORTED_MEDIA_TYPE, "manifestos DASH ainda não são suportados pelo proxy seguro".into()));
     }
-    let is_hls = target.force_hls || content_type.contains("mpegurl") || url.path().to_ascii_lowercase().ends_with(".m3u8");
+    let declared_hls = target.force_hls || content_type.contains("mpegurl") || url.path().to_ascii_lowercase().ends_with(".m3u8");
+    let mut upstream = upstream;
+    // Inspeciona um prefixo pequeno para detectar playlists HLS servidas sem extensão/MIME.
+    // O prefixo é preservado e reenviado intacto quando o recurso é mídia binária.
+    let mut prefix = Vec::new();
+    if !declared_hls && status.is_success() && method != Method::HEAD {
+        while prefix.len() < 10 {
+            let next = tokio::time::timeout(Duration::from_secs(45), upstream.chunk()).await
+                .map_err(|_| (StatusCode::GATEWAY_TIMEOUT, "timeout lendo mídia".into()))?
+                .map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))?;
+            let Some(chunk) = next else { break };
+            prefix.extend_from_slice(&chunk);
+        }
+    }
+    let is_hls = declared_hls || prefix.starts_with(b"#EXTM3U") || prefix.starts_with(b"\\xef\\xbb\\xbf#EXTM3U");
     let mut builder = Response::builder().status(status);
     if is_hls && status.is_success() && method != Method::HEAD {
         // Limita durante a leitura: não usar bytes() aqui, pois poderia alocar uma resposta
         // ilimitada antes de verificar o tamanho.
-        let mut upstream = upstream;
-        let mut bytes = Vec::new();
+        let mut bytes = prefix;
+        if bytes.len() > 4 * 1024 * 1024 {
+            return Err((StatusCode::PAYLOAD_TOO_LARGE, "playlist HLS excede 4 MiB".into()));
+        }
         loop {
             let next = tokio::time::timeout(Duration::from_secs(45), upstream.chunk()).await
                 .map_err(|_| (StatusCode::GATEWAY_TIMEOUT, "timeout lendo playlist HLS".into()))?
@@ -209,12 +225,16 @@ async fn proxy_request(
     let body = if method == Method::HEAD || status == StatusCode::NO_CONTENT {
         Body::empty()
     } else {
-        let chunks = stream::unfold(upstream, |mut resp| async move {
+        let pending = if prefix.is_empty() { None } else { Some(Bytes::from(prefix)) };
+        let chunks = stream::unfold((upstream, pending), |(mut resp, pending)| async move {
+            if let Some(first) = pending {
+                return Some((Ok::<_, std::io::Error>(first), (resp, None)));
+            }
             match tokio::time::timeout(Duration::from_secs(45), resp.chunk()).await {
-                Ok(Ok(Some(bytes))) => Some((Ok::<_, std::io::Error>(bytes), resp)),
+                Ok(Ok(Some(bytes))) => Some((Ok(bytes), (resp, None))),
                 Ok(Ok(None)) => None,
-                Ok(Err(e)) => Some((Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())), resp)),
-                Err(_) => Some((Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "timeout lendo mídia")), resp)),
+                Ok(Err(e)) => Some((Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())), (resp, None))),
+                Err(_) => Some((Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "timeout lendo mídia")), (resp, None))),
             }
         });
         Body::from_stream(chunks)
