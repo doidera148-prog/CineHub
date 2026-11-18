@@ -39,11 +39,11 @@ body.tv-mode {
   flex-direction: column;
   justify-content: flex-start;
   align-items: stretch;
-  gap: 12px;
+  gap: 8px;
   overflow: visible;
 }
 .tv-mode #nav-main a {
-  min-height: 76px;
+  min-height: 72px;
   padding: 10px 4px;
   display: flex;
   flex-direction: column;
@@ -52,7 +52,7 @@ body.tv-mode {
   gap: 6px;
   border-radius: 16px;
   color: #a6a6ad;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 650;
   text-align: center;
   white-space: normal;
@@ -60,7 +60,7 @@ body.tv-mode {
 }
 .tv-mode #nav-main .ico {
   display: block;
-  font-size: 27px;
+  font-size: 29px;
   line-height: 1;
 }
 .tv-mode #nav-main .lbl { display: block; }
@@ -196,6 +196,16 @@ body.tv-mode {
   .tv-mode .sidebar { padding-inline: 8px; }
   .tv-mode #nav-main a { min-height: 68px; }
 }
+
+/* Menus compactos em TVs 720p e janelas baixas: todos os destinos continuam visíveis. */
+@media (max-height: 800px) {
+  .tv-mode .sidebar { padding-block: 18px; gap: 18px; }
+  .tv-mode .logo { font-size: 1.45rem; }
+  .tv-mode #nav-main { gap: 4px; }
+  .tv-mode #nav-main a { min-height: 58px; padding-block: 6px; gap: 3px; font-size: 12px; }
+  .tv-mode #nav-main .ico { font-size: 24px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tv-mode .card, .tv-mode #nav-main a { transition: none; }
 }
