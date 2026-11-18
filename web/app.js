@@ -787,7 +787,7 @@ async function addonsPage() {
       <button type="button" class="chip" data-addon-tab="installed" role="tab" aria-selected="false">Instalados</button>
     </div>
     <section id="community-panel" class="addon-panel" role="tabpanel">
-      <p class="muted small">Catálogo selecionado e mantido pelo CineHub. São addons independentes de terceiros; confira a descrição e instale apenas serviços em que confia.</p>
+      <div class="community-status-bar"><p class="muted small">Catálogo selecionado e mantido pelo CineHub. São addons independentes de terceiros; confira a descrição e instale apenas serviços em que confia.</p><button id="check-community" type="button" class="chip small">Verificar disponibilidade</button></div>
       <div class="community-tools">
         <input id="community-search" type="search" placeholder="Buscar addons…" aria-label="Buscar addons da comunidade" autocomplete="off">
         <div class="community-filters" role="group" aria-label="Filtrar addons">
@@ -818,6 +818,7 @@ async function addonsPage() {
   const communityPanel = $('#community-panel'), installedPanel = $('#installed-panel');
   const communityList = $('#community-list'), installedList = $('#al');
   let activeFilter = 'all', installed = [];
+  const addonHealth = new Map();
   const installedFor = (addon) => installed.some((entry) => entry.manifest?.id === addon.id || entry.transportUrl === addon.url);
 
   const renderCommunity = () => {
@@ -835,6 +836,7 @@ async function addonsPage() {
           <div><h3>${esc(addon.name)}</h3><span class="muted small">v${esc(addon.version)}</span></div>
         </div>
         <p>${esc(addon.description)}</p>
+        <p class="addon-health muted small" data-community-status="${esc(addon.id)}" role="status">${esc(addonHealth.get(addon.id)?.label || 'Não verificado')}</p>
         <div class="community-tags">${addon.tags.map((tag) => `<span>${esc(tag)}</span>`).join('')}</div>
         <button type="button" class="community-install${done ? ' installed' : ''}" data-community-install="${esc(addon.id)}" ${done ? 'disabled' : ''}>${done ? '✓ Instalado' : '＋ Instalar'}</button>
       </article>`;
@@ -880,7 +882,46 @@ async function addonsPage() {
       renderCommunity();
     };
   });
+  async function checkCommunityAddons() {
+    const checkButton = $('#check-community');
+    if (checkButton) { checkButton.disabled = true; checkButton.textContent = 'Verificando…'; }
+    const queue = [...COMMUNITY_ADDONS];
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < queue.length) {
+        const addon = queue[cursor++];
+        addonHealth.set(addon.id, { state: 'checking', label: 'Verificando disponibilidade…' });
+        const status = communityList.querySelector(`[data-community-status="${CSS.escape(addon.id)}"]`);
+        if (status) status.textContent = 'Verificando disponibilidade…';
+        try {
+          const result = await call('check_addon_manifest', {
+            url: addon.url, expectedId: addon.id, expectedVersion: addon.version,
+          });
+          const label = result.versionMatches
+            ? `Disponível · v${result.version}`
+            : `Disponível · versão publicada v${result.version} (catálogo v${addon.version})`;
+          addonHealth.set(addon.id, { state: result.versionMatches ? 'ok' : 'version-differs', label });
+        } catch (error) {
+          const label = `Indisponível · ${String(error.message || error).slice(0, 140)}`;
+          addonHealth.set(addon.id, { state: 'error', label });
+        }
+        const current = communityList.querySelector(`[data-community-status="${CSS.escape(addon.id)}"]`);
+        if (current) {
+          current.textContent = addonHealth.get(addon.id).label;
+          current.dataset.state = addonHealth.get(addon.id).state;
+        }
+      }
+    };
+    try {
+      await Promise.all(Array.from({ length: Math.min(3, queue.length) }, worker));
+      toast('Verificação dos addons concluída.');
+    } finally {
+      if (checkButton) { checkButton.disabled = false; checkButton.textContent = 'Verificar novamente'; }
+    }
+  }
+
   $('#community-search').addEventListener('input', renderCommunity);
+  $('#check-community').onclick = checkCommunityAddons;
   communityList.addEventListener('click', async (event) => {
     const button = event.target.closest('[data-community-install]');
     if (!button || button.disabled) return;
