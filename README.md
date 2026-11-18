@@ -49,6 +49,8 @@ Aplicativo de mídia multiplataforma, escrito em Rust + Tauri 2, com interface e
 
 ## Arquitetura e estrutura
 
+Para uma visão dos fluxos internos, limites e responsabilidades dos módulos, consulte [docs/architecture.md](docs/architecture.md).
+
 ```
 web/
   index.html                 estrutura da interface
