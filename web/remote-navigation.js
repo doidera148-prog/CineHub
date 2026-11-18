@@ -64,17 +64,35 @@
     return true;
   }
 
-  // Ao abrir o player, leva o foco para dentro; ao fechar, devolve ao item que o abriu.
+  // O player é um diálogo modal: mantém o foco dentro dele e devolve ao acionador ao fechar.
   const player = document.querySelector('#player');
-  if (player) new MutationObserver(() => {
-    if (!player.classList.contains('hidden')) {
-      if (!player.contains(document.activeElement)) focusBeforePlayer = document.activeElement;
-      if (remoteMode) requestAnimationFrame(() => focus(player.querySelector('#close-player') || player.querySelector('button')));
-    } else if (focusBeforePlayer?.isConnected && remoteMode) {
-      requestAnimationFrame(() => focus(focusBeforePlayer));
-      focusBeforePlayer = null;
-    }
-  }).observe(player, { attributes: true, attributeFilter: ['class'] });
+  if (player) {
+    new MutationObserver(() => {
+      if (!player.classList.contains('hidden')) {
+        if (!player.contains(document.activeElement)) focusBeforePlayer = document.activeElement;
+        requestAnimationFrame(() => focus(player.querySelector('#close-player') || player.querySelector('button')));
+      } else if (focusBeforePlayer?.isConnected) {
+        const previous = focusBeforePlayer;
+        focusBeforePlayer = null;
+        requestAnimationFrame(() => focus(previous));
+      }
+    }).observe(player, { attributes: true, attributeFilter: ['class'] });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Tab' || !playerOpen()) return;
+      const items = visibleFocusables(player);
+      if (!items.length) {
+        event.preventDefault();
+        focus(player.querySelector('#close-player'));
+        return;
+      }
+      const first = items[0], last = items[items.length - 1], active = document.activeElement;
+      if (!player.contains(active) || (event.shiftKey && active === first) || (!event.shiftKey && active === last)) {
+        event.preventDefault();
+        focus(event.shiftKey && player.contains(active) ? last : first);
+      }
+    }, true);
+  }
 
   document.addEventListener('keydown', (event) => {
     if (!playerOpen() || event.altKey || event.ctrlKey || event.metaKey || isTextEntry(document.activeElement)) return;
