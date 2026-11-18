@@ -1782,9 +1782,10 @@ async function play(stream, label, id, meta, subs) {
     }
   }
   const segments = await skipSegmentsFor(id, meta);
-  // MKV não é suportado de forma consistente pelo WebView2: no Windows usa libmpv como fallback.
-  // MP4/WebM continuam no player integrado WebView2; Android continua no ExoPlayer.
-  if (IS_WINDOWS && isMkvStream(stream) && await playNative(stream, label, id, meta, subs, segments)) return;
+  // No Windows, libmpv é o player principal para todos os formatos de mídia:
+  // vídeo, áudio, contêineres e protocolos suportados pelo próprio mpv.
+  // Não restringir por extensão: URLs sem extensão e streams também são válidos.
+  if (IS_WINDOWS && await playNative(stream, label, id, meta, subs, segments)) return;
   if (!IS_WINDOWS && await playNative(stream, label, id, meta, subs, segments)) return;
 
   saveProgress(true);
