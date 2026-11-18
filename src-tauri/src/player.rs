@@ -19,6 +19,20 @@ pub struct PlayerCutout {
     pub height: u32,
 }
 
+/// Recorta retângulos de controle aos limites da caixa do vídeo, evitando
+/// regiões Win32 negativas, vazias ou fora da superfície nativa.
+fn clipped_cutouts(width: u32, height: u32, cutouts: &[PlayerCutout]) -> Vec<(i32, i32, i32, i32)> {
+    let max_x = width.min(i32::MAX as u32) as i32;
+    let max_y = height.min(i32::MAX as u32) as i32;
+    cutouts.iter().filter_map(|cutout| {
+        let left = cutout.x.clamp(0, max_x);
+        let top = cutout.y.clamp(0, max_y);
+        let right = cutout.x.saturating_add(cutout.width.min(i32::MAX as u32) as i32).clamp(0, max_x);
+        let bottom = cutout.y.saturating_add(cutout.height.min(i32::MAX as u32) as i32).clamp(0, max_y);
+        (right > left && bottom > top).then_some((left, top, right, bottom))
+    }).collect()
+}
+
 #[tauri::command]
 pub fn player_set_geometry(x: i32, y: i32, width: u32, height: u32, cutouts: Vec<PlayerCutout>) -> bool {
     #[cfg(all(windows, feature = "mpv"))]
@@ -378,13 +392,8 @@ mod win {
             let bottom_edge = y.saturating_add(height.min(i32::MAX as u32) as i32);
             let region = CreateRectRgn(x, y, right_edge, bottom_edge);
             if region.is_null() { return false; }
-            for cutout in cutouts {
-                let left = x.saturating_add(cutout.x).max(x);
-                let top = y.saturating_add(cutout.y).max(y);
-                let right = left.saturating_add(cutout.width.min(i32::MAX as u32) as i32).min(right_edge);
-                let bottom = top.saturating_add(cutout.height.min(i32::MAX as u32) as i32).min(bottom_edge);
-                if right <= left || bottom <= top { continue; }
-                let hole = CreateRectRgn(left, top, right, bottom);
+            for (left, top, right, bottom) in super::clipped_cutouts(width, height, cutouts) {
+                let hole = CreateRectRgn(x + left, y + top, x + right, y + bottom);
                 if !hole.is_null() {
                     CombineRgn(region, region, hole, RGN_DIFF);
                     DeleteObject(hole);
@@ -440,6 +449,20 @@ mod tests {
             result.is_ok(),
             "libmpv rejeitou as opções do OSC: {:?}",
             result.err()
+        );
+    }
+
+    #[test]
+    fn player_cutouts_are_clipped_to_the_video_box() {
+        let cuts = [
+            super::PlayerCutout { x: -10, y: 5, width: 30, height: 20 },
+            super::PlayerCutout { x: 90, y: 90, width: 30, height: 30 },
+            super::PlayerCutout { x: 110, y: 10, width: 5, height: 5 },
+            super::PlayerCutout { x: 10, y: 10, width: 0, height: 20 },
+        ];
+        assert_eq!(
+            super::clipped_cutouts(100, 100, &cuts),
+            vec![(0, 5, 20, 25), (90, 90, 100, 100)]
         );
     }
 
