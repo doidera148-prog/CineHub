@@ -200,14 +200,36 @@ function magnetFromInfoHash(hash, name = 'CineHub') {
   return `magnet:?xt=urn:btih:${clean}&dn=${encodeURIComponent(name)}`;
 }
 
+const closingTorrentTokens = new Map();
+
 async function closeTorrentToken(token) {
-  if (!token) return;
-  // Não apaga o token de uma sessão mais nova aberta enquanto esta era encerrada.
-  if (activeTorrentToken === token) activeTorrentToken = null;
+  if (!token) return false;
+  // Reutiliza a mesma operação se vários eventos tentarem fechar a sessão ao mesmo tempo.
+  const existing = closingTorrentTokens.get(token);
+  if (existing) return existing;
+
+  const closing = (async () => {
+    let lastError = null;
+    // Falhas transitórias de IPC/engine não devem descartar o único token capaz de fechar a sessão.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await call('torrent_close', { token });
+        if (activeTorrentToken === token) activeTorrentToken = null;
+        return true;
+      } catch (err) {
+        lastError = err;
+        if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+      }
+    }
+    logEvent('WARN', `encerrar torrent falhou após 3 tentativas: ${lastError?.message || String(lastError)}`);
+    return false;
+  })();
+
+  closingTorrentTokens.set(token, closing);
   try {
-    await call('torrent_close', { token });
-  } catch (err) {
-    logEvent('WARN', `encerrar torrent falhou: ${err.message || String(err)}`);
+    return await closing;
+  } finally {
+    if (closingTorrentTokens.get(token) === closing) closingTorrentTokens.delete(token);
   }
 }
 
