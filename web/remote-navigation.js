@@ -1,270 +1,314 @@
-// Navegação por setas/OK/Voltar e atalhos de reprodução em teclado e controles remotos.
+// Navegação D-pad unificada para Android TV, controles remotos e teclado.
 (() => {
-  const SELECTOR = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [role="button"], [tabindex]:not([tabindex="-1"])';
-  const DIRS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', DpadUp: 'up', DpadDown: 'down', DpadLeft: 'left', DpadRight: 'right' };
-  // Alguns controles TCL/Android TV entregam o DPAD apenas por keyCode.
-  const KEYCODE_DIRS = { 19: 'up', 20: 'down', 21: 'left', 22: 'right' };
-  const directionOf = (event) => DIRS[event.key] || KEYCODE_DIRS[event.keyCode] || null;
-  const GROUPS = '.strip, .episodes, .seasons, #streams, #nav-main, .dataactions, .kodi-results, #kodi-listing, .dialog-actions, .tp-list';
-  let remoteMode = false;
-  let focusBeforePlayer = null;
+  'use strict';
 
-  function playerOpen() { return Boolean(document.querySelector('#player:not(.hidden)')); }
-  function visibleFocusables(root = document) {
-    return [...root.querySelectorAll(SELECTOR)].filter((el) => {
-      if (el.closest('.hidden, [aria-hidden="true"], [inert]') || el.getAttribute('aria-hidden') === 'true' ||
-          el.getAttribute('aria-disabled') === 'true' || el.tabIndex < 0 || el.disabled) return false;
-      const rect = el.getBoundingClientRect();
-      const style = getComputedStyle(el);
-      const opacity = Number.parseFloat(style.opacity || '1');
-      // Slides inativos e elementos transparentes não podem receber foco via DPAD.
-      if (el.closest('.billboard-slide:not(.is-active), [aria-hidden="true"], [inert]')) return false;
-      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' &&
-        style.display !== 'none' && opacity > 0.05;
-    });
+  const FOCUSABLE = [
+    'a[href]', 'button:not(:disabled)', 'input:not(:disabled)', 'select:not(:disabled)',
+    'textarea:not(:disabled)', 'summary', '[role="button"]', '[tabindex]:not([tabindex="-1"])',
+    '[contenteditable="true"]'
+  ].join(',');
+  const DIRECTIONS = {
+    ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+    DpadUp: 'up', DpadDown: 'down', DpadLeft: 'left', DpadRight: 'right'
+  };
+  const KEYCODE_DIRECTIONS = { 19: 'up', 20: 'down', 21: 'left', 22: 'right' };
+  const GROUPS = '.strip, .episodes, .seasons, #streams, #nav-main, .dataactions, .kodi-results, #kodi-listing, .dialog-actions, .tp-list';
+  const TEXT_INPUT_TYPES = new Set(['button', 'checkbox', 'radio', 'file', 'range', 'submit', 'reset', 'color']);
+  let remoteMode = false;
+  let lastMainFocus = null;
+  let focusBeforeModal = null;
+  let lastBackAt = 0;
+
+  const directionOf = (event) => DIRECTIONS[event.key] || KEYCODE_DIRECTIONS[event.keyCode] || null;
+  const isOk = (event) =>
+    ['Enter', ' ', 'OK', 'Select', 'Accept', 'DPAD_CENTER', 'NumpadEnter'].includes(event.key) ||
+    event.keyCode === 23 || event.keyCode === 66;
+  const isTextEntry = (el) =>
+    el instanceof HTMLTextAreaElement ||
+    (el instanceof HTMLInputElement && !TEXT_INPUT_TYPES.has(el.type)) ||
+    Boolean(el?.isContentEditable);
+
+  function isVisible(el) {
+    if (!el?.isConnected || el.disabled || el.getAttribute('aria-disabled') === 'true' ||
+        el.getAttribute('aria-hidden') === 'true' || el.tabIndex < 0 ||
+        el.closest('.hidden, [hidden], [inert], [aria-hidden="true"], dialog:not([open])')) return false;
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) return false;
+    for (let node = el; node && node.nodeType === 1; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (style.display === 'none' || style.visibility === 'hidden' ||
+          Number.parseFloat(style.opacity || '1') <= 0.05) return false;
+    }
+    return true;
   }
-  function isTextEntry(el) {
-    return el instanceof HTMLTextAreaElement ||
-      (el instanceof HTMLInputElement && !['button', 'checkbox', 'radio', 'file', 'range'].includes(el.type));
+
+  function focusables(root = document) {
+    if (!root) return [];
+    return [...root.querySelectorAll(FOCUSABLE)].filter(isVisible);
   }
-  function focus(el) {
-    if (!el) return false;
+
+  function focusElement(el) {
+    if (!isVisible(el)) return false;
     try { el.focus({ preventScroll: true }); } catch { el.focus(); }
-    // O navegador rola tanto a página quanto os trilhos horizontais sem saltos desnecessários.
+    if (document.activeElement !== el) return false;
     el.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'auto' });
-    return document.activeElement === el;
+    if (el.closest('.sidebar')) {
+      // O menu pode ter seu próprio scroll em layouts compactos.
+      el.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'auto' });
+    } else if (!el.closest('dialog[open]') && !el.closest('#player')) {
+      lastMainFocus = el;
+    }
+    return true;
   }
-  function nearest(from, candidates, direction) {
-    const a = from.getBoundingClientRect();
+
+  function rectOf(el) {
+    const r = el.getBoundingClientRect();
+    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom,
+      x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }
+
+  function overlaps(aStart, aEnd, bStart, bEnd) {
+    return Math.min(aEnd, bEnd) - Math.max(aStart, bStart) > 0;
+  }
+
+  // Escolhe primeiro elementos alinhados no eixo perpendicular; só depois aceita diagonais.
+  function nearest(from, candidates, direction, { alignedOnly = false } = {}) {
+    if (!from) return null;
+    const a = rectOf(from);
     const horizontal = direction === 'left' || direction === 'right';
-    const aMainStart = horizontal ? a.left : a.top;
-    const aMainEnd = horizontal ? a.right : a.bottom;
-    const aCrossStart = horizontal ? a.top : a.left;
-    const aCrossEnd = horizontal ? a.bottom : a.right;
-    let best = null, bestScore = Infinity;
+    let best = null;
+    let bestScore = Infinity;
     for (const el of candidates) {
-      if (el === from || !el.isConnected) continue;
-      const b = el.getBoundingClientRect();
-      const bMainStart = horizontal ? b.left : b.top;
-      const bMainEnd = horizontal ? b.right : b.bottom;
-      const bCrossStart = horizontal ? b.top : b.left;
-      const bCrossEnd = horizontal ? b.bottom : b.right;
-      // Considera a posição das bordas, não apenas o centro: evita saltos
-      // diagonais quando há cards/botões de tamanhos diferentes.
-      const ahead = direction === 'right' ? bMainStart >= aMainEnd - 2 :
-        direction === 'left' ? bMainEnd <= aMainStart + 2 :
-        direction === 'down' ? bMainStart >= aMainEnd - 2 :
-        bMainEnd <= aMainStart + 2;
-      if (!ahead) continue;
-      const crossGap = Math.max(0, bCrossStart - aCrossEnd, aCrossStart - bCrossEnd);
-      const mainGap = Math.max(0, bMainStart - aMainEnd, aMainStart - bMainEnd);
-      const crossOverlap = crossGap === 0;
-      // Primeiro prioriza o avanço na direção pressionada; depois a proximidade
-      // lateral. A penalidade diagonal é moderada para não saltar para uma coluna
-      // distante só porque ela compartilha alguns pixels do eixo perpendicular.
-      const crossCenterDelta = Math.abs(((bCrossStart + bCrossEnd) - (aCrossStart + aCrossEnd)) / 2);
-      const score = mainGap * 4 + crossGap * 2 + crossCenterDelta * 0.35 -
-        (crossOverlap ? Math.min(aCrossEnd - aCrossStart, bCrossEnd - bCrossStart) * 0.08 : 0);
+      if (el === from || !isVisible(el)) continue;
+      const b = rectOf(el);
+      const delta = horizontal ? b.x - a.x : b.y - a.y;
+      if ((direction === 'right' || direction === 'down') ? delta <= 3 : delta >= -3) continue;
+      const overlap = horizontal
+        ? overlaps(a.top, a.bottom, b.top, b.bottom)
+        : overlaps(a.left, a.right, b.left, b.right);
+      if (alignedOnly && !overlap) continue;
+      const primary = Math.abs(delta);
+      const cross = horizontal ? Math.abs(b.y - a.y) : Math.abs(b.x - a.x);
+      const score = primary + cross * (overlap ? 1.8 : 3.2) + (overlap ? 0 : 90);
       if (score < bestScore) { best = el; bestScore = score; }
     }
     return best;
   }
-  function isOk(event) {
-    return ['OK', 'Select', 'Accept', 'DPAD_CENTER', 'NumpadEnter'].includes(event.key) || event.keyCode === 23 || event.keyCode === 66;
+
+  function activeModal() {
+    const dialog = document.querySelector('dialog[open]');
+    if (dialog) return dialog;
+    const player = document.querySelector('#player:not(.hidden)');
+    return player || null;
   }
+
+  function activeRegion(current) {
+    const modal = activeModal();
+    if (modal) return modal;
+    if (current?.closest('.sidebar')) return document.querySelector('.sidebar');
+    return document.querySelector('#main-content') || document.querySelector('#view') || document;
+  }
+
   function announce(message) {
     const toast = document.querySelector('#toast');
     if (!toast) return;
     toast.textContent = message;
     toast.classList.remove('hidden');
     clearTimeout(announce.timer);
-    announce.timer = setTimeout(() => toast.classList.add('hidden'), 1300);
-  }
-  function seekVideo(seconds) {
-    const video = document.querySelector('#video');
-    if (!video || !Number.isFinite(video.duration)) return false;
-    const target = Math.max(0, Math.min(video.duration, (video.currentTime || 0) + seconds));
-    video.currentTime = target;
-    announce(`${seconds > 0 ? 'Avançando' : 'Voltando'} ${Math.abs(seconds)} segundos`);
-    return true;
+    announce.timer = setTimeout(() => toast.classList.add('hidden'), 1400);
   }
 
-  // O player é um diálogo modal: mantém o foco dentro dele e devolve ao acionador ao fechar.
-  const player = document.querySelector('#player');
-  if (player) {
-    new MutationObserver(() => {
-      if (!player.classList.contains('hidden')) {
-        if (!player.contains(document.activeElement)) focusBeforePlayer = document.activeElement;
-        requestAnimationFrame(() => focus(player.querySelector('#close-player') || player.querySelector('button')));
-      } else if (focusBeforePlayer?.isConnected) {
-        const previous = focusBeforePlayer;
-        focusBeforePlayer = null;
-        requestAnimationFrame(() => focus(previous));
-      }
-    }).observe(player, { attributes: true, attributeFilter: ['class'] });
-
-    document.addEventListener('keydown', (event) => {
-      if (event.key !== 'Tab' || !playerOpen()) return;
-      const items = visibleFocusables(player);
-      if (!items.length) {
-        event.preventDefault();
-        focus(player.querySelector('#close-player'));
-        return;
-      }
-      const first = items[0], last = items[items.length - 1], active = document.activeElement;
-      if (!player.contains(active) || (event.shiftKey && active === first) || (!event.shiftKey && active === last)) {
-        event.preventDefault();
-        focus(event.shiftKey && player.contains(active) ? last : first);
-      }
-    }, true);
-  }
-
-  document.addEventListener('keydown', (event) => {
-    if (!playerOpen() || event.altKey || event.ctrlKey || event.metaKey || isTextEntry(document.activeElement)) return;
-    const video = document.querySelector('#video');
-    const focused = document.activeElement;
-    const onVideo = focused === video || focused?.closest?.('.video-js');
-    if (event.key === ' ' || event.key.toLowerCase() === 'k' || ['MediaPlayPause', 'Play', 'Pause'].includes(event.key)) {
-      if (focused.matches?.('button, input, select')) return;
-      event.preventDefault();
-      if (video?.paused) video.play?.().catch?.(() => {}); else video?.pause?.();
-      return;
-    }
-    if (!onVideo) return;
-    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-      event.preventDefault();
-      seekVideo(event.key === 'ArrowRight' ? 10 : -10);
-    } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
-      event.preventDefault();
-      if (video) video.volume = Math.max(0, Math.min(1, video.volume + (event.key === 'ArrowUp' ? 0.1 : -0.1)));
-      announce(`Volume ${Math.round((video?.volume || 0) * 100)}%`);
-    } else if (event.key.toLowerCase() === 'm') {
-      event.preventDefault();
-      if (video) video.muted = !video.muted;
-      announce(video?.muted ? 'Sem áudio' : 'Áudio ativado');
-    }
-  }, true);
-
-  // OK no campo de busca abre o teclado virtual; Enter/ação de pesquisa
-  // confirma o formulário e tira o foco para fechar o IME do Android TV.
-  document.addEventListener('keydown', (event) => {
-    const target = document.activeElement;
-    if (!isTextEntry(target) || event.altKey || event.ctrlKey || event.metaKey) return;
-    const isImeSubmit = event.key === 'Enter' || event.key === 'Search' ||
-      event.key === 'Go' || event.key === 'Done' || event.keyCode === 66;
-    if (isImeSubmit) {
-      event.preventDefault();
-      if (target.form) target.form.requestSubmit();
-      target.blur();
-      return;
-    }
-    if (target.id === 'q' && isOk(event)) {
-      event.preventDefault();
-      target.click();
-    }
-  }, true);
-
-  document.addEventListener('keydown', (event) => {
-    if (!isOk(event) || event.altKey || event.ctrlKey || event.metaKey || document.querySelector('#confirm[open]')) return;
-    const target = document.activeElement;
-    if (!target || target === document.body || isTextEntry(target)) return;
-    if (target.matches('a[href], button:not([disabled]), summary, [role="button"]')) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      target.click();
-    }
-  }, true);
-
-  document.addEventListener('keydown', (event) => {
-    const direction = directionOf(event);
-    if (!direction || event.altKey || event.ctrlKey || event.metaKey || document.querySelector('#confirm[open]')) return;
-    if (playerOpen()) return;
+  function handleDirection(event, direction) {
     const current = document.activeElement;
-    // Em diálogos (como a escolha de episódio do torrent), nunca navega para trás da janela.
-    const activeDialog = document.querySelector('dialog[open]');
-    if (current?.matches?.('select, input[type="range"]')) return;
-    if (isTextEntry(current) && (direction === 'left' || direction === 'right')) return;
-    // A navegação é isolada por região: uma seta pressionada no conteúdo nunca
-    // pode atravessar para a barra lateral. Diálogos também permanecem confinados.
-    const region = activeDialog
-      ? activeDialog
-      : current?.closest?.('.sidebar')
-        ? document.querySelector('.sidebar')
-        : document.querySelector('#main-content') || document.querySelector('#view') || document;
-    const items = visibleFocusables(region);
+    if (isTextEntry(current)) {
+      // Não rouba as setas horizontais do cursor nem as setas do seletor nativo.
+      if (direction === 'left' || direction === 'right' ||
+          current instanceof HTMLSelectElement || current.type === 'range') return;
+    }
+    if (current?.matches('input[type="range"], select')) return;
+
+    const modal = activeModal();
+    const region = activeRegion(current);
+    const items = focusables(region);
     if (!items.length) return;
+
     event.preventDefault();
     event.stopImmediatePropagation();
     remoteMode = true;
+
     if (!items.includes(current)) {
       const preferred = region.matches?.('.sidebar')
-        ? items[0]
+        ? items.find((el) => el.matches('[aria-current="page"], .active')) || items[0]
         : items.find((el) => el.closest('#view')) || items.find((el) => el.closest('.topbar')) || items[0];
-      focus(preferred);
+      focusElement(preferred);
       return;
     }
+
+    if (region.matches?.('.sidebar')) {
+      if (direction === 'up' || direction === 'down') {
+        const next = nearest(current, items, direction);
+        if (next) focusElement(next);
+      } else if (direction === 'right') {
+        const target = isVisible(lastMainFocus) && document.querySelector('#main-content')?.contains(lastMainFocus)
+          ? lastMainFocus
+          : focusables(document.querySelector('#main-content'))[0];
+        if (target) focusElement(target);
+      }
+      return;
+    }
+
     const group = current.closest(GROUPS);
-    // A lista de arquivos do torrent é uma lista vertical: navegação por índice evita
-    // que o cálculo geométrico pule itens quando os nomes têm comprimentos diferentes.
-    if (group?.matches('.tp-list') && (direction === 'up' || direction === 'down')) {
-      const entries = visibleFocusables(group);
-      const index = entries.indexOf(current);
-      const nextIndex = index < 0 ? 0 : Math.max(0, Math.min(entries.length - 1, index + (direction === 'down' ? 1 : -1)));
-      if (entries[nextIndex]) focus(entries[nextIndex]);
+    if (group && region.contains(group)) {
+      const localItems = focusables(group);
+      if (group.matches('.tp-list') && (direction === 'up' || direction === 'down')) {
+        const index = localItems.indexOf(current);
+        const nextIndex = index + (direction === 'down' ? 1 : -1);
+        if (localItems[nextIndex]) focusElement(localItems[nextIndex]);
+        return;
+      }
+
+      const localNext = nearest(current, localItems, direction, {
+        alignedOnly: group.matches('.strip, #nav-main')
+      });
+      if (localNext) {
+        focusElement(localNext);
+        return;
+      }
+    }
+
+    // O cálculo global nunca inclui a sidebar. Assim, cima/baixo e movimentos
+    // a partir de colunas internas não escapam para o menu.
+    const mainItems = modal ? items : focusables(document.querySelector('#main-content'));
+    const next = nearest(current, mainItems, direction,
+      { alignedOnly: direction === 'left' || direction === 'right' });
+    if (next) {
+      focusElement(next);
       return;
     }
-    if (group && (direction === 'left' || direction === 'right')) {
-      const localNext = nearest(current, visibleFocusables(group), direction);
-      // Não faz loop infinito no trilho: na ponta, a seta sai do grupo e alcança o menu,
-      // a busca ou o próximo bloco. Esse era o principal motivo de o controle ficar preso.
-      // Na borda esquerda dos trilhos de conteúdo, permite voltar ao menu lateral.
-      // Essa exceção é somente horizontal: cima/baixo continuam confinados ao conteúdo,
-      // evitando que o DPAD desça para a sidebar ao navegar pelos cards.
-      const boundaryItems = direction === 'left' && !activeDialog
-        ? [...items, ...visibleFocusables(document.querySelector('.sidebar'))]
-        : items;
-      const outside = localNext ? null : nearest(current, boundaryItems.filter((el) => !group.contains(el)), direction);
-      if (localNext || outside) focus(localNext || outside);
+
+    // Só entra no menu ao pressionar ESQUERDA quando não existe outro elemento
+    // de conteúdo alinhado à esquerda: isto equivale à primeira coluna da linha/trilho.
+    if (!modal && direction === 'left') {
+      const sidebarItems = focusables(document.querySelector('.sidebar'));
+      const nav = document.querySelector('#nav-main');
+      const active = nav?.querySelector('[aria-current="page"], .active');
+      const target = active && sidebarItems.includes(active) ? active : sidebarItems[0];
+      if (target) focusElement(target);
+    }
+  }
+
+  // Modais prendem o foco e devolvem-no ao elemento que os abriu.
+  const observer = new MutationObserver(() => {
+    const modal = activeModal();
+    if (modal) {
+      if (!modal.contains(document.activeElement)) {
+        if (!focusBeforeModal || !modal.contains(focusBeforeModal)) focusBeforeModal = document.activeElement;
+        requestAnimationFrame(() => {
+          const first = modal.querySelector('#close-player, .tp-item, button:not(:disabled), [href], input:not(:disabled)');
+          if (first && isVisible(first)) focusElement(first);
+        });
+      }
+    } else if (focusBeforeModal?.isConnected) {
+      const previous = focusBeforeModal;
+      focusBeforeModal = null;
+      requestAnimationFrame(() => focusElement(previous));
+    }
+  });
+  observer.observe(document.body, { subtree: true, childList: true, attributes: true,
+    attributeFilter: ['class', 'open', 'hidden', 'disabled', 'aria-hidden'] });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    const direction = directionOf(event);
+    if (direction) {
+      if (document.querySelector('#confirm[open]') && !activeModal()) return;
+      handleDirection(event, direction);
       return;
     }
-    const next = nearest(current, items, direction);
-    if (next) focus(next);
+
+    if (isOk(event)) {
+      const current = document.activeElement;
+      if (!current || current === document.body || isTextEntry(current) ||
+          current.matches('select, input[type="range"], video')) return;
+      if (current.matches('a[href], button:not(:disabled), summary, [role="button"], [tabindex]:not([tabindex="-1"])')) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        current.click();
+      }
+      return;
+    }
+
+    if (event.key === 'Tab') {
+      const modal = activeModal();
+      if (!modal) return;
+      const items = focusables(modal);
+      if (!items.length) { event.preventDefault(); return; }
+      const first = items[0], last = items[items.length - 1], current = document.activeElement;
+      if (!modal.contains(current) || (event.shiftKey && current === first) || (!event.shiftKey && current === last)) {
+        event.preventDefault();
+        focusElement(event.shiftKey && modal.contains(current) ? last : first);
+      }
+    }
+  }, true);
+
+  // Campos de texto: Enter envia uma vez e fecha o teclado virtual; esquerda/direita
+  // continuam sendo edição do texto. Escape/Voltar primeiro dispensam o IME.
+  document.addEventListener('keydown', (event) => {
+    const target = document.activeElement;
+    if (!isTextEntry(target) || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (['Enter', 'Search', 'Go', 'Done'].includes(event.key) || event.keyCode === 66) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (target.form) target.form.requestSubmit();
+      else if (target.id === 'q') target.dispatchEvent(new Event('change', { bubbles: true }));
+      target.blur();
+    }
   }, true);
 
   document.addEventListener('keydown', (event) => {
-    if (!['Escape', 'Backspace', 'BrowserBack', 'GoBack'].includes(event.key)) return;
-    // Em Android TV, Voltar primeiro fecha o teclado virtual da busca, sem sair da tela.
-    if (['Escape', 'BrowserBack', 'GoBack'].includes(event.key) && isTextEntry(document.activeElement)) {
+    if (!['Escape', 'Backspace', 'BrowserBack', 'GoBack'].includes(event.key) && event.keyCode !== 4) return;
+    const target = document.activeElement;
+    if (isTextEntry(target) && (event.key !== 'Backspace' || !target.value)) {
       event.preventDefault();
-      document.activeElement.blur();
+      target.blur();
       return;
     }
-    if (event.key === 'Backspace' && isTextEntry(document.activeElement)) return;
-    const dialog = document.querySelector('#confirm[open]');
-    if (dialog) { event.preventDefault(); dialog.querySelector('[value="cancel"]')?.click(); return; }
-    if (playerOpen()) { event.preventDefault(); document.querySelector('#close-player')?.click(); return; }
+    const dialog = document.querySelector('#confirm[open], dialog[open]');
+    if (dialog) {
+      event.preventDefault();
+      const cancel = dialog.querySelector('[value="cancel"], [data-action="cancel"]');
+      if (cancel) cancel.click(); else dialog.close();
+      return;
+    }
+    if (document.querySelector('#player:not(.hidden)')) {
+      event.preventDefault();
+      document.querySelector('#close-player')?.click();
+      return;
+    }
     if (location.hash && location.hash !== '#/' && location.hash !== '#') {
       event.preventDefault();
       if (history.length > 1) history.back(); else location.hash = '#/';
     }
   }, true);
 
-  // Chamado pelo Android antes de sair do app.
-  let lastBackAt = 0;
+  // O callback nativo Android intercepta Voltar antes de o evento chegar ao WebView.
   window.__cinehubBack = () => {
-    // O callback nativo intercepta Voltar antes do WebView; tirar o foco fecha o IME.
-    if (isTextEntry(document.activeElement)) {
-      document.activeElement.blur();
-      return true;
-    }
+    const target = document.activeElement;
+    if (isTextEntry(target)) { target.blur(); return true; }
     const dialog = document.querySelector('dialog[open]');
     if (dialog) {
       const cancel = dialog.querySelector('[value="cancel"]');
       if (cancel) cancel.click(); else dialog.close();
       return true;
     }
-    if (playerOpen()) { document.querySelector('#close-player')?.click(); return true; }
-    if (location.hash && location.hash !== '#/' && location.hash !== '#') { history.back(); return true; }
+    if (document.querySelector('#player:not(.hidden)')) {
+      document.querySelector('#close-player')?.click();
+      return true;
+    }
+    if (location.hash && location.hash !== '#/' && location.hash !== '#') {
+      history.back();
+      return true;
+    }
     const now = Date.now();
     if (now - lastBackAt < 2500) return false;
     lastBackAt = now;
@@ -272,13 +316,19 @@
     return true;
   };
 
-  document.addEventListener('focusin', () => { remoteMode = true; });
+  document.addEventListener('focusin', (event) => {
+    if (event.target?.closest?.('#main-content') && !event.target.closest('.hidden')) lastMainFocus = event.target;
+    remoteMode = true;
+  });
   document.addEventListener('pointerdown', () => { remoteMode = false; }, true);
   window.addEventListener('hashchange', () => {
     if (!remoteMode) return;
     requestAnimationFrame(() => {
-      if (document.activeElement && document.activeElement !== document.body && document.activeElement.isConnected) return;
-      focus(document.querySelector('#view a[href], #view button:not([disabled]), #view input:not([disabled]), #view select:not([disabled])'));
+      if (document.activeElement && document.activeElement !== document.body &&
+          document.activeElement.isConnected && isVisible(document.activeElement)) return;
+      const content = document.querySelector('#view');
+      const first = focusables(content)[0] || focusables(document.querySelector('.topbar'))[0];
+      if (first) focusElement(first);
     });
   });
 })();
