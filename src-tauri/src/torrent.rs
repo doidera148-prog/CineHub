@@ -79,6 +79,20 @@ pub struct TorrentEngine {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TorrentNetworkStats {
+    pub active: bool,
+    pub state: String,
+    pub download_speed_bytes: u64,
+    pub upload_speed_bytes: u64,
+    pub peers: usize,
+    pub peers_seen: usize,
+    pub downloaded_bytes: u64,
+    pub total_bytes: u64,
+    pub error: Option<String>,
+}
+
 pub struct TorrentPlayback {
     pub token: String,
     pub stream_url: String,
@@ -270,6 +284,49 @@ impl TorrentEngine {
             size_bytes: plan.size,
             videos: plan.videos.iter().map(VideoFile::from).collect(),
         })
+    }
+
+    /// Snapshot leve da atividade de rede do torrent atualmente aberto.
+    pub async fn network_stats(&self) -> TorrentNetworkStats {
+        let handle = {
+            let files = self.files.read().await;
+            files.values().next().map(|entry| entry.torrent.clone())
+        };
+        let Some(handle) = handle else {
+            return TorrentNetworkStats {
+                active: false,
+                state: "inativo".into(),
+                download_speed_bytes: 0,
+                upload_speed_bytes: 0,
+                peers: 0,
+                peers_seen: 0,
+                downloaded_bytes: 0,
+                total_bytes: 0,
+                error: None,
+            };
+        };
+        let stats = handle.stats();
+        let (download_speed_bytes, upload_speed_bytes, peers, peers_seen) =
+            match &stats.live {
+                Some(live) => (
+                    (live.download_speed.mbps.max(0.0) * 125_000.0) as u64,
+                    (live.upload_speed.mbps.max(0.0) * 125_000.0) as u64,
+                    live.snapshot.peer_stats.live as usize,
+                    live.snapshot.peer_stats.seen as usize,
+                ),
+                None => (0, 0, 0, 0),
+            };
+        TorrentNetworkStats {
+            active: true,
+            state: stats.state.to_string(),
+            download_speed_bytes,
+            upload_speed_bytes,
+            peers,
+            peers_seen,
+            downloaded_bytes: stats.progress_bytes,
+            total_bytes: stats.total_bytes,
+            error: stats.error.clone(),
+        }
     }
 
     /// Troca o arquivo que toca dentro de um torrent já aberto (outro episódio, outro idioma).
