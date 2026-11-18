@@ -217,7 +217,13 @@
       const localNext = nearest(current, visibleFocusables(group), direction);
       // Não faz loop infinito no trilho: na ponta, a seta sai do grupo e alcança o menu,
       // a busca ou o próximo bloco. Esse era o principal motivo de o controle ficar preso.
-      const outside = localNext ? null : nearest(current, items.filter((el) => !group.contains(el)), direction);
+      // Na borda esquerda dos trilhos de conteúdo, permite voltar ao menu lateral.
+      // Essa exceção é somente horizontal: cima/baixo continuam confinados ao conteúdo,
+      // evitando que o DPAD desça para a sidebar ao navegar pelos cards.
+      const boundaryItems = direction === 'left' && !activeDialog
+        ? [...items, ...visibleFocusables(document.querySelector('.sidebar'))]
+        : items;
+      const outside = localNext ? null : nearest(current, boundaryItems.filter((el) => !group.contains(el)), direction);
       if (localNext || outside) focus(localNext || outside);
       return;
     }
