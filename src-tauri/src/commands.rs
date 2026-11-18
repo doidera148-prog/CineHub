@@ -49,7 +49,10 @@ pub async fn check_addon_manifest(
     }
     let manifest = bounded(addon::fetch_manifest(&state.http, &url)).await?;
     if manifest.id != expected_id {
-        return Err(format!("ID do manifesto não corresponde ao catálogo ({})", manifest.id));
+        return Err(format!(
+            "ID do manifesto não corresponde ao catálogo ({})",
+            manifest.id
+        ));
     }
     if manifest.version.trim().is_empty() {
         return Err("manifesto sem versão válida".into());
