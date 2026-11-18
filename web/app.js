@@ -1425,8 +1425,8 @@ async function play(stream, label, id, meta, subs) {
     return;
   }
   nativeFailure = null;
-  // Toda fonte HTTP progressiva passa pelo proxy local; HLS é recusado até que
-  // playlists, segmentos e chaves também possam ser reescritos com segurança.
+  // Fontes HTTP/HTTPS passam pelo proxy local; playlists HLS e seus recursos filhos
+  // também são reescritos para manter cada requisição dentro do proxy.
   try {
     const originalUrl = stream.url;
     stream = {
@@ -1451,7 +1451,7 @@ async function play(stream, label, id, meta, subs) {
   current = { id, label, meta, src: stream.url, mime: stream.mimeType || '' };
 
   const src = { src: stream.url };
-  if (/\.m3u8(\?|$)/i.test(stream.url)) src.type = 'application/x-mpegURL';
+  if (stream.mimeType === 'application/x-mpegURL' || /\.m3u8(\?|$)/i.test(stream.url)) src.type = 'application/x-mpegURL';
   clearTextTracks();
   vjsPlayer.src(src);
   for (const sub of pickSubtitles(stream, subs)) addSubtitle(sub.url, seq);
