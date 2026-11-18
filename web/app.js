@@ -1767,7 +1767,8 @@ async function play(stream, label, id, meta, subs) {
   if (stream.mimeType === 'application/x-mpegURL' || /\.m3u8(\?|$)/i.test(stream.url)) src.type = 'application/x-mpegURL';
   clearTextTracks();
   vjsPlayer.src(src);
-  for (const sub of pickSubtitles(stream, subs)) addSubtitle(sub.url, seq);
+  const webSubtitle = pickSubtitles(stream, subs)[0];
+  if (webSubtitle) addSubtitle(webSubtitle.url, seq);
 
   const saved = store.get('progress', {})[id];
   // Um único handler por vez: sem isso, cada vídeo novo empilha outro listener.
