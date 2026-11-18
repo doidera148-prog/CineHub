@@ -10,6 +10,19 @@ const topQ = $('#q');
 
 const PAGE_HINT = 20; // a partir deste tamanho, a fila mostra "Carregar mais"
 const MAX_PROGRESS = 50; // quantidade de títulos guardados no progresso
+const SEARCH_MAX_CHARS = 200;
+const SEARCH_DEBOUNCE_MS = 450;
+const normalizeSearchQuery = (value) => Array.from(String(value ?? '').trim()).slice(0, SEARCH_MAX_CHARS).join('');
+function scheduleSearch(input, callback) {
+  if (input.isComposing) return;
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(() => callback(input.value), SEARCH_DEBOUNCE_MS);
+}
+function flushSearch(input, callback) {
+  clearTimeout(debounceTimer);
+  debounceTimer = null;
+  callback(input.value);
+}
 
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -464,11 +477,12 @@ function renderBillboard(rows) {
 
 async function catalogPage(kind, title, alive) {
   if (kind === 'anime') {
-    setView('<h1>Animes</h1><form id="anime-search-form" role="search"><input id="anime-search-input" type="search" placeholder="Pesquisar animes…" autocomplete="off" aria-label="Pesquisar animes"></form><p id="anime-search-status" class="muted small" role="status" aria-live="polite">Pesquise para encontrar títulos nos addons de anime.</p><div id="anime-search-results"></div><h2 class="section-heading">Catálogos</h2><div id="rows">' + skeleton() + skeleton() + '</div>');
+    setView('<h1>Animes</h1><form id="anime-search-form" role="search"><input id="anime-search-input" type="search" maxlength="200" placeholder="Pesquisar animes…" autocomplete="off" aria-label="Pesquisar animes"></form><p id="anime-search-status" class="muted small" role="status" aria-live="polite">Pesquise para encontrar títulos nos addons de anime.</p><div id="anime-search-results"></div><h2 class="section-heading">Catálogos</h2><div id="rows">' + skeleton() + skeleton() + '</div>');
     const input = $('#anime-search-input');
-    const submit = (event) => { event?.preventDefault(); clearTimeout(debounceTimer); runAnimeSearch(input.value.trim()); };
+    const submit = (event) => { event?.preventDefault(); flushSearch(input, (value) => runAnimeSearch(value)); };
     $('#anime-search-form').onsubmit = submit;
-    input.addEventListener('input', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(() => runAnimeSearch(input.value.trim()), 450); });
+    input.addEventListener('input', () => scheduleSearch(input, (value) => runAnimeSearch(value)));
+    input.addEventListener('compositionend', () => scheduleSearch(input, (value) => runAnimeSearch(value)));
     const { rows } = await call('home', { kind });
     if (!alive()) return;
     renderRows(rows, 'Nenhum catálogo disponível. Use a pesquisa acima para consultar addons que exigem um termo de busca.');
@@ -481,20 +495,26 @@ async function catalogPage(kind, title, alive) {
 }
 
 let animeSearchSeq = 0;
-async function runAnimeSearch(q) {
+async function runAnimeSearch(raw) {
+  const q = normalizeSearchQuery(raw);
   const seq = ++animeSearchSeq;
   const stillHere = () => seq === animeSearchSeq && sectionOf() === 'animes';
   const box = $('#anime-search-results');
   const status = $('#anime-search-status');
   if (!box) return;
-  if (!q) { box.innerHTML = ''; if (status) status.textContent = 'Pesquise para encontrar títulos nos addons de anime.'; return; }
+  if (!q) {
+    box.innerHTML = '';
+    if (status) status.textContent = 'Pesquise para encontrar títulos nos addons de anime.';
+    return;
+  }
   box.innerHTML = skeleton(3);
   if (status) status.textContent = 'Pesquisando animes…';
   try {
-    const { rows = [] } = await call('search', { q, kind: 'anime' });
+    const result = await call('search', { q, kind: 'anime' });
     if (!stillHere()) return;
+    const rows = Array.isArray(result?.rows) ? result.rows : [];
     renderRows(rows, 'Nenhum anime encontrado para essa pesquisa.', { pageable: false, targetId: 'anime-search-results' });
-    const total = rows.reduce((count, row) => count + (row.metas || []).length, 0);
+    const total = rows.reduce((count, row) => count + (Array.isArray(row.metas) ? row.metas.length : 0), 0);
     if (status) status.textContent = total ? `${total} resultado${total === 1 ? '' : 's'}` : 'Nenhum resultado';
   } catch (error) {
     if (!stillHere()) return;
@@ -506,37 +526,37 @@ async function runAnimeSearch(q) {
 let debounceTimer = null;
 let searchSeq = 0;
 
-function searchPage(q) {
+function searchPage(raw) {
+  const q = normalizeSearchQuery(raw);
+  topQ.value = q;
   setView(`
     <h1>Pesquisar</h1>
-    <form id="sf" role="search"><input id="sq" type="search" value="${esc(q)}" placeholder="Digite um título…" autocomplete="off" aria-label="Pesquisar título" aria-controls="rows"></form>
+    <form id="sf" role="search"><input id="sq" type="search" maxlength="200" value="${esc(q)}" placeholder="Digite um título…" autocomplete="off" aria-label="Pesquisar título" aria-controls="rows"></form>
     <p id="search-status" class="muted small" role="status" aria-live="polite"></p>
     <div id="rows"></div>`);
   const input = $('#sq');
-  // Esc limpa o campo (útil também com controle remoto, que não tem botão de limpar).
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && input.value) {
-      e.preventDefault();
+  // Esc limpa a busca atual sem deixar uma requisição anterior reescrever os resultados.
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && input.value) {
+      event.preventDefault();
       input.value = '';
       clearTimeout(debounceTimer);
+      debounceTimer = null;
       setSearch('');
     }
   });
-  $('#sf').onsubmit = (e) => {
-    e.preventDefault();
-    clearTimeout(debounceTimer);
-    setSearch(input.value);
+  $('#sf').onsubmit = (event) => {
+    event.preventDefault();
+    flushSearch(input, (value) => setSearch(value));
   };
-  input.addEventListener('input', () => {
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => setSearch(input.value), 450);
-  });
-  runSearch(q.trim());
+  input.addEventListener('input', () => scheduleSearch(input, (value) => setSearch(value)));
+  input.addEventListener('compositionend', () => scheduleSearch(input, (value) => setSearch(value)));
+  runSearch(q);
 }
 
 // Atualiza a busca: na página de pesquisa troca só a URL e refaz a busca; em outras páginas, navega.
 function setSearch(raw) {
-  const q = raw.trim();
+  const q = normalizeSearchQuery(raw);
   if (sectionOf() !== 'search') {
     location.hash = '#/search?q=' + encodeURIComponent(q);
     return;
@@ -548,34 +568,34 @@ function setSearch(raw) {
   runSearch(q);
 }
 
-async function runSearch(q) {
+async function runSearch(raw) {
+  const q = normalizeSearchQuery(raw);
   const seq = ++searchSeq;
   const stillHere = () => seq === searchSeq && sectionOf() === 'search';
   const box = $('#rows');
   if (!box) return;
+  const status = $('#search-status');
   if (!q) {
     box.innerHTML = '<p class="muted">Digite um título para pesquisar.</p>';
-    const status = $('#search-status');
+    box.removeAttribute('aria-busy');
     if (status) status.textContent = '';
     return;
   }
   box.innerHTML = skeleton(4);
   box.setAttribute('aria-busy', 'true');
-  const status = $('#search-status');
   if (status) status.textContent = 'Pesquisando…';
   try {
-    const { rows } = await call('search', { q });
-    if (stillHere()) {
-      renderRows(rows, 'Nenhum resultado. Verifique se há addons de catálogo com busca instalados.', { pageable: false });
-      // Quantidade anunciada para quem usa leitor de tela (o texto também fica visível).
-      const total = rows.reduce((n, r) => n + (r.metas || []).length, 0);
-      if (status) status.textContent = total ? `${total} resultado${total === 1 ? '' : 's'}` : 'Nenhum resultado';
-    }
-  } catch (e) {
-    if (stillHere()) {
-      box.innerHTML = `<p class="muted">Erro: ${esc(e.message)}</p>`;
-      if (status) status.textContent = 'Erro na pesquisa';
-    }
+    const result = await call('search', { q });
+    if (!stillHere()) return;
+    const rows = Array.isArray(result?.rows) ? result.rows : [];
+    renderRows(rows, 'Nenhum resultado. Verifique se há addons de catálogo com busca instalados.', { pageable: false });
+    // Quantidade anunciada para quem usa leitor de tela (o texto também fica visível).
+    const total = rows.reduce((count, row) => count + (Array.isArray(row.metas) ? row.metas.length : 0), 0);
+    if (status) status.textContent = total ? `${total} resultado${total === 1 ? '' : 's'}` : 'Nenhum resultado';
+  } catch (error) {
+    if (!stillHere()) return;
+    box.innerHTML = `<p class="muted">Erro: ${esc(error.message)}</p>`;
+    if (status) status.textContent = 'Erro na pesquisa';
   } finally {
     if (stillHere()) box.removeAttribute('aria-busy');
   }
@@ -2290,14 +2310,13 @@ function focusContent() {
   first?.focus({ preventScroll: true });
 }
 
-topQ.addEventListener('input', () => {
-  clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(() => setSearch(topQ.value), 450);
-});
-topQ.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    clearTimeout(debounceTimer);
-    setSearch(topQ.value);
+topQ.maxLength = SEARCH_MAX_CHARS;
+topQ.addEventListener('input', () => scheduleSearch(topQ, (value) => setSearch(value)));
+topQ.addEventListener('compositionend', () => scheduleSearch(topQ, (value) => setSearch(value)));
+topQ.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && !event.isComposing && event.keyCode !== 229) {
+    event.preventDefault();
+    flushSearch(topQ, (value) => setSearch(value));
   }
 });
 
