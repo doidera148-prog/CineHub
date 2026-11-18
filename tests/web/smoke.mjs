@@ -38,7 +38,8 @@ async function check(viewport, label) {
   await page.goto(`${base}/#/movies`);
   await page.waitForTimeout(300);
   const beforeSkip = await page.evaluate(() => location.hash);
-  await page.locator('.skip-link').click();
+  await page.locator('.skip-link').focus();
+  await page.keyboard.press('Enter');
   if (await page.evaluate(() => location.hash) !== beforeSkip) failures.push(`[${label}] atalho acessível alterou a rota`);
   if (await page.evaluate(() => document.activeElement?.id) !== 'view') failures.push(`[${label}] atalho acessível não focou o conteúdo`);
   const cards = page.locator('#view .strip a');
