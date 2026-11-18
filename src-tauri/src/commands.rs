@@ -337,7 +337,7 @@ fn annotate(s: &mut Value, addon_name: &str) {
 
     // Só links web: qualquer outro esquema (javascript:, file:, intent:…) é descartado.
     let external = external
-        .filter(|u| u.starts_with("https://") || u.starts_with("http://"))
+        .filter(|u| is_http_url(u))
         .or_else(|| {
             yt_id
                 .as_ref()
@@ -381,8 +381,22 @@ fn annotate(s: &mut Value, addon_name: &str) {
 }
 
 /// Esquemas que o app reproduz: http(s) e magnet (este último vai para o motor torrent).
-fn is_app_url(url: &str) -> bool {
-    url.starts_with("https://") || url.starts_with("http://") || url.starts_with("magnet:?")
+/// Aceita somente URLs HTTP(S) sintaticamente válidas, com host, ou magnets válidos.
+/// Não bloqueia IPs privados aqui: fontes locais podem ser intencionais e o torrent usa loopback.
+fn is_http_url(raw: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(raw.trim()) else {
+        return false;
+    };
+    matches!(url.scheme(), "http" | "https") && url.host_str().is_some()
+}
+
+/// Esquemas que o app reproduz: HTTP(S) com autoridade válida e magnet para o motor torrent.
+fn is_app_url(raw: &str) -> bool {
+    if raw.trim().starts_with("magnet:?") {
+        return reqwest::Url::parse(raw.trim())
+            .is_ok_and(|url| url.scheme() == "magnet");
+    }
+    is_http_url(raw)
 }
 
 /// Legenda: baixa o arquivo (só URLs públicas, validando cada redirecionamento,
@@ -627,6 +641,29 @@ mod tests {
         let mut good = json!({ "externalUrl": "https://x.example/a" });
         annotate(&mut good, "A");
         assert_eq!(good["externalUrl"], "https://x.example/a");
+    }
+
+    #[test]
+    fn stream_urls_require_a_valid_http_authority_but_keep_local_sources() {
+        assert!(is_app_url("https://cdn.example/video.m3u8?token=a"));
+        assert!(is_app_url("http://192.168.1.20:8080/video.mp4"));
+        assert!(is_app_url("http://127.0.0.1:9000/stream/token"));
+        assert!(is_app_url("magnet:?xt=urn:btih:0123456789012345678901234567890123456789"));
+        assert!(!is_app_url("https:///missing-host/video.mp4"));
+        assert!(!is_app_url("http://"));
+        assert!(!is_app_url("file:///video.mp4"));
+        assert!(!is_app_url("javascript:alert(1)"));
+    }
+
+    #[test]
+    fn malformed_stream_urls_are_removed_without_rejecting_lan_urls() {
+        let mut malformed = json!({ "url": "https:///missing-host/video.mp4" });
+        annotate(&mut malformed, "A");
+        assert!(malformed.get("url").is_none());
+
+        let mut lan = json!({ "url": "http://192.168.1.20:8080/video.mp4" });
+        annotate(&mut lan, "A");
+        assert_eq!(lan["url"], "http://192.168.1.20:8080/video.mp4");
     }
 
     #[test]
