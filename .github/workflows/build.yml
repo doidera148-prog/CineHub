@@ -60,8 +60,12 @@ jobs:
             -not -path 'web/vendor/*' -print0 \
             | xargs -0 -r -n1 node --check
       - name: Detectar variáveis e imports JavaScript não utilizados
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Executar ESLint 10 para detectar variáveis e imports não utilizados
         run: |
-          find web tests -type f \( -name '*.js' -o -name '*.mjs' \) -not -path 'web/vendor/*' -print0 | xargs -0 -r npx --yes eslint@9 --no-config-lookup --rule 'no-unused-vars:error'
+          find web tests -type f \( -name '*.js' -o -name '*.mjs' \) -not -path 'web/vendor/*' -print0 | xargs -0 -r npx --yes eslint@10.15.0 --no-config-lookup --rule 'no-unused-vars:error'
       - name: Validar sintaxe Python
         run: python3 -m compileall -q src-tauri/android-tv tests/python
       - name: Testes de regressão dos scripts Python
