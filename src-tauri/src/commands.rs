@@ -35,6 +35,33 @@ pub async fn list_addons(state: State<'_, AppState>) -> Result<Value, String> {
     ))
 }
 
+/// Verifica um manifesto público sem instalar nem alterar a lista de addons.
+#[tauri::command]
+pub async fn check_addon_manifest(
+    state: State<'_, AppState>,
+    url: String,
+    expected_id: String,
+    expected_version: String,
+) -> Result<Value, String> {
+    let url = normalize_url(&url)?;
+    if !addon::is_safe_url(&url).await {
+        return Err("endereço não permitido: o addon precisa estar em um domínio público".into());
+    }
+    let manifest = bounded(addon::fetch_manifest(&state.http, &url)).await?;
+    if manifest.id != expected_id {
+        return Err(format!("ID do manifesto não corresponde ao catálogo ({})", manifest.id));
+    }
+    if manifest.version.trim().is_empty() {
+        return Err("manifesto sem versão válida".into());
+    }
+    Ok(json!({
+        "ok": true,
+        "name": manifest.name,
+        "version": manifest.version,
+        "versionMatches": manifest.version == expected_version,
+    }))
+}
+
 #[tauri::command]
 pub async fn install_addon(state: State<'_, AppState>, url: String) -> Result<Value, String> {
     let url = normalize_url(&url)?;
