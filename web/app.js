@@ -2142,6 +2142,10 @@ vjsPlayer.on('error', () => {
 
 function closePlayer(fromHistory = false, save = true) {
   if (player.classList.contains('hidden')) return;
+  // Voltar do histórico também precisa encerrar a janela nativa, não apenas esconder a WebView.
+  if (nativePlayerActive) {
+    void call('player_close').catch((error) => logEvent('WARN', `fechar player nativo falhou: ${describeError(error)}`));
+  }
   // Esconde primeiro: se salvar o progresso falhar, o usuário ainda consegue sair do vídeo.
   player.classList.add('hidden');
   hideSkip();
