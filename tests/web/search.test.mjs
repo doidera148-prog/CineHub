@@ -132,6 +132,7 @@ try {
   await page.locator('#q').fill('  topo  ');
   await waitForQuery('topo', null);
   await page.waitForFunction(() => location.hash.startsWith('#/search?q=topo'));
+  await page.waitForFunction(() => document.querySelector('#search-status')?.textContent === '1 resultado');
   assert.match(await page.locator('#rows').innerText(), /Resultado topo/);
 
   // Campo específico de animes encaminha kind=anime e apresenta resultados.
