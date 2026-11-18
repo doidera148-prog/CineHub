@@ -1288,7 +1288,7 @@ async function loadStreams(kind, id, label, meta) {
   const { subtitles = [], errors = [] } = result;
   // Fontes que tocam vêm primeiro, depois as de maior resolução (e dublagem em português).
   const allStreams = Array.isArray(result.streams) ? result.streams : [];
-  const streams = sortStreams(allStreams.filter((stream) => !isMkvStream(stream)));
+  const streams = sortStreams(allStreams);
   const box = $('#streams') || $('#body');
   if (!box) return;
   box.innerHTML = '';
@@ -1306,9 +1306,7 @@ async function loadStreams(kind, id, label, meta) {
   if (!streams.length) {
     const message = document.createElement('p');
     message.className = 'muted';
-    message.textContent = allStreams.length && allStreams.every(isMkvStream)
-      ? 'As fontes encontradas estão em MKV, que não é compatível com este aparelho. Procure uma versão MP4 ou WebM.'
-      : 'Nenhuma fonte MP4/WebM compatível encontrada. Verifique os addons instalados ou tente novamente.';
+    message.textContent = 'Nenhuma fonte reproduzível encontrada. Verifique os addons instalados ou tente novamente.';
     const retry = document.createElement('button');
     retry.type = 'button';
     retry.className = 'chip';
@@ -1751,7 +1749,9 @@ async function play(stream, label, id, meta, subs) {
     }
   }
   const segments = await skipSegmentsFor(id, meta);
-  // Windows: manter a reprodução no WebView2 (Video.js/HTML5), sem iniciar libmpv.
+  // MKV não é suportado de forma consistente pelo WebView2: no Windows usa libmpv como fallback.
+  // MP4/WebM continuam no player integrado WebView2; Android continua no ExoPlayer.
+  if (IS_WINDOWS && isMkvStream(stream) && await playNative(stream, label, id, meta, subs, segments)) return;
   if (!IS_WINDOWS && await playNative(stream, label, id, meta, subs, segments)) return;
 
   saveProgress(true);
@@ -1979,7 +1979,7 @@ async function playNextEpisode() {
       'Buscando fontes do próximo episódio',
       call('streams', { kind: epKind, id: ep.id }),
     );
-    const pick = sortStreams((Array.isArray(streams) ? streams : []).filter((s) => !isMkvStream(s))).find((s) => s.url || s.externalUrl || s.infoHash || s.hash);
+    const pick = sortStreams(Array.isArray(streams) ? streams : []).find((s) => s.url || s.externalUrl || s.infoHash || s.hash);
     if (!pick) {
       toast('Sem fontes para o próximo episódio.');
       return;
