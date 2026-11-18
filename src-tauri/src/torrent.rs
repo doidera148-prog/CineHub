@@ -708,8 +708,13 @@ fn response_error(status: StatusCode, message: &str) -> Response<Body> {
 fn mime_for_extension(extension: &str) -> Option<&'static str> {
     match extension {
         "mp4" | "m4v" => Some("video/mp4"),
+        "mkv" => Some("video/x-matroska"),
         "webm" => Some("video/webm"),
-        // MKV e outros contêineres são excluídos: o player do aparelho não os decodifica.
+        "mov" => Some("video/quicktime"),
+        "avi" => Some("video/x-msvideo"),
+        "mpeg" | "mpg" | "m2v" => Some("video/mpeg"),
+        "ts" | "m2ts" => Some("video/mp2t"),
+        "ogv" => Some("video/ogg"),
         _ => None,
     }
 }
@@ -750,17 +755,16 @@ mod tests {
     #[test]
     fn recognizes_supported_video_types_and_ignores_others() {
         assert_eq!(mime_for_extension("mp4"), Some("video/mp4"));
-        assert_eq!(mime_for_extension("mkv"), None);
-        assert_eq!(mime_for_extension("m2ts"), None);
+        assert_eq!(mime_for_extension("mkv"), Some("video/x-matroska"));
+        assert_eq!(mime_for_extension("m2ts"), Some("video/mp2t"));
         assert_eq!(mime_for_extension("webm"), Some("video/webm"));
         assert_eq!(mime_for_extension("txt"), None);
         let found = video_candidates(vec![
             (0, "readme.txt".into(), 20),
             (1, "empty.mp4".into(), 0),
             (2, "film.MKV".into(), 30),
-            (3, "film.webm".into(), 40),
         ]);
-        assert_eq!(found.iter().map(|c| c.index).collect::<Vec<_>>(), vec![3]);
+        assert_eq!(found.iter().map(|c| c.index).collect::<Vec<_>>(), vec![2]);
     }
 
     #[test]
@@ -770,7 +774,7 @@ mod tests {
         let files = [
             candidate(0, 10, "sample.mp4"),
             candidate(1, 200, "trailer.mp4"),
-            candidate(2, 100, "Movie.webm"),
+            candidate(2, 100, "Movie.mkv"),
         ];
         assert_eq!(pick_video(&files, None).map(|c| c.index), Ok(2));
     }
@@ -778,8 +782,8 @@ mod tests {
     #[test]
     fn automatic_selection_prefers_portuguese_video_over_larger_english_file() {
         let files = [
-            candidate(0, 900, "Movie.1080p.ENG.mp4"),
-            candidate(1, 600, "Movie.1080p.PT-BR.Dublado.webm"),
+            candidate(0, 900, "Movie.1080p.ENG.mkv"),
+            candidate(1, 600, "Movie.1080p.PT-BR.Dublado.mkv"),
         ];
         assert_eq!(pick_video(&files, None).map(|c| c.index), Ok(1));
     }
@@ -787,8 +791,8 @@ mod tests {
     #[test]
     fn explicit_file_index_overrides_portuguese_preference() {
         let files = [
-            candidate(0, 900, "Movie.1080p.ENG.mp4"),
-            candidate(1, 600, "Movie.1080p.PT-BR.webm"),
+            candidate(0, 900, "Movie.1080p.ENG.mkv"),
+            candidate(1, 600, "Movie.1080p.PT-BR.mkv"),
         ];
         assert_eq!(pick_video(&files, Some(0)).map(|c| c.index), Ok(0));
     }
