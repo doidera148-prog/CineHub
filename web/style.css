@@ -1180,3 +1180,56 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.7); }
   .torrent-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 380px) { .torrent-stat-grid { grid-template-columns: 1fr; } }
+
+
+/* ---------- Layout fluido: adapta o conteúdo ao espaço disponível ---------- */
+#main-content, #view, #view > *, .hero-info, .billboard-info { min-width: 0; }
+#view { width: 100%; max-width: 100%; }
+#view :where(p, h1, h2, h3, label, a, button, span) { overflow-wrap: anywhere; }
+#view img, #view video, #view iframe { max-width: 100%; }
+#view :where(input, select, textarea) { max-width: 100%; min-width: 0; }
+#view :where(.actions, .dataactions, .seasons, .stream-tools, .stream-group, .prefrow) { flex-wrap: wrap; }
+#view :where(.panel, .card, .favcell, .addon, .stream, .ep-row) { min-width: 0; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 148px), 1fr)); align-items: start; gap: clamp(0.65rem, 1.5vw, 1.1rem); }
+.grid .favcell { width: auto; max-width: 100%; }
+.grid .card { width: 100%; min-width: 0; flex: initial; }
+.grid .favcell > button { max-width: 100%; white-space: normal; }
+.card .title { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; min-height: 2.4em; line-height: 1.2; }
+.card .small { display: block; overflow-wrap: anywhere; }
+.episodes { grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); }
+#view :where(.stream, .addon, .kodi-panel, .kodi-addon, .kodi-item) { overflow-wrap: anywhere; }
+#view :where(.stream strong, .stream span, .addon > div, .kodi-addon > div) { min-width: 0; }
+#view :where(.torrent-stat-grid, .settings-grid) { grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); }
+.billboard { min-height: clamp(300px, 56vh, 680px); height: auto; }
+.billboard-info { width: min(100%, 42rem); max-width: 100%; }
+.hero { min-height: clamp(360px, 68vh, 760px); }
+.hero-info { width: min(100%, 48rem); }
+@media (max-width: 720px) {
+  :root { --gutter: clamp(14px, 4vw, 22px); }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 112px), 1fr)); gap: 0.65rem; }
+  .grid .card { padding: 0.25rem; }
+  .billboard { min-height: 390px; height: auto; max-height: 72dvh; }
+  .billboard-info { gap: 0.65rem; }
+  .billboard .actions, .hero .actions { width: 100%; }
+  .billboard .actions > *, .hero .actions > * { max-width: 100%; }
+  .hero { min-height: 420px; padding-bottom: 1.25rem; }
+  .hero h1 { overflow-wrap: anywhere; }
+  .hero p { overflow-wrap: anywhere; }
+  .episodes { grid-template-columns: minmax(0, 1fr); }
+  .ep-row { flex-wrap: wrap; }
+  .ep-row .ep { flex-basis: 100%; }
+  .dialog-actions { flex-wrap: wrap; }
+  .dialog-actions > * { flex: 1 1 120px; }
+}
+@media (min-width: 721px) and (max-width: 1100px) {
+  .grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .billboard-info { width: min(58%, 38rem); }
+}
+@media (min-width: 1500px) {
+  #view { max-width: 1920px; margin-inline: auto; }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+}
+@media (max-height: 620px) and (min-width: 721px) {
+  .billboard { min-height: 320px; }
+  .hero { min-height: 360px; }
+}
