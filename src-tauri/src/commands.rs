@@ -393,6 +393,18 @@ pub async fn subtitle(state: State<'_, AppState>, url: String) -> Result<String,
     Ok(srt_to_vtt(&String::from_utf8_lossy(&bytes)))
 }
 
+/// Retorna estatísticas do torrent ativo, sem iniciar uma sessão nova.
+#[tauri::command]
+pub async fn torrent_stats(
+    state: State<'_, AppState>,
+) -> Result<crate::torrent::TorrentNetworkStats, String> {
+    let engine = state
+        .torrent
+        .as_ref()
+        .ok_or("o motor de torrent não está disponível neste aparelho")?;
+    Ok(engine.network_stats().await)
+}
+
 /// Abre um torrent (magnet ou bytes de .torrent) e devolve a URL local do arquivo de vídeo.
 /// Recebe exatamente um dos dois. Só um torrent fica ativo por vez.
 #[tauri::command]
