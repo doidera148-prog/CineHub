@@ -10,8 +10,11 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import app.tauri.annotation.Command
@@ -106,7 +109,18 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         val renderers = DefaultRenderersFactory(act)
             .setEnableDecoderFallback(true)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
-        val player = ExoPlayer.Builder(act, renderers).build()
+        // Torrents podem levar vários segundos para entregar o próximo bloco quando há
+        // poucos peers. O timeout HTTP padrão do ExoPlayer é curto para esse cenário,
+        // causando "IO network timeout" mesmo com o servidor local ainda aguardando dados.
+        val httpDataSource = DefaultHttpDataSource.Factory()
+            .setConnectTimeoutMs(30_000)
+            .setReadTimeoutMs(120_000)
+            .setAllowCrossProtocolRedirects(true)
+        val dataSource = DefaultDataSource.Factory(act, httpDataSource)
+        val mediaSource = DefaultMediaSourceFactory(act).setDataSourceFactory(dataSource)
+        val player = ExoPlayer.Builder(act, renderers)
+            .setMediaSourceFactory(mediaSource)
+            .build()
         // Prioriza português brasileiro; usa português genérico como fallback.
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
             .setPreferredAudioLanguages("pt-BR", "pt")
