@@ -260,7 +260,9 @@ impl TorrentEngine {
             if previous != id {
                 if let Err(error) = session.delete(TorrentIdOrHash::Id(previous), true).await {
                     let _ = session.delete(TorrentIdOrHash::Id(id), true).await;
-                    return Err(format!("não foi possível encerrar o torrent anterior: {error:#}"));
+                    return Err(format!(
+                        "não foi possível encerrar o torrent anterior: {error:#}"
+                    ));
                 }
             }
         }
