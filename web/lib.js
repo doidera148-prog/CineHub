@@ -104,6 +104,23 @@
     return { favs: favs.slice(0, maxFavs), progress: Object.fromEntries(kept) };
   }
 
+  // Cria um backup canônico: aplica os mesmos limites e saneamento usados na importação.
+  function createBackupData(favs, progress, exportedAt = new Date().toISOString(), maxFavs = 500, maxProgress = 50) {
+    const cleaned = mergeBackupData([], {}, {
+      app: 'CineHub',
+      version: 1,
+      favs,
+      progress,
+    }, maxFavs, maxProgress);
+    return {
+      app: 'CineHub',
+      version: 1,
+      exportedAt: typeof exportedAt === 'string' ? exportedAt : new Date().toISOString(),
+      favs: cleaned.favs,
+      progress: cleaned.progress,
+    };
+  }
+
   function cleanFav(f) {
     return { id: str(f.id), type: str(f.type), name: str(f.name), poster: str(f.poster), releaseInfo: str(f.releaseInfo) };
   }
@@ -259,6 +276,7 @@
     cleanFav,
     writeStorageBatch,
     mergeBackupData,
+    createBackupData,
     cleanProgress,
     progressPercent,
     sortStreams,
