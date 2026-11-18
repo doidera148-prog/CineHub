@@ -49,7 +49,6 @@ impl MediaProxy {
         // Sem timeout total: streams podem durar horas. DNS continua fixado em IPs públicos.
         let client = Client::builder()
             .connect_timeout(Duration::from_secs(12))
-            .timeout(None)
             .redirect(reqwest::redirect::Policy::none())
             .user_agent("CineHub/0.2 media-proxy")
             .dns_resolver(Arc::new(crate::addon::PublicResolver))
