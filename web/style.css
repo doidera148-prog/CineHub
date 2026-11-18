@@ -1267,3 +1267,10 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.7); }
   .addon-manual .addform { flex-direction: column; }
   .addon-manual .addform > * { width: 100%; }
 }
+
+.community-status-bar { display: flex; align-items: center; justify-content: space-between; gap: .8rem; flex-wrap: wrap; }
+.community-status-bar p { margin: 0; flex: 1 1 280px; }
+.addon-health { min-height: 1.25rem; overflow-wrap: anywhere; }
+.addon-health[data-state="ok"] { color: var(--success, #36a66a); }
+.addon-health[data-state="version-differs"] { color: var(--warning, #c58a2b); }
+.addon-health[data-state="error"] { color: var(--danger, #d45b5b); }
