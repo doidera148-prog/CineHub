@@ -200,6 +200,18 @@ function magnetFromInfoHash(hash, name = 'CineHub') {
   return `magnet:?xt=urn:btih:${clean}&dn=${encodeURIComponent(name)}`;
 }
 
+async function closeActiveTorrent() {
+  const token = activeTorrentToken;
+  if (!token) return;
+  // Limpa localmente primeiro para impedir duas rotinas de fechamento concorrentes.
+  activeTorrentToken = null;
+  try {
+    await call('torrent_close', { token });
+  } catch (err) {
+    logEvent('WARN', `encerrar torrent falhou: ${err.message || String(err)}`);
+  }
+}
+
 async function openTorrentSource(stream, label, id, meta, subs) {
   const currentUrl = String(stream?.url ?? '').trim();
   const magnet = currentUrl.startsWith('magnet:?')
@@ -219,8 +231,15 @@ async function openTorrentSource(stream, label, id, meta, subs) {
         fileIndex: Number.isInteger(stream?.fileIndex) ? stream.fileIndex : null,
       }),
     );
+    activeTorrentToken = result.token;
     const chosen = await pickTorrentVideo(result);
-    const fixed = { ...stream, url: chosen.streamUrl, mimeType: chosen.mimeType, name: chosen.name || stream?.name || label };
+    const fixed = {
+      ...stream,
+      url: chosen.streamUrl,
+      mimeType: chosen.mimeType,
+      name: chosen.name || stream?.name || label,
+      torrentToken: result.token,
+    };
     await play(fixed, label, id, meta, subs);
   } catch (err) {
     logEvent('WARN', `abrir torrent falhou: ${err.message || String(err)}`);
@@ -297,10 +316,17 @@ function pickTorrentVideo(result) {
 
 // Reproduz um torrent recém-aberto pelo backend (magnet ou arquivo .torrent).
 async function playOpenedTorrent(input, fallbackName) {
+  activeTorrentToken = input.token || null;
   const result = await pickTorrentVideo(input);
   const name = result.name || fallbackName;
   const id = `torrent:${Date.now()}`;
-  const fake = { url: result.streamUrl, name, fileName: result.fileName, mimeType: result.mimeType };
+  const fake = {
+    url: result.streamUrl,
+    name,
+    fileName: result.fileName,
+    mimeType: result.mimeType,
+    torrentToken: result.token || input.token,
+  };
   await play(fake, name, id, { id, label: name, name, type: 'movie' }, []);
 }
 
@@ -1332,6 +1358,7 @@ function describePlaybackError(err, src, mime) {
 
 const vjsPlayer = videojs(video, { controls: true, fluid: true, preload: 'auto', playsinline: true, playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 2] });
 let current = null; // { id, label, meta } do que está tocando agora
+let activeTorrentToken = null; // sessão torrent vinculada à reprodução atual
 let playSeq = 0; // muda a cada fonte; legendas de fontes antigas são descartadas
 let blobUrls = [];
 let lastSave = 0;
@@ -1406,6 +1433,8 @@ async function play(stream, label, id, meta, subs) {
     await openTorrentSource(stream, label, id, meta, subs);
     return;
   }
+  // Ao mudar para uma fonte não-torrent, libera a sessão anterior antes de iniciar outra.
+  if (!stream?.torrentToken) await closeActiveTorrent();
   nativeFailure = null;
   // Torrents já abertos são servidos pelo endpoint local do backend e nunca passam
   // pelo proxy HTTP público. Apenas fontes HTTP/HTTPS externas usam o proxy de mídia.
@@ -1703,6 +1732,7 @@ function closePlayer(fromHistory = false) {
   } catch (e) {
     console.warn('falha ao limpar o player:', e);
   }
+  void closeActiveTorrent();
   current = null;
   hideNext();
   $('#player-title').textContent = '';
