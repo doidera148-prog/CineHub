@@ -542,8 +542,12 @@ fn normalize_url(raw: &str) -> Result<String, String> {
     // Acrescenta o caminho antes da query: /manifest.json?key=x precisa manter o parâmetro.
     let path = url.path().trim_end_matches('/');
     if !path.ends_with("/manifest.json") && path != "manifest.json" {
-        let next = if path.is_empty() { "/manifest.json" } else { &format!("{path}/manifest.json") };
-        url.set_path(next);
+        let next = if path.is_empty() {
+            "/manifest.json".to_string()
+        } else {
+            format!("{path}/manifest.json")
+        };
+        url.set_path(&next);
     }
     // Fragmentos nunca são enviados ao servidor e só criam URLs duplicadas no armazenamento.
     url.set_fragment(None);
