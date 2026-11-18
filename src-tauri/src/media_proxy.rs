@@ -161,10 +161,10 @@ async fn proxy_request(
         if let Some(value) = upstream.headers().get(&name) { builder = builder.header(name, value); }
     }
     // O token é uma credencial local; não há cookies de sessão e o CORS não permite credenciais.
-    builder = builder.header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-        .header(header::ACCESS_CONTROL_ALLOW_METHODS, "GET, HEAD, OPTIONS")
-        .header(header::ACCESS_CONTROL_ALLOW_HEADERS, "Range, If-Range")
-        .header(header::ACCESS_CONTROL_EXPOSE_HEADERS, "Content-Length, Content-Range, Accept-Ranges");
+    builder = builder.header("access-control-allow-origin", "*")
+        .header("access-control-allow-methods", "GET, HEAD, OPTIONS")
+        .header("access-control-allow-headers", "Range, If-Range")
+        .header("access-control-expose-headers", "Content-Length, Content-Range, Accept-Ranges");
     let body = if method == Method::HEAD || status == StatusCode::NO_CONTENT {
         Body::empty()
     } else {
