@@ -183,7 +183,7 @@ async fn proxy_request(
             prefix.extend_from_slice(&chunk);
         }
     }
-    let is_hls = declared_hls || prefix.starts_with(b"#EXTM3U") || prefix.starts_with(b"\\xef\\xbb\\xbf#EXTM3U");
+    let is_hls = declared_hls || prefix.starts_with(b"#EXTM3U") || prefix.starts_with(b"\xef\xbb\xbf#EXTM3U");
     let mut builder = Response::builder().status(status);
     if is_hls && status.is_success() && method != Method::HEAD {
         // Limita durante a leitura: não usar bytes() aqui, pois poderia alocar uma resposta
