@@ -44,10 +44,28 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri
-      - name: Formatação
+      - name: Formatação Rust (rustfmt)
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+      - name: Formatação YAML e JSON (Prettier)
+        run: |
+          mapfile -d '' files < <(find .github src-tauri tests -type f \\
+            \\( -name '*.yml' -o -name '*.yaml' -o -name '*.json' \\) \\
+            -not -path '*/target/*' -not -path '*/gen/*' -print0)
+          npx --yes prettier@3.6.2 --check "${files[@]}"
+      - name: Verificar sintaxe de todos os arquivos JavaScript
+        run: |
+          find web tests -type f \\
+            \\( -name '*.js' -o -name '*.mjs' \\) \\
+            -not -path 'web/vendor/*' -print0 \\
+            | xargs -0 -r -n1 node --check
+      - name: Validar sintaxe Python
+        run: python3 -m compileall -q android-tv
+      - name: Validar metadados e dependências Rust
+        run: cargo metadata --manifest-path src-tauri/Cargo.toml --locked --format-version 1 --no-deps > /dev/null
+      - name: Verificação de compilação Rust (todos os targets)
+        run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets --locked
       - name: Clippy (avisos viram erro)
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
       - name: Licenças e fontes das dependências (cargo-deny)
         uses: EmbarkStudios/cargo-deny-action@v2
         continue-on-error: true
