@@ -162,11 +162,18 @@ async fn proxy_request(
     let is_hls = content_type.contains("mpegurl") || url.path().to_ascii_lowercase().ends_with(".m3u8");
     let mut builder = Response::builder().status(status);
     if is_hls && status.is_success() && method != Method::HEAD {
-        let bytes = upstream.bytes().await.map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))?;
-        if bytes.len() > 4 * 1024 * 1024 {
-            return Err((StatusCode::PAYLOAD_TOO_LARGE, "playlist HLS excede 4 MiB".into()));
+        // Limita durante a leitura: não usar bytes() aqui, pois poderia alocar uma resposta
+        // ilimitada antes de verificar o tamanho.
+        let mut upstream = upstream;
+        let mut bytes = Vec::new();
+        while let Some(chunk) = upstream.chunk().await
+            .map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))? {
+            if bytes.len() + chunk.len() > 4 * 1024 * 1024 {
+                return Err((StatusCode::PAYLOAD_TOO_LARGE, "playlist HLS excede 4 MiB".into()));
+            }
+            bytes.extend_from_slice(&chunk);
         }
-        let playlist = String::from_utf8(bytes.to_vec())
+        let playlist = String::from_utf8(bytes)
             .map_err(|_| (StatusCode::BAD_GATEWAY, "playlist HLS não é UTF-8".into()))?;
         let rewritten = rewrite_playlist(&state, &url, &target.headers, &playlist).await?;
         builder = builder.header(header::CONTENT_TYPE, "application/vnd.apple.mpegurl");
