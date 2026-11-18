@@ -382,7 +382,20 @@ fn annotate(s: &mut Value, addon_name: &str) {
 /// Aceita somente URLs HTTP(S) sintaticamente válidas, com host, ou magnets válidos.
 /// Não bloqueia IPs privados aqui: fontes locais podem ser intencionais e o torrent usa loopback.
 fn is_http_url(raw: &str) -> bool {
-    let Ok(url) = reqwest::Url::parse(raw.trim()) else {
+    let raw = raw.trim();
+    let Some((scheme, remainder)) = raw.split_once("://") else {
+        return false;
+    };
+    if !matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https") {
+        return false;
+    }
+    // Url::parse normaliza barras extras (https:///host vira https://host).
+    // Exigir autoridade explícita evita aceitar URLs malformadas após essa normalização.
+    let authority = remainder.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.is_empty() {
+        return false;
+    }
+    let Ok(url) = reqwest::Url::parse(raw) else {
         return false;
     };
     matches!(url.scheme(), "http" | "https") && url.host_str().is_some()
