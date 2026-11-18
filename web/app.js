@@ -188,10 +188,7 @@ function isLocalTorrentStream(stream) {
 }
 
 function isTorrentStream(stream) {
-  const url = String(stream?.url ?? '').trim();
-  // URLs locais já são streams preparados pelo backend: não reabra o magnet.
-  if (isLocalTorrentStream(stream)) return false;
-  return url.startsWith('magnet:?') || Boolean(stream?.infoHash) || Boolean(stream?.hash);
+  return window.CineHubLib.isTorrentSource(stream);
 }
 
 function magnetFromInfoHash(hash, name = 'CineHub') {
