@@ -1234,3 +1234,36 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.7); }
   .billboard { min-height: 320px; }
   .hero { min-height: 360px; }
 }
+
+
+/* ---------- Catálogo de addons da comunidade ---------- */
+.addons-heading { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: .5rem; }
+.addons-heading h1 { margin-bottom: .25rem; }
+.addons-heading p { margin: 0; }
+.addon-tabs { display: flex; gap: .5rem; margin: 1rem 0; border-bottom: 1px solid var(--line); padding-bottom: .75rem; }
+.addon-tabs button { min-width: 112px; min-height: 42px; }
+.addon-panel[hidden] { display: none; }
+.community-tools { display: grid; gap: .7rem; margin: 1rem 0; }
+.community-tools input { width: 100%; }
+.community-filters { display: flex; flex-wrap: wrap; gap: .45rem; }
+.community-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 270px), 1fr)); gap: .8rem; }
+.community-addon { display: flex; flex-direction: column; min-width: 0; gap: .65rem; padding: 1rem; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.community-addon-head { display: flex; align-items: center; gap: .75rem; min-width: 0; }
+.community-addon-head img { width: 52px; height: 52px; flex: 0 0 52px; object-fit: contain; border-radius: 10px; background: var(--poster); }
+.community-addon-head h3 { margin: 0 0 .15rem; font-size: 1.05rem; }
+.community-addon > p { margin: 0; color: var(--text-2); font-size: .9rem; line-height: 1.5; }
+.community-tags { display: flex; flex-wrap: wrap; gap: .35rem; }
+.community-tags span { padding: .2rem .5rem; border-radius: 999px; background: var(--chip); color: var(--text-2); font-size: .72rem; }
+.community-install { margin-top: auto; min-height: 42px; }
+.community-install.installed { background: var(--chip); color: var(--text-2); }
+.addon-manual { margin: 1.2rem 0 .9rem; padding: .8rem 1rem; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-raised); }
+.addon-manual summary { cursor: pointer; font-weight: 600; }
+.addon-manual[open] summary { margin-bottom: .9rem; }
+.addon-manual .addform { margin-bottom: 0; }
+@media (max-width: 720px) {
+  .addon-tabs button { flex: 1; }
+  .community-grid { grid-template-columns: minmax(0, 1fr); }
+  .community-addon { padding: .9rem; }
+  .addon-manual .addform { flex-direction: column; }
+  .addon-manual .addform > * { width: 100%; }
+}
