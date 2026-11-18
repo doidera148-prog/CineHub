@@ -117,6 +117,9 @@ async fn proxy_request(
     if token.len() != 32 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err((StatusCode::NOT_FOUND, "não encontrado".into()));
     }
+    if method != Method::GET && method != Method::HEAD && method != Method::OPTIONS {
+        return Err((StatusCode::METHOD_NOT_ALLOWED, "método não permitido".into()));
+    }
     if method == Method::OPTIONS {
         return Response::builder()
             .status(StatusCode::NO_CONTENT)
