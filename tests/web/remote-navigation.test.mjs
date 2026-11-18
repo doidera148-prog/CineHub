@@ -90,6 +90,13 @@ await expectFocus('card-1', 'seta para cima entre trilhos');
 await press('ArrowUp');
 await expectFocus('card-1', 'limite superior não deve mover foco para outro eixo');
 
+await page.locator('#card-3').focus();
+await press('ArrowUp');
+await expectFocus('card-3', 'limite superior não pode saltar diagonalmente para a busca');
+await page.locator('#card-6').focus();
+await press('ArrowDown');
+await expectFocus('card-6', 'limite inferior não pode saltar diagonalmente para ação');
+
 // Menu: cima/baixo percorrem itens e direita retorna ao conteúdo.
 await page.locator('#nav-home').focus();
 await press('ArrowDown');
