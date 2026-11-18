@@ -437,7 +437,8 @@ function renderBillboard(rows) {
     const dot = e.target.closest('.billboard-dot');
     if (dot) show(Number(dot.dataset.i));
   });
-  if (slides.length < 2) return;
+  // Respeita a preferência do sistema: com movimento reduzido, mantém o primeiro destaque estático.
+  if (slides.length < 2 || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
   billboardTimer = setInterval(() => {
     if (!box.isConnected) {
       clearInterval(billboardTimer);
@@ -1129,6 +1130,17 @@ function progressFor(id) {
   if (all[id]) return all[id];
   return Object.values(all).find((p) => p && p.seriesId === id) || null;
 }
+
+// Cartaz remoto indisponível: substitui a imagem quebrada pelo título, sem deixar ícone de erro.
+view.addEventListener('error', (event) => {
+  const img = event.target;
+  if (!(img instanceof HTMLImageElement) || !img.matches('.poster-img')) return;
+  const card = img.closest('.card');
+  const placeholder = document.createElement('span');
+  placeholder.className = 'poster-placeholder';
+  placeholder.textContent = card?.querySelector('.title')?.textContent || 'Imagem indisponível';
+  img.replaceWith(placeholder);
+}, true);
 
 function cardHtml(m) {
   // Cartaz como <img> com carregamento preguiçoso (só baixa o que aparece na tela).
