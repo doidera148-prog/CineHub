@@ -142,6 +142,29 @@ test('filtro de fontes por qualidade, idioma e addon', () => {
   assert.equal(L.filterStreams(list, { quality: [], lang: [], addon: [] }).length, 3);
 });
 
+test('detecta contêineres e rejeita fontes MKV', () => {
+  assert.equal(L.streamContainer({ url: 'https://cdn.example/movie.mp4?token=x' }), 'mp4');
+  assert.equal(L.streamContainer({ url: 'https://cdn.example/movie.webm' }), 'webm');
+  assert.equal(L.streamContainer({ mimeType: 'video/x-matroska' }), 'mkv');
+  assert.equal(L.streamContainer({ name: 'Filme.1080p.mkv' }), 'mkv');
+  assert.equal(L.streamContainer({ url: 'https://cdn.example/play?id=123' }), 'unknown');
+  assert.equal(L.isMkvStream({ title: 'Filme.mkv' }), true);
+  assert.equal(L.isMkvStream({ mimeType: 'video/mp4' }), false);
+});
+
+test('fontes MP4/WebM são priorizadas na ordenação', () => {
+  const list = [
+    { url: 'https://cdn.example/movie.mkv', title: 'Filme 4K' },
+    { url: 'https://cdn.example/movie.mp4', title: 'Filme 720p' },
+    { url: 'https://cdn.example/movie.webm', title: 'Filme 1080p' },
+  ];
+  assert.deepEqual(L.sortStreams(list).map((s) => s.url), [
+    'https://cdn.example/movie.webm',
+    'https://cdn.example/movie.mp4',
+    'https://cdn.example/movie.mkv',
+  ]);
+});
+
 test('ordenação das fontes: maior qualidade e português primeiro', () => {
   const list = [
     { title: 'a 720p' },
