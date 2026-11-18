@@ -323,17 +323,22 @@ function pickTorrentVideo(result) {
 // Reproduz um torrent recém-aberto pelo backend (magnet ou arquivo .torrent).
 async function playOpenedTorrent(input, fallbackName) {
   activeTorrentToken = input.token || null;
-  const result = await pickTorrentVideo(input);
-  const name = result.name || fallbackName;
-  const id = `torrent:${Date.now()}`;
-  const fake = {
-    url: result.streamUrl,
-    name,
-    fileName: result.fileName,
-    mimeType: result.mimeType,
-    torrentToken: result.token || input.token,
-  };
-  await play(fake, name, id, { id, label: name, name, type: 'movie' }, []);
+  try {
+    const result = await pickTorrentVideo(input);
+    const name = result.name || fallbackName;
+    const id = `torrent:${Date.now()}`;
+    const fake = {
+      url: result.streamUrl,
+      name,
+      fileName: result.fileName,
+      mimeType: result.mimeType,
+      torrentToken: result.token || input.token,
+    };
+    await play(fake, name, id, { id, label: name, name, type: 'movie' }, []);
+  } catch (err) {
+    if (input.token && activeTorrentToken === input.token) await closeTorrentToken(input.token);
+    throw err;
+  }
 }
 
 // ---------- Páginas ----------
