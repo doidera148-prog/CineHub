@@ -276,7 +276,9 @@ impl TorrentEngine {
                     let cleanup = delete_torrent_with_retry(&session, id).await;
                     let detail = cleanup
                         .err()
-                        .map(|cleanup_error| format!("; a limpeza do novo torrent também falhou: {cleanup_error}"))
+                        .map(|cleanup_error| {
+                            format!("; a limpeza do novo torrent também falhou: {cleanup_error}")
+                        })
                         .unwrap_or_default();
                     return Err(format!(
                         "não foi possível encerrar o torrent anterior: {error}{detail}"
