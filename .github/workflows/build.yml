@@ -67,6 +67,13 @@ jobs:
         run: python3 -m unittest discover -s tests/python -v
       - name: Validar metadados e dependências Rust
         run: cargo metadata --manifest-path src-tauri/Cargo.toml --locked --format-version 1 --no-deps > /dev/null
+      - name: Verificar correção da dependência ringbuf vulnerável
+        run: |
+          if cargo tree --manifest-path src-tauri/Cargo.toml --locked -i ringbuf@0.4.8; then
+            echo "::error::ringbuf 0.4.8 vulnerável ainda está presente na árvore de dependências."
+            exit 1
+          fi
+          cargo tree --manifest-path src-tauri/Cargo.toml --locked -i ringbuf@0.5.3 | grep -q 'librqbit-utp'
       - name: Detectar dependências Rust não utilizadas
         run: |
           cargo install cargo-machete --locked
