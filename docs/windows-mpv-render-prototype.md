@@ -52,3 +52,44 @@ nativos.
 - [mpv render API](https://github.com/mpv-player/mpv/blob/master/include/mpv/render.h)
 - [mpv manual — D3D11 output mode](https://mpv.io/manual/stable/)
 - [libmpv2 Rust API](https://docs.rs/libmpv2/7.0.1/libmpv2/)
+
+
+## Etapa 2 — apresentação via DirectComposition
+
+O exemplo `src-tauri/examples/windows_mpv_directcomposition_probe.rs` vai além
+do probe anterior: obtém o `IDXGIDevice` a partir da swapchain do mpv, cria
+`IDCompositionDevice`, associa um visual à janela indicada por HWND e define a
+swapchain como conteúdo desse visual.
+
+Execute no Windows, com libmpv/D3D11 disponível:
+
+```powershell
+cargo run --manifest-path src-tauri/Cargo.toml --features mpv --example windows_mpv_directcomposition_probe -- "https://servidor/video.mkv" 0x123456
+```
+
+O segundo argumento é o HWND da janela principal do CineHub, em hexadecimal
+(ou decimal). Obtenha-o com Spy++ ou outra ferramenta de inspeção de janelas.
+O protótipo usa um destino DirectComposition na camada superior (`topmost=true`):
+o vídeo pode cobrir a WebView inteira. Isso é intencional para validar que a
+swapchain é apresentada no HWND correto; não representa ainda o layout final
+nem oferece controles HTML sobre o vídeo. A saída também fixa
+`d3d11-composition-size=1280x720`; redimensionamento dinâmico ainda não foi
+implementado.
+
+A etapa só pode ser considerada validada depois de executar em Windows com
+libmpv compilado com D3D11 e confirmar visualmente a imagem dentro da janela
+informada. O CI padrão não compila esses exemplos opt-in com a feature `mpv`.
+
+### Limites e próximo critério
+
+- Confirmar que o HWND informado pertence ao processo do CineHub e que o vídeo
+  aparece dentro dele, sem janela externa.
+- Testar se o destino topmost pode ser substituído por uma composição que permita
+  controles HTML clicáveis sobre o vídeo. O destino topmost tende a ficar acima
+  dos filhos da janela, portanto não se deve presumir que os controles WebView2
+  serão desenhados por cima.
+- Implementar atualização de tamanho/posição, DPI, fullscreen, minimizar/restaurar
+  e limpeza/recriação da árvore antes de qualquer ativação em produção.
+- Se a camada DirectComposition cobrir a WebView2 de forma inevitável, avaliar
+  WebView2 CompositionController ou controles nativos em vez de esconder isso
+  atrás de uma falsa integração HTML.
