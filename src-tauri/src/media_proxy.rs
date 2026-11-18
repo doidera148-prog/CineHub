@@ -510,7 +510,10 @@ mod tests {
     fn hls_relative_references_resolve_against_playlist_directory() {
         let base = Url::parse("https://cdn.example/live/master.m3u8").unwrap();
         let resolved = resolve_playlist_reference(&base, "720p/variant.m3u8").unwrap();
-        assert_eq!(resolved.as_str(), "https://cdn.example/live/720p/variant.m3u8");
+        assert_eq!(
+            resolved.as_str(),
+            "https://cdn.example/live/720p/variant.m3u8"
+        );
     }
 
     #[test]
