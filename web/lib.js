@@ -160,17 +160,40 @@
     return /dublad|dual|pt-?br|portugu/i.test(String(text || ''));
   }
 
-  // Ordena as fontes, nesta ordem de prioridade: dublagem ou áudio em português, fontes de torrent
-  // (infoHash/magnet, como as do Torrentio), reproduzíveis e, por fim, maior resolução.
-  // A ordem original é mantida quando tudo empata.
+  // Identifica o contêiner declarado pela fonte, sem confundir extensão com codec.
+  // URLs sem extensão continuam desconhecidas; MKV é bloqueado porque o player-alvo não o suporta.
+  function streamContainer(s) {
+    const mime = String(s?.mimeType || s?.mime || '').toLowerCase();
+    if (/matroska|x-matroska/.test(mime)) return 'mkv';
+    if (/video\\/mp4/.test(mime)) return 'mp4';
+    if (/video\\/webm/.test(mime)) return 'webm';
+    const values = [s?.url, s?.fileName, s?.name, s?.title].filter(Boolean);
+    for (const value of values) {
+      let path = String(value);
+      try { path = new URL(path).pathname; } catch { /* nome de arquivo ou rótulo do addon */ }
+      const match = path.match(/\\.(mkv|mp4|m4v|webm)(?:$|[?#])/i) || String(value).match(/\\b(matroska|mkv)\\b/i);
+      if (!match) continue;
+      const ext = String(match[1]).toLowerCase();
+      return ext === 'matroska' ? 'mkv' : ext === 'm4v' ? 'mp4' : ext;
+    }
+    return 'unknown';
+  }
+  function isMkvStream(s) {
+    return streamContainer(s) === 'mkv';
+  }
+
+  // MP4/WebM têm prioridade; MKV é descartado no carregamento das fontes.
+  // Mantém preferência por português e torrents, sem permitir que ela supere o formato compatível.
   function sortStreams(list) {
     const score = (s) => {
       const text = `${s.name || ''} ${s.title || ''}`;
+      const container = streamContainer(s);
+      const format = container === 'mp4' || container === 'webm' ? 2000 : 0;
       const hasLink = Boolean(s.url || s.externalUrl);
       const torrent = !hasLink && Boolean(s.infoHash || s.hash) ? 1000 : 0;
       const playable = hasLink || s.infoHash || s.hash ? 100 : 0;
       const portuguese = isPortuguese(text) ? 10000 : 0;
-      return portuguese + torrent + playable + qualityScore(text) * 2;
+      return portuguese + format + torrent + playable + qualityScore(text) * 2;
     };
     return list
       .map((s, i) => ({ s, i, score: score(s) }))
@@ -280,6 +303,8 @@
     cleanProgress,
     progressPercent,
     sortStreams,
+    streamContainer,
+    isMkvStream,
     torrentLanguage,
     nextEpisode,
     isPortuguese,
