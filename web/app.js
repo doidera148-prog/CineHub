@@ -1885,7 +1885,7 @@ async function skipSegmentsFor(id, meta) {
       timeout,
     ]);
     return Array.isArray(res?.segments) ? res.segments : [];
-  } catch (_) {
+  } catch {
     return [];
   }
 }
@@ -1935,7 +1935,7 @@ pipBtn.onclick = async () => {
   try {
     if (document.pictureInPictureElement) await document.exitPictureInPicture();
     else await videoEl.requestPictureInPicture();
-  } catch (_) {
+  } catch {
     toast('Não foi possível abrir a janela flutuante neste aparelho.');
   }
 };
