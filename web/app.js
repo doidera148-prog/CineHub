@@ -184,16 +184,7 @@ async function openExternal(url) {
 }
 
 function isLocalTorrentStream(stream) {
-  const url = String(stream?.url ?? '').trim();
-  try {
-    const parsed = new URL(url);
-    const isLoopback = parsed.hostname === '127.0.0.1'
-      || parsed.hostname === 'localhost'
-      || parsed.hostname === '[::1]';
-    return isLoopback && parsed.pathname.startsWith('/stream/');
-  } catch {
-    return false;
-  }
+  return window.CineHubLib.isLocalTorrentStream(stream);
 }
 
 function isTorrentStream(stream) {
@@ -1442,7 +1433,7 @@ async function play(stream, label, id, meta, subs) {
   nativeFailure = null;
   // Torrents já abertos são servidos pelo endpoint local do backend e nunca passam
   // pelo proxy HTTP público. Apenas fontes HTTP/HTTPS externas usam o proxy de mídia.
-  if (!isLocalTorrentStream(stream)) {
+  if (window.CineHubLib.shouldUseMediaProxy(stream)) {
     try {
       const originalUrl = stream.url;
       stream = {
