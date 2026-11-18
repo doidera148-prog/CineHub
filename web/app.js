@@ -164,7 +164,7 @@ function askConfirm(msg, okLabel) {
 }
 
 // Funções puras (URLs seguras, ordenação de fontes, próximo episódio) vêm de lib.js, testadas com node.
-const { isWebUrl, cssUrl, str, num, cleanFav, cleanProgress, progressPercent, sortStreams, nextEpisode, torrentLanguage, isSeriesLike, typeLabel, qualityLabel, filterStreams, sortStreamsBy } = window.CineHubLib;
+const { isWebUrl, cssUrl, str, num, cleanFav, cleanProgress, mergeBackupData, progressPercent, sortStreams, nextEpisode, torrentLanguage, isSeriesLike, typeLabel, qualityLabel, filterStreams, sortStreamsBy } = window.CineHubLib;
 
 const STREAM_LANG = { pt: 'Português', en: 'Inglês', other: 'Outros' };
 const STREAM_SORTS = [
@@ -632,28 +632,9 @@ async function importData(file) {
   }
   try {
     const data = JSON.parse(await file.text());
-    if (data?.app !== 'CineHub' || typeof data.version !== 'number') throw new Error('o arquivo não é um backup do CineHub');
-
-    const favs = getFavs();
-    const ids = new Set(favs.map((f) => f.id));
-    for (const f of Array.isArray(data.favs) ? data.favs : []) {
-      if (f && typeof f.id === 'string' && f.id && !ids.has(f.id)) {
-        favs.push(cleanFav(f));
-        ids.add(f.id);
-      }
-    }
-    store.set('favs', favs.slice(0, MAX_FAVS));
-
-    const progress = store.get('progress', {});
-    for (const [key, p] of Object.entries(data.progress && typeof data.progress === 'object' ? data.progress : {})) {
-      if (!p || typeof p !== 'object') continue;
-      const incoming = cleanProgress(p);
-      if (!progress[key] || incoming.updated > num(progress[key].updated)) progress[key] = incoming;
-    }
-    const kept = Object.entries(progress)
-      .sort((a, b) => num(b[1].updated) - num(a[1].updated))
-      .slice(0, MAX_PROGRESS);
-    store.set('progress', Object.fromEntries(kept));
+    const merged = mergeBackupData(getFavs(), store.get('progress', {}), data, MAX_FAVS, MAX_PROGRESS);
+    store.set('favs', merged.favs);
+    store.set('progress', merged.progress);
 
     toast('Dados importados.');
     libraryPage();
