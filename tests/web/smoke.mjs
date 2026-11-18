@@ -18,7 +18,7 @@ const server = createServer(async (req, res) => {
 });
 await new Promise((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
 const base = `http://127.0.0.1:${server.address().port}`;
-const fixtures = `window.__calls=[];window.__TAURI__={core:{invoke:async(cmd,args)=>{window.__calls.push({cmd,args});const metas=(n,p)=>Array.from({length:n},(_,i)=>({id:'tt'+p+i,type:'movie',name:p+' filme '+i,releaseInfo:'2026'}));switch(cmd){case'home':return{rows:[{title:'Populares',addon:'Teste',transportUrl:'https://test.invalid/manifest.json',type:args.kind,catalogId:'top',metas:metas(20,'home')}]};case'search':return{rows:[]};case'catalog_page':return{metas:[]};case'list_addons':return[];case'meta':return{meta:{id:args.id,type:'movie',name:'Título de teste',description:'Descrição'}};case'streams':if(args.id==='tt2')throw Error('offline');return{streams:[{name:'Fonte MP4 de teste',title:'1080p',url:'https://stream.test/sample.mp4',mimeType:'video/mp4'}],subtitles:[{lang:'pt',url:'https://subs.test/sample.vtt'}],errors:[]};case'media_proxy_url':return'${base}/sample.mp4';case'subtitle':return'WEBVTT\\n\\n00:00:00.000 --> 00:00:01.000\\nLegenda de teste';case'skip_segments':return{segments:[]};case'plugin:exoplayer|play':if(window.__rejectNativePlayer)throw Error('falha nativa simulada');return{positionMs:0,durationMs:0};case'torrent_stats':return{active:true,state:'Live',downloadSpeedBytes:1250000,uploadSpeedBytes:64000,peers:8,peersSeen:14,downloadedBytes:500000000,totalBytes:1000000000,error:null};default:return{};}}}};`;
+const fixtures = `window.__calls=[];window.__TAURI__={core:{invoke:async(cmd,args)=>{window.__calls.push({cmd,args});const metas=(n,p)=>Array.from({length:n},(_,i)=>({id:'tt'+p+i,type:'movie',name:p+' filme '+i,releaseInfo:'2026'}));switch(cmd){case'home':return{rows:[{title:'Populares',addon:'Teste',transportUrl:'https://test.invalid/manifest.json',type:args.kind,catalogId:'top',metas:metas(20,'home')}]};case'search':return{rows:[]};case'catalog_page':return{metas:[]};case'list_addons':return[];case'meta':return{meta:{id:args.id,type:'movie',name:window.__maliciousMetaName || 'Título de teste',description:'Descrição'}};case'streams':if(args.id==='tt2')throw Error('offline');return{streams:[{name:'Fonte MP4 de teste',title:'1080p',url:'https://stream.test/sample.mp4',mimeType:'video/mp4'}],subtitles:[{lang:'pt',url:'https://subs.test/sample.vtt'}],errors:[]};case'media_proxy_url':return'${base}/sample.mp4';case'subtitle':return'WEBVTT\\n\\n00:00:00.000 --> 00:00:01.000\\nLegenda de teste';case'skip_segments':return{segments:[]};case'plugin:exoplayer|play':if(window.__rejectNativePlayer)throw Error('falha nativa simulada');return{positionMs:0,durationMs:0};case'torrent_stats':return{active:true,state:'Live',downloadSpeedBytes:1250000,uploadSpeedBytes:64000,peers:8,peersSeen:14,downloadedBytes:500000000,totalBytes:1000000000,error:null};default:return{};}}}};`;
 const routes = ['#/', '#/movies', '#/series', '#/animes', '#/search?q=filme', '#/library', '#/addons', '#/detail/movie/tt1'];
 const failures = [];
 const browser = await chromium.launch();
@@ -157,6 +157,25 @@ async function checkAndroidPlayerFallback() {
   await page.close();
 }
 
+async function checkUntrustedMetadataEscaping() {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const payload = '<img src=x onerror=alert(1)>';
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.addInitScript(fixtures);
+  await page.addInitScript((value) => { window.__maliciousMetaName = value; }, payload);
+  await page.goto(`${base}/#/detail/movie/tt1`);
+  await page.waitForFunction(() => document.querySelector('#view')?.textContent.includes('onerror'));
+  const result = await page.evaluate(() => ({
+    injected: document.querySelector('#view img[onerror]') !== null,
+    literal: document.querySelector('#view')?.textContent.includes('<img src=x onerror=alert(1)>'),
+  }));
+  if (result.injected) failures.push('[security-xss] metadado de addon foi interpretado como HTML executável');
+  if (!result.literal) failures.push('[security-xss] metadado não foi preservado como texto escapado');
+  if (errors.length) failures.push(...errors.map((e) => `[security-xss] ${e}`));
+  await page.close();
+}
+
 async function checkBackupImport() {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   const errors = [];
@@ -210,7 +229,7 @@ async function checkTv(viewport, label) {
   if (await page.evaluate(() => document.activeElement?.closest('.strip') === document.querySelector('.strip'))) failures.push(`[${label}] controle ficou preso na borda do trilho`);
   await page.close();
 }
-try { await check({ width: 360, height: 800 }, 'celular'); await check({ width: 1280, height: 800 }, 'desktop'); await checkTv({ width: 1280, height: 720 }, 'Android TV 720p'); await checkTv({ width: 3840, height: 2160 }, 'Android TV 4K'); await checkBackupImport(); await checkWindowsPlayer(); await checkAndroidPlayer(); await checkAndroidPlayerFallback(); }
+try { await check({ width: 360, height: 800 }, 'celular'); await check({ width: 1280, height: 800 }, 'desktop'); await checkTv({ width: 1280, height: 720 }, 'Android TV 720p'); await checkTv({ width: 3840, height: 2160 }, 'Android TV 4K'); await checkBackupImport(); await checkUntrustedMetadataEscaping(); await checkWindowsPlayer(); await checkAndroidPlayer(); await checkAndroidPlayerFallback(); }
 finally { await browser.close(); server.close(); }
 if (failures.length) { console.error('Falhas:\n- ' + failures.join('\n- ')); process.exit(1); }
 console.log('Smoke test ok: rotas, acessibilidade e navegação em celular, desktop e Android TV.');
