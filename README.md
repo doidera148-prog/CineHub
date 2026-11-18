@@ -7,7 +7,7 @@ Aplicativo de mídia multiplataforma, escrito em Rust + Tauri 2, com interface e
 ## Plataformas
 
 - **Android e Android TV:** APK único, com player nativo Media3/ExoPlayer. A interface detecta TVs Android de tela grande e ativa layout próprio para controle remoto.
-- **Windows:** pacote desktop Tauri com reprodução integrada no WebView2, usando Video.js/HTML5. O vídeo permanece dentro da janela do CineHub; o build Windows não depende de libmpv.
+- **Windows:** pacote desktop Tauri com player nativo libmpv/FFmpeg incorporado à janela do CineHub. A superfície nativa é recortada para deixar elementos HTML da interface visíveis e clicáveis; a primeira etapa mantém o OSC do mpv para os controles de transporte enquanto a sobreposição é validada.
 - **Linux e macOS:** pacotes desktop Tauri; reprodução pelo player disponível no WebView quando o player nativo não está habilitado.
 - **iOS:** não é alvo de build nem de teste.
 
@@ -23,7 +23,7 @@ Aplicativo de mídia multiplataforma, escrito em Rust + Tauri 2, com interface e
 
 ### Reprodução
 - **Android/Android TV:** player nativo baseado em AndroidX Media3/ExoPlayer, com seleção manual de áudio, seleção e desativação de legendas, preferência por português, controle por D-pad e ações para pular segmentos quando disponíveis.
-- **Windows:** player integrado ao WebView2, baseado em Video.js/HTML5, sem abrir janela externa do mpv.
+- **Windows:** player nativo libmpv, usando os codecs e contêineres suportados pelo mpv/FFmpeg, sem limitar a escolha pela extensão do arquivo. A janela de vídeo usa regiões Win32 para preservar os elementos HTML do CineHub sobre a superfície nativa.
 - **Linux e macOS:** player baseado em Video.js/WebView; o player nativo só é usado se estiver habilitado em uma compilação específica.
 - Proxy HTTP local para streams HTTP/HTTPS, com suporte a respostas em blocos, solicitações Range e reescrita de playlists HLS e seus recursos filhos.
 - A interface oferece recuperação para buscas de fontes sem resultado, incluindo tentar novamente, atualizar e limpar filtros quando essas ações estão disponíveis.
