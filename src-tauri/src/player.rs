@@ -22,11 +22,7 @@ pub struct PlayerCutout {
 #[cfg(any(all(windows, feature = "mpv"), test))]
 /// Recorta retângulos de controle aos limites da caixa do vídeo, evitando
 /// regiões Win32 negativas, vazias ou fora da superfície nativa.
-fn clipped_cutouts(
-    width: u32,
-    height: u32,
-    cutouts: &[PlayerCutout],
-) -> Vec<(i32, i32, i32, i32)> {
+fn clipped_cutouts(width: u32, height: u32, cutouts: &[PlayerCutout]) -> Vec<(i32, i32, i32, i32)> {
     let max_x = width.min(i32::MAX as u32) as i32;
     let max_y = height.min(i32::MAX as u32) as i32;
     cutouts
@@ -403,7 +399,15 @@ mod win {
         unsafe {
             SetForegroundWindow(video);
             SetFocus(video);
-            SetWindowPos(video, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+            SetWindowPos(
+                video,
+                HWND_TOP,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+            );
         }
     }
 
@@ -460,10 +464,11 @@ mod win {
         let video = VIDEO.swap(0, std::sync::atomic::Ordering::SeqCst);
         if video != 0 {
             // SAFETY: região nula restaura a forma retangular padrão da janela.
-            unsafe { SetWindowRgn(video as usize as Hwnd, std::ptr::null_mut(), 1); }
+            unsafe {
+                SetWindowRgn(video as usize as Hwnd, std::ptr::null_mut(), 1);
+            }
         }
     }
-
 }
 
 #[cfg(not(feature = "mpv"))]
@@ -507,10 +512,30 @@ mod tests {
     #[test]
     fn player_cutouts_are_clipped_to_the_video_box() {
         let cuts = [
-            super::PlayerCutout { x: -10, y: 5, width: 30, height: 20 },
-            super::PlayerCutout { x: 90, y: 90, width: 30, height: 30 },
-            super::PlayerCutout { x: 110, y: 10, width: 5, height: 5 },
-            super::PlayerCutout { x: 10, y: 10, width: 0, height: 20 },
+            super::PlayerCutout {
+                x: -10,
+                y: 5,
+                width: 30,
+                height: 20,
+            },
+            super::PlayerCutout {
+                x: 90,
+                y: 90,
+                width: 30,
+                height: 30,
+            },
+            super::PlayerCutout {
+                x: 110,
+                y: 10,
+                width: 5,
+                height: 5,
+            },
+            super::PlayerCutout {
+                x: 10,
+                y: 10,
+                width: 0,
+                height: 20,
+            },
         ];
         assert_eq!(
             super::clipped_cutouts(100, 100, &cuts),
