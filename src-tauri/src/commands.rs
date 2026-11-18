@@ -415,11 +415,12 @@ pub async fn media_proxy_url(
     state: State<'_, AppState>,
     url: String,
     behavior_hints: Option<Value>,
+    mime_type: Option<String>,
 ) -> Result<String, String> {
     let proxy = state.media_proxy.get_or_init(|| async {
         crate::media_proxy::MediaProxy::start().await
     }).await.as_ref().map_err(Clone::clone)?;
-    proxy.register(&url, behavior_hints.as_ref()).await
+    proxy.register(&url, behavior_hints.as_ref(), mime_type.as_deref()).await
 }
 
 /// Retorna estatísticas do torrent ativo, sem iniciar uma sessão nova.
