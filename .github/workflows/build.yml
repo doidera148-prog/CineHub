@@ -97,6 +97,9 @@ jobs:
       - name: Testes de navegação por controle remoto (D-pad)
         working-directory: tests/web
         run: node remote-navigation.test.mjs
+      - name: Testes de regressão da pesquisa da interface
+        working-directory: tests/web
+        run: node search.test.mjs
 
   desktop:
     strategy:
