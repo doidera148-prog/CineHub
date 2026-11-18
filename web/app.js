@@ -716,7 +716,7 @@ function applyTheme(pref) {
 applyTheme(themePref());
 
 // Idioma das legendas (preferência guardada neste aparelho).
-const SUB_LANGS = { pt: /^(por|pt)/i, en: /^(eng|en)/i, off: null };
+const SUB_LANGS = { pt: /^(por|pt|portugu[eê]s)/i, en: /^(eng|en|english)/i, off: null };
 function subPref() {
   const v = store.get('subLang', 'pt');
   return Object.prototype.hasOwnProperty.call(SUB_LANGS, v) ? v : 'pt';
@@ -1811,8 +1811,11 @@ document.addEventListener('visibilitychange', () => {
 function pickSubtitles(stream, subs) {
   const re = SUB_LANGS[subPref()];
   if (!re) return [];
-  const all = [...(stream.subtitles || []), ...(subs || [])];
-  return all.filter((s) => re.test(s.lang || '') && s.url).slice(0, 1);
+  const all = [...(stream.subtitles || []), ...(Array.isArray(subs) ? subs : [])];
+  const languageOf = (subtitle) => String(subtitle?.lang || subtitle?.language || subtitle?.srclang || '').trim();
+  // Addons Stremio podem devolver códigos ISO (por/pt-BR) ou nomes ("Português",
+  // "Portuguese (Brazil)"). Aceita os dois formatos para não descartar uma legenda válida.
+  return all.filter((s) => s?.url && re.test(languageOf(s))).slice(0, 1);
 }
 
 function clearTextTracks() {
