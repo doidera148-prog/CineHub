@@ -171,3 +171,40 @@ test('teclas 0–9 pulam para 0–90% do vídeo', () => {
   assert.equal(L.seekFraction('5', NaN), null);
   assert.equal(L.seekFraction('5', 0), null);
 });
+
+test('streams torrent locais preparados nunca passam pelo proxy HTTP', () => {
+  const localStreams = [
+    { url: 'http://127.0.0.1:43127/stream/token' },
+    { url: 'http://localhost:43127/stream/token?file=2' },
+    { url: 'http://[::1]:43127/stream/token' },
+  ];
+  for (const stream of localStreams) {
+    assert.equal(L.isLocalTorrentStream(stream), true);
+    assert.equal(L.shouldUseMediaProxy(stream), false);
+  }
+});
+
+test('somente endpoint /stream em loopback é tratado como torrent preparado', () => {
+  const external = [
+    'https://cdn.example/stream/token',
+    'http://192.168.1.20:43127/stream/token',
+    'http://127.0.0.1:43127/media/token',
+    'not a url',
+  ];
+  for (const url of external) {
+    const stream = { url };
+    assert.equal(L.isLocalTorrentStream(stream), false);
+    assert.equal(L.shouldUseMediaProxy(stream), true);
+  }
+});
+
+test('URL local preparada não é reaberta como magnet mesmo herdando infoHash', () => {
+  assert.equal(L.isTorrentSource({
+    url: 'http://127.0.0.1:43127/stream/token',
+    infoHash: 'a'.repeat(40),
+  }), false);
+  assert.equal(L.isTorrentSource({ url: 'magnet:?xt=urn:btih:abc' }), true);
+  assert.equal(L.isTorrentSource({ infoHash: 'a'.repeat(40) }), true);
+  assert.equal(L.isTorrentSource({ hash: 'b'.repeat(40) }), true);
+  assert.equal(L.isTorrentSource({ url: 'https://cdn.example/video.mp4' }), false);
+});
