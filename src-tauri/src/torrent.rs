@@ -77,8 +77,6 @@ pub struct TorrentEngine {
     server_failed: Arc<AtomicBool>,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TorrentNetworkStats {
@@ -93,6 +91,8 @@ pub struct TorrentNetworkStats {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TorrentPlayback {
     pub token: String,
     pub stream_url: String,
