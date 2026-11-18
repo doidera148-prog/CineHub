@@ -611,6 +611,97 @@ mod tests {
         }
     }
 
+    async fn capture_redirected_playlist_headers(
+        State(seen): State<Arc<std::sync::Mutex<Vec<bool>>>>,
+        headers: HeaderMap,
+    ) -> &'static str {
+        seen.lock().unwrap().push(
+            headers.contains_key(header::AUTHORIZATION) || headers.contains_key(header::COOKIE),
+        );
+        "#EXTM3U\\nsegment.ts\\n"
+    }
+
+    async fn capture_redirected_segment_headers(
+        State(seen): State<Arc<std::sync::Mutex<Vec<bool>>>>,
+        headers: HeaderMap,
+    ) -> &'static str {
+        seen.lock().unwrap().push(
+            headers.contains_key(header::AUTHORIZATION) || headers.contains_key(header::COOKIE),
+        );
+        "segment"
+    }
+
+    #[tokio::test]
+    async fn hls_redirect_to_another_origin_drops_authorization_and_cookie() {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let destination = Router::new()
+            .route(
+                "/redirected.m3u8",
+                axum::routing::get(capture_redirected_playlist_headers),
+            )
+            .route(
+                "/segment.ts",
+                axum::routing::get(capture_redirected_segment_headers),
+            )
+            .with_state(seen.clone());
+        let destination_address = start_test_server(destination).await;
+
+        let redirect_target = format!("http://{destination_address}/redirected.m3u8");
+        let redirect = Router::new().route(
+            "/start.m3u8",
+            axum::routing::get(move || async move {
+                axum::response::Redirect::temporary(&redirect_target)
+            }),
+        );
+        let redirect_address = start_test_server(redirect).await;
+
+        let state = local_test_state();
+        let token = Uuid::new_v4().simple().to_string();
+        state.sessions.write().await.insert(
+            token.clone(),
+            Target {
+                url: Url::parse(&format!("http://{redirect_address}/start.m3u8")).unwrap(),
+                headers: vec![
+                    (
+                        header::AUTHORIZATION,
+                        HeaderValue::from_static("Bearer integration-test-secret"),
+                    ),
+                    (
+                        header::COOKIE,
+                        HeaderValue::from_static("session=integration-test-secret"),
+                    ),
+                ],
+                force_hls: true,
+                expires: Instant::now() + SESSION_TTL,
+            },
+        );
+
+        let playlist_response =
+            request_test_resource(&state, token, HeaderMap::new()).await;
+        assert_eq!(playlist_response.status(), StatusCode::OK);
+        let playlist_body = axum::body::to_bytes(playlist_response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let playlist = String::from_utf8(playlist_body.to_vec()).unwrap();
+        let segment_token = rewritten_token(
+            playlist
+                .lines()
+                .find(|line| line.starts_with("/media/"))
+                .expect("redirected segment URI missing"),
+        );
+
+        let segment_response =
+            request_test_resource(&state, segment_token, HeaderMap::new()).await;
+        assert_eq!(segment_response.status(), StatusCode::OK);
+        assert_eq!(
+            &axum::body::to_bytes(segment_response.into_body(), 1024)
+                .await
+                .unwrap()[..],
+            b"segment"
+        );
+        assert_eq!(*seen.lock().unwrap(), vec![false, false]);
+    }
+
     #[tokio::test]
     async fn hls_proxy_integration_rewrites_master_variant_key_and_segment_range() {
         let origin = Router::new()
