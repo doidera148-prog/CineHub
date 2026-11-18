@@ -107,7 +107,7 @@ jobs:
           key: tauri-cli-2-${{ runner.os }}-${{ hashFiles('.github/workflows/build.yml') }}
       - name: Instalar Tauri CLI
         if: steps.tauri-cache.outputs.cache-hit != 'true'
-        run: cargo install tauri-cli --version "^2" --locked
+        run: cargo install tauri-cli --version "^2" --locked --force
       - name: Gerar pacotes
         working-directory: src-tauri
         run: cargo tauri build
