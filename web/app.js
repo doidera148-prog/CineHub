@@ -819,6 +819,9 @@ async function addonsPage() {
   const communityList = $('#community-list'), installedList = $('#al');
   let activeFilter = 'all', installed = [];
   const addonHealth = new Map();
+  const COMMUNITY_CHECK_TTL = 15 * 60 * 1000;
+  let communityLastCheckedAt = 0;
+  let communityCheckPromise = null;
   const installedFor = (addon) => installed.some((entry) => entry.manifest?.id === addon.id || entry.transportUrl === addon.url);
 
   const renderCommunity = () => {
@@ -836,7 +839,7 @@ async function addonsPage() {
           <div><h3>${esc(addon.name)}</h3><span class="muted small">v${esc(addon.version)}</span></div>
         </div>
         <p>${esc(addon.description)}</p>
-        <p class="addon-health muted small" data-community-status="${esc(addon.id)}" role="status">${esc(addonHealth.get(addon.id)?.label || 'Não verificado')}</p>
+        <p class="addon-health muted small" data-community-status="${esc(addon.id)}" data-state="${esc(addonHealth.get(addon.id)?.state || 'unknown')}" role="status">${esc(addonHealth.get(addon.id)?.label || 'Não verificado')}</p>
         <div class="community-tags">${addon.tags.map((tag) => `<span>${esc(tag)}</span>`).join('')}</div>
         <button type="button" class="community-install${done ? ' installed' : ''}" data-community-install="${esc(addon.id)}" ${done ? 'disabled' : ''}>${done ? '✓ Instalado' : '＋ Instalar'}</button>
       </article>`;
@@ -869,6 +872,7 @@ async function addonsPage() {
       button.classList.toggle('on', selected);
       button.setAttribute('aria-selected', String(selected));
     });
+    if (tab === 'community') checkCommunityAddons(false);
   };
   document.querySelectorAll('[data-addon-tab]').forEach((button) => { button.onclick = () => selectTab(button.dataset.addonTab); });
   document.querySelectorAll('[data-addon-filter]').forEach((button) => {
@@ -882,7 +886,9 @@ async function addonsPage() {
       renderCommunity();
     };
   });
-  async function checkCommunityAddons() {
+  async function checkCommunityAddons(force = false) {
+    if (communityCheckPromise) return communityCheckPromise;
+    if (!force && communityLastCheckedAt && Date.now() - communityLastCheckedAt < COMMUNITY_CHECK_TTL) return;
     const checkButton = $('#check-community');
     if (checkButton) { checkButton.disabled = true; checkButton.textContent = 'Verificando…'; }
     const queue = [...COMMUNITY_ADDONS];
@@ -892,7 +898,7 @@ async function addonsPage() {
         const addon = queue[cursor++];
         addonHealth.set(addon.id, { state: 'checking', label: 'Verificando disponibilidade…' });
         const status = communityList.querySelector(`[data-community-status="${CSS.escape(addon.id)}"]`);
-        if (status) status.textContent = 'Verificando disponibilidade…';
+        if (status) { status.textContent = 'Verificando disponibilidade…'; status.dataset.state = 'checking'; }
         try {
           const result = await call('check_addon_manifest', {
             url: addon.url, expectedId: addon.id, expectedVersion: addon.version,
@@ -912,16 +918,21 @@ async function addonsPage() {
         }
       }
     };
-    try {
-      await Promise.all(Array.from({ length: Math.min(3, queue.length) }, worker));
-      toast('Verificação dos addons concluída.');
-    } finally {
-      if (checkButton) { checkButton.disabled = false; checkButton.textContent = 'Verificar novamente'; }
-    }
+    communityCheckPromise = (async () => {
+      try {
+        await Promise.all(Array.from({ length: Math.min(3, queue.length) }, worker));
+        communityLastCheckedAt = Date.now();
+        toast('Verificação dos addons concluída.');
+      } finally {
+        communityCheckPromise = null;
+        if (checkButton) { checkButton.disabled = false; checkButton.textContent = 'Verificar novamente'; }
+      }
+    })();
+    return communityCheckPromise;
   }
 
   $('#community-search').addEventListener('input', renderCommunity);
-  $('#check-community').onclick = checkCommunityAddons;
+  $('#check-community').onclick = () => checkCommunityAddons(true);
   communityList.addEventListener('click', async (event) => {
     const button = event.target.closest('[data-community-install]');
     if (!button || button.disabled) return;
