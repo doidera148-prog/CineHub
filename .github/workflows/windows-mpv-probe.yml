@@ -6,8 +6,12 @@ on:
     branches: [main]
     paths:
       - 'src-tauri/examples/windows_mpv_*.rs'
+      - 'src-tauri/src/player.rs'
       - 'src-tauri/Cargo.toml'
+      - 'src-tauri/tauri.windows.conf.json'
+      - 'web/app.js'
       - '.github/workflows/windows-mpv-probe.yml'
+      - '.github/workflows/build.yml'
 
 permissions:
   contents: read
@@ -41,10 +45,10 @@ jobs:
           $dll = Get-ChildItem $dest -Filter 'libmpv-2.dll' -Recurse | Select-Object -First 1
           if (-not $dll) { throw 'libmpv-2.dll não foi encontrado no pacote.' }
           $env:MPV_LIB_DIR = $dll.Directory.FullName
-          # O tauri.windows.conf.json declara esta DLL como recurso obrigatório.
-          $resources = Join-Path $env:GITHUB_WORKSPACE 'src-tauri/resources'
+          # O bundle Windows inclui todas as DLLs necessárias ao runtime do libmpv.
+          $resources = Join-Path $env:GITHUB_WORKSPACE 'src-tauri/resources/mpv'
           New-Item -ItemType Directory -Force -Path $resources | Out-Null
-          Copy-Item $dll.FullName (Join-Path $resources 'mpv-2.dll') -Force
+          Get-ChildItem $dll.Directory.FullName -Filter '*.dll' | Copy-Item -Destination $resources -Force
           "MPV_LIB_DIR=$($dll.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
           "MPV_DLL=$($dll.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Create MSVC import library
@@ -68,6 +72,16 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path $importLib)) { throw 'Falha ao gerar mpv.lib.' }
           "LIB=$env:MPV_LIB_DIR;$env:LIB" | Out-File -FilePath $env:GITHUB_ENV -Append
           "PATH=$env:MPV_LIB_DIR;$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Append
-      - name: Compile all libmpv examples
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
+      - name: Build Windows app with libmpv enabled
         working-directory: src-tauri
-        run: cargo check --examples --features mpv --target x86_64-pc-windows-msvc
+        run: cargo tauri build --config tauri.windows.conf.json --features mpv
+      - name: Upload Windows installer for testing
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cinehub-windows-mpv-test
+          path: |
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.exe
+          if-no-files-found: error
