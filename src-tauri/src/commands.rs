@@ -514,6 +514,16 @@ pub async fn torrent_select_file(
     }))
 }
 
+/// Encerra um torrent e invalida o token de reprodução local.
+#[tauri::command]
+pub async fn torrent_close(state: State<'_, AppState>, token: String) -> Result<bool, String> {
+    let engine = state
+        .torrent
+        .as_ref()
+        .ok_or("o motor de torrent não está disponível neste aparelho")?;
+    engine.close(&token).await
+}
+
 /// Tamanho máximo de um backup da biblioteca (2 MiB).
 const MAX_EXPORT_BYTES: usize = 2 * 1024 * 1024;
 
