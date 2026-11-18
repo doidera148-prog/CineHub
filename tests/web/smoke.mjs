@@ -41,6 +41,10 @@ async function check(viewport, label) {
   await cards.first().focus();
   await page.keyboard.press('ArrowRight');
   if (await page.evaluate(() => document.activeElement?.getAttribute('aria-label')) !== await cards.nth(1).getAttribute('aria-label')) failures.push(`[${label}] setas não navegam entre cards`);
+  // Na borda esquerda, o foco deve poder sair do trilho em vez de saltar para o último card.
+  await cards.first().focus();
+  await page.keyboard.press('ArrowLeft');
+  if (await page.evaluate(() => document.activeElement?.closest('.strip') === document.querySelector('.strip'))) failures.push(`[${label}] controle ficou preso no início do trilho`);
   await page.keyboard.press('Enter');
   await page.waitForTimeout(350);
   if (!(await page.evaluate(() => location.hash.startsWith('#/detail/')))) failures.push(`[${label}] Enter não ativou o card focado`);
