@@ -1909,6 +1909,10 @@ async function route() {
   const seq = ++routeSeq;
   const alive = () => seq === routeSeq;
   clearTimeout(debounceTimer);
+  if (sectionOf() !== 'settings' && torrentStatsTimer !== null) {
+    clearInterval(torrentStatsTimer);
+    torrentStatsTimer = null;
+  }
 
   const path = location.hash.replace(/^#\/?/, '').split('?')[0];
   const [section, kind, id] = path.split('/');
