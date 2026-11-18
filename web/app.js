@@ -2021,6 +2021,7 @@ async function route() {
   const [section, kind, id] = path.split('/');
   const active = section === 'detail' ? '' : section || 'home';
   document.body.classList.toggle('search-active', active === 'search');
+  document.body.classList.toggle('animes-active', active === 'animes');
   if (player.classList.contains('hidden') && section !== 'detail') {
     document.title = PAGE_TITLES[active] ? `${PAGE_TITLES[active]} · CineHub` : 'CineHub';
   }
@@ -2048,8 +2049,9 @@ document.addEventListener('keydown', (e) => {
   const typing = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el?.isContentEditable;
   if (typing || !player.classList.contains('hidden') || confirmDialog.open) return;
   e.preventDefault();
-  topQ.focus();
-  topQ.select();
+  const target = sectionOf() === 'animes' ? $('#anime-search-input') : topQ;
+  target?.focus();
+  target?.select();
 });
 
 document.addEventListener('keydown', () => (usingKeys = true), true);
