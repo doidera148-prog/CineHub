@@ -69,10 +69,8 @@ impl MediaProxy {
         if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
             return Err("somente fontes HTTP/HTTPS podem usar o proxy".into());
         }
-        if url.path().to_ascii_lowercase().ends_with(".m3u8")
-            || url.query_pairs().any(|(k, v)| k.eq_ignore_ascii_case("type") && v.eq_ignore_ascii_case("hls"))
-        {
-            return Err("HLS ainda não está habilitado no proxy: playlists e segmentos precisam de reescrita segura".into());
+        if url.path().to_ascii_lowercase().ends_with(".mpd") {
+            return Err("DASH ainda não está habilitado no proxy".into());
         }
         if !crate::addon::is_safe_url(url.as_str()).await {
             return Err("fonte bloqueada: o proxy só aceita destinos públicos".into());
@@ -156,7 +154,30 @@ async fn proxy_request(
     }
     let upstream = response.ok_or((StatusCode::BAD_GATEWAY, "redirecionamentos demais".into()))?;
     let status = StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let content_type = upstream.headers().get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok()).unwrap_or("").to_ascii_lowercase();
+    if content_type.contains("application/dash+xml") || url.path().to_ascii_lowercase().ends_with(".mpd") {
+        return Err((StatusCode::UNSUPPORTED_MEDIA_TYPE, "manifestos DASH ainda não são suportados pelo proxy seguro".into()));
+    }
+    let is_hls = content_type.contains("mpegurl") || url.path().to_ascii_lowercase().ends_with(".m3u8");
     let mut builder = Response::builder().status(status);
+    if is_hls && status.is_success() && method != Method::HEAD {
+        let bytes = upstream.bytes().await.map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))?;
+        if bytes.len() > 4 * 1024 * 1024 {
+            return Err((StatusCode::PAYLOAD_TOO_LARGE, "playlist HLS excede 4 MiB".into()));
+        }
+        let playlist = String::from_utf8(bytes.to_vec())
+            .map_err(|_| (StatusCode::BAD_GATEWAY, "playlist HLS não é UTF-8".into()))?;
+        let rewritten = rewrite_playlist(&state, &url, &target.headers, &playlist).await?;
+        builder = builder.header(header::CONTENT_TYPE, "application/vnd.apple.mpegurl");
+        builder = builder.header(header::CACHE_CONTROL, "no-store");
+        builder = builder.header("access-control-allow-origin", "*")
+            .header("access-control-allow-methods", "GET, HEAD, OPTIONS")
+            .header("access-control-allow-headers", "Range, If-Range")
+            .header("access-control-expose-headers", "Content-Length, Content-Range, Accept-Ranges");
+        return builder.body(Body::from(rewritten))
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
+    }
     for name in [header::CONTENT_TYPE, header::CONTENT_LENGTH, header::CONTENT_RANGE, header::ACCEPT_RANGES, header::ETAG, header::LAST_MODIFIED] {
         if let Some(value) = upstream.headers().get(&name) { builder = builder.header(name, value); }
     }
@@ -178,6 +199,62 @@ async fn proxy_request(
         Body::from_stream(chunks)
     };
     builder.body(body).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+async fn rewrite_playlist(
+    state: &ProxyState,
+    base: &Url,
+    headers: &[(header::HeaderName, HeaderValue)],
+    playlist: &str,
+) -> Result<String, (StatusCode, String)> {
+    let mut output = Vec::new();
+    for line in playlist.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            output.push(line.to_string());
+        } else if trimmed.starts_with('#') {
+            let mut rewritten = line.to_string();
+            let mut search_from = 0;
+            while let Some(relative) = rewritten[search_from..].find("URI=\\\"") {
+                let start = search_from + relative + 5;
+                let end = rewritten[start..].find('"').map(|n| start + n)
+                    .ok_or((StatusCode::BAD_GATEWAY, "atributo URI inválido na playlist".into()))?;
+                let original = rewritten[start..end].to_string();
+                let local = register_child(state, base, &original, headers).await?;
+                rewritten.replace_range(start..end, &local);
+                search_from = start + local.len() + 1;
+            }
+            output.push(rewritten);
+        } else {
+            output.push(register_child(state, base, trimmed, headers).await?);
+        }
+    }
+    Ok(format!("{}\\n", output.join("\\n")))
+}
+
+async fn register_child(
+    state: &ProxyState,
+    base: &Url,
+    reference: &str,
+    headers: &[(header::HeaderName, HeaderValue)],
+) -> Result<String, (StatusCode, String)> {
+    let url = base.join(reference)
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "URI filha inválida na playlist".into()))?;
+    if !crate::addon::is_safe_url(url.as_str()).await {
+        return Err((StatusCode::FORBIDDEN, "playlist referencia destino não permitido".into()));
+    }
+    let token = Uuid::new_v4().simple().to_string();
+    let mut sessions = state.sessions.write().await;
+    sessions.retain(|_, v| v.expires > Instant::now());
+    if sessions.len() >= 4096 {
+        return Err((StatusCode::TOO_MANY_REQUESTS, "limite de recursos HLS atingido".into()));
+    }
+    sessions.insert(token.clone(), Target {
+        url,
+        headers: headers.to_vec(),
+        expires: Instant::now() + SESSION_TTL,
+    });
+    Ok(format!("/media/{token}"))
 }
 
 #[cfg(test)]
