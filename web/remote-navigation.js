@@ -184,14 +184,23 @@
     const activeDialog = document.querySelector('dialog[open]');
     if (current?.matches?.('select, input[type="range"]')) return;
     if (isTextEntry(current) && (direction === 'left' || direction === 'right')) return;
-    const scope = activeDialog || document;
-    const items = visibleFocusables(scope);
+    // A navegação é isolada por região: uma seta pressionada no conteúdo nunca
+    // pode atravessar para a barra lateral. Diálogos também permanecem confinados.
+    const region = activeDialog
+      ? activeDialog
+      : current?.closest?.('.sidebar')
+        ? document.querySelector('.sidebar')
+        : document.querySelector('#main-content') || document.querySelector('#view') || document;
+    const items = visibleFocusables(region);
     if (!items.length) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     remoteMode = true;
     if (!items.includes(current)) {
-      focus(items[0]);
+      const preferred = region.matches?.('.sidebar')
+        ? items[0]
+        : items.find((el) => el.closest('#view')) || items.find((el) => el.closest('.topbar')) || items[0];
+      focus(preferred);
       return;
     }
     const group = current.closest(GROUPS);
