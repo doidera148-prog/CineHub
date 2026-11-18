@@ -225,3 +225,74 @@ body.tv-mode {
   .tv-mode .grid { grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); }
   .tv-mode .card { flex-basis: auto; }
 }
+
+/* Escala 4K: alvos maiores e mais espaço para leitura a distância.
+   A classe é detectada pelo tamanho físico estimado (resolução × DPR). */
+.tv-4k.tv-mode {
+  --tv-rail: clamp(142px, 5.2vw, 184px);
+  --tv-card: clamp(248px, 8.2vw, 340px);
+  --tv-gap: clamp(30px, 1.8vw, 56px);
+  --gutter: clamp(58px, 3.6vw, 138px);
+  font-size: clamp(20px, 0.72vw, 28px);
+}
+.tv-4k.tv-mode .sidebar {
+  padding: clamp(28px, 1.8vw, 54px) 14px;
+  gap: clamp(34px, 2vw, 60px);
+}
+.tv-4k.tv-mode .logo { font-size: clamp(2rem, 1.25vw, 3rem); }
+.tv-4k.tv-mode #nav-main { gap: clamp(10px, .55vw, 20px); }
+.tv-4k.tv-mode #nav-main a {
+  min-height: clamp(82px, 4.2vw, 112px);
+  gap: 9px;
+  padding: 12px 6px;
+  font-size: clamp(15px, .52vw, 20px);
+  border-radius: 18px;
+}
+.tv-4k.tv-mode #nav-main .ico { font-size: clamp(32px, 1.1vw, 42px); }
+.tv-4k.tv-mode main { padding: clamp(38px, 2vw, 68px) var(--gutter) 90px; }
+.tv-4k.tv-mode .topbar { top: clamp(38px, 2vw, 68px); }
+.tv-4k.tv-mode .topbar input,
+.tv-4k.tv-mode .topbar input:focus {
+  width: clamp(320px, 18vw, 560px);
+  height: clamp(62px, 3.2vw, 86px);
+  font-size: clamp(19px, .7vw, 26px);
+}
+.tv-4k.tv-mode .billboard {
+  height: clamp(560px, 58vh, 900px);
+  margin-bottom: clamp(42px, 2.5vw, 76px);
+}
+.tv-4k.tv-mode .billboard-info { max-width: min(900px, 60%); padding-bottom: clamp(54px, 3vw, 96px); }
+.tv-4k.tv-mode .billboard h2 { font-size: clamp(68px, 3.6vw, 124px); }
+.tv-4k.tv-mode .billboard p { font-size: clamp(21px, .78vw, 30px); max-width: 760px; }
+.tv-4k.tv-mode .billboard .btn-link {
+  min-height: clamp(68px, 3.2vw, 88px);
+  padding-inline: clamp(28px, 1.5vw, 48px);
+  font-size: clamp(20px, .72vw, 28px);
+}
+.tv-4k.tv-mode .row { margin-bottom: clamp(48px, 2.4vw, 78px); }
+.tv-4k.tv-mode .row h2 { font-size: clamp(28px, 1.05vw, 40px); margin-bottom: 22px; }
+.tv-4k.tv-mode .card .poster { height: calc(var(--tv-card) * 1.48); }
+.tv-4k.tv-mode .card .title { font-size: clamp(18px, .62vw, 24px); margin-top: 14px; }
+.tv-4k.tv-mode .card .small { font-size: clamp(15px, .48vw, 18px); }
+.tv-4k.tv-mode button,
+.tv-4k.tv-mode .btn-link,
+.tv-4k.tv-mode input,
+.tv-4k.tv-mode select { min-height: clamp(62px, 3vw, 82px); }
+.tv-4k.tv-mode .episodes { gap: 18px; }
+.tv-4k.tv-mode .ep { min-height: 82px; font-size: clamp(19px, .68vw, 26px); }
+.tv-4k.tv-mode #streams { max-width: 1440px; padding: 26px; }
+.tv-4k.tv-mode .stream { min-height: 94px; padding: 22px 26px; }
+.tv-4k.tv-mode .stream strong { font-size: clamp(20px, .72vw, 28px); }
+.tv-4k.tv-mode .stream span { font-size: clamp(17px, .6vw, 23px); }
+.tv-4k.tv-mode :focus-visible {
+  outline-width: 4px;
+  outline-offset: 7px;
+  box-shadow: 0 0 0 10px rgba(229,9,20,.68), 0 18px 42px rgba(0,0,0,.55);
+}
+@media (max-height: 1000px) {
+  .tv-4k.tv-mode .sidebar { padding-block: 18px; gap: 18px; }
+  .tv-4k.tv-mode #nav-main { gap: 5px; }
+  .tv-4k.tv-mode #nav-main a { min-height: 68px; font-size: 14px; }
+  .tv-4k.tv-mode #nav-main .ico { font-size: 27px; }
+}
+
