@@ -387,6 +387,31 @@ fn headers_for_origin(
         .collect()
 }
 
+/// Extrai as referências de uma linha HLS e seus intervalos de bytes.
+fn playlist_line_references(line: &str) -> Result<Vec<(std::ops::Range<usize>, String)>, String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+    if !trimmed.starts_with('#') {
+        let start = line.find(trimmed).ok_or("linha HLS inválida")?;
+        return Ok(vec![(start..start + trimmed.len(), trimmed.to_string())]);
+    }
+
+    let mut references = Vec::new();
+    let mut search_from = 0;
+    while let Some(relative) = line[search_from..].find("URI=\"") {
+        let start = search_from + relative + 5;
+        let end = line[start..]
+            .find('"')
+            .map(|n| start + n)
+            .ok_or("atributo URI inválido na playlist")?;
+        references.push((start..end, line[start..end].to_string()));
+        search_from = end + 1;
+    }
+    Ok(references)
+}
+
 async fn rewrite_playlist(
     state: &ProxyState,
     base: &Url,
@@ -396,27 +421,19 @@ async fn rewrite_playlist(
     let playlist = playlist.trim_start_matches('\u{feff}');
     let mut output = Vec::new();
     for line in playlist.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            output.push(line.to_string());
-        } else if trimmed.starts_with('#') {
-            let mut rewritten = line.to_string();
-            let mut search_from = 0;
-            while let Some(relative) = rewritten[search_from..].find("URI=\"") {
-                let start = search_from + relative + 5;
-                let end = rewritten[start..].find('"').map(|n| start + n).ok_or((
-                    StatusCode::BAD_GATEWAY,
-                    "atributo URI inválido na playlist".into(),
-                ))?;
-                let original = rewritten[start..end].to_string();
-                let local = register_child(state, base, &original, headers).await?;
-                rewritten.replace_range(start..end, &local);
-                search_from = start + local.len() + 1;
-            }
-            output.push(rewritten);
-        } else {
-            output.push(register_child(state, base, trimmed, headers).await?);
+        let references = playlist_line_references(line).map_err(|_| {
+            (
+                StatusCode::BAD_GATEWAY,
+                "atributo URI inválido na playlist".into(),
+            )
+        })?;
+        let mut rewritten = line.to_string();
+        // Substitui do fim para o início para preservar os offsets originais.
+        for (range, original) in references.into_iter().rev() {
+            let local = register_child(state, base, &original, headers).await?;
+            rewritten.replace_range(range, &local);
         }
+        output.push(rewritten);
     }
     Ok(format!("{}\n", output.join("\n")))
 }
@@ -551,6 +568,66 @@ mod tests {
         assert!(
             resolve_playlist_reference(&base, "https://user:pass@cdn.example/segment.ts").is_err()
         );
+    }
+
+    #[test]
+    fn hls_media_playlist_extracts_segments_and_whitespace_safely() {
+        let line = "  segments/part-001.ts?token=a  ";
+        let refs = playlist_line_references(line).unwrap();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].1, "segments/part-001.ts?token=a");
+        assert_eq!(&line[refs[0].0.clone()], refs[0].1);
+        assert!(playlist_line_references("   ").unwrap().is_empty());
+    }
+
+    #[test]
+    fn hls_master_playlist_extracts_nested_variants_and_renditions() {
+        let variant = playlist_line_references("#EXT-X-STREAM-INF:BANDWIDTH=2500000").unwrap();
+        assert!(variant.is_empty());
+        let rendition = playlist_line_references(
+            "#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"audio\",URI=\"audio/pt.m3u8\"",
+        )
+        .unwrap();
+        assert_eq!(rendition.len(), 1);
+        assert_eq!(rendition[0].1, "audio/pt.m3u8");
+
+        let iframe = playlist_line_references(
+            "#EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=800000,URI=\"iframe/low.m3u8\"",
+        )
+        .unwrap();
+        assert_eq!(iframe[0].1, "iframe/low.m3u8");
+        let nested = playlist_line_references("video/1080p/index.m3u8").unwrap();
+        assert_eq!(nested[0].1, "video/1080p/index.m3u8");
+    }
+
+    #[test]
+    fn hls_key_map_part_and_preload_uri_attributes_are_extracted() {
+        let lines = [
+            "#EXT-X-KEY:METHOD=AES-128,URI=\"keys/key.bin\",IV=0x01",
+            "#EXT-X-SESSION-KEY:METHOD=AES-128,URI=\"keys/session.bin\"",
+            "#EXT-X-MAP:URI=\"init/init.mp4\",BYTERANGE=\"720@0\"",
+            "#EXT-X-PART:DURATION=0.5,URI=\"parts/part-01.m4s\"",
+            "#EXT-X-PRELOAD-HINT:TYPE=PART,URI=\"parts/part-02.m4s\"",
+            "#EXT-X-RENDITION-REPORT:URI=\"../audio/index.m3u8\"",
+        ];
+        let expected = [
+            "keys/key.bin",
+            "keys/session.bin",
+            "init/init.mp4",
+            "parts/part-01.m4s",
+            "parts/part-02.m4s",
+            "../audio/index.m3u8",
+        ];
+        for (line, expected) in lines.into_iter().zip(expected) {
+            let refs = playlist_line_references(line).unwrap();
+            assert_eq!(refs.len(), 1, "{line}");
+            assert_eq!(refs[0].1, expected, "{line}");
+        }
+    }
+
+    #[test]
+    fn hls_uri_attributes_reject_unterminated_quotes() {
+        assert!(playlist_line_references("#EXT-X-KEY:METHOD=AES-128,URI=\"keys/key.bin").is_err());
     }
 
     #[test]
