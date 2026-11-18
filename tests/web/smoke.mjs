@@ -100,11 +100,8 @@ async function checkWindowsPlayer() {
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
     await page.addInitScript(`window.__preserveMediaUrl = true;
-      window.__streamForTest = ${JSON.stringify({ name: "Fonte", title: "Teste", url: "", mimeType: "" })};
-      ${fixtures}`.replace(
-        JSON.stringify({ name: "Fonte", title: "Teste", url: "", mimeType: "" }),
-        JSON.stringify({ name: 'Fonte ' + url, title: 'Teste ' + url, url, mimeType }),
-      ));
+      window.__streamForTest = ${JSON.stringify({ name: 'Fonte ' + url, title: 'Teste ' + url, url, mimeType })};
+      ${fixtures}`);
     await page.goto(`${base}/#/detail/movie/tt1`);
     await page.locator('.stream').waitFor({ state: 'visible' });
     await page.locator('.stream').click();
