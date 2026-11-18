@@ -2,6 +2,9 @@
 (() => {
   const SELECTOR = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [role="button"], [tabindex]:not([tabindex="-1"])';
   const DIRS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', DpadUp: 'up', DpadDown: 'down', DpadLeft: 'left', DpadRight: 'right' };
+  // Alguns controles TCL/Android TV entregam o DPAD apenas por keyCode.
+  const KEYCODE_DIRS = { 19: 'up', 20: 'down', 21: 'left', 22: 'right' };
+  const directionOf = (event) => DIRS[event.key] || KEYCODE_DIRS[event.keyCode] || null;
   const GROUPS = '.strip, .episodes, .seasons, #streams, #nav-main, .dataactions, .kodi-results, #kodi-listing, .dialog-actions, .tp-list';
   let remoteMode = false;
   let focusBeforePlayer = null;
@@ -140,7 +143,7 @@
   }, true);
 
   document.addEventListener('keydown', (event) => {
-    const direction = DIRS[event.key];
+    const direction = directionOf(event);
     if (!direction || event.altKey || event.ctrlKey || event.metaKey || document.querySelector('#confirm[open]')) return;
     if (playerOpen()) return;
     const current = document.activeElement;
@@ -159,6 +162,15 @@
       return;
     }
     const group = current.closest(GROUPS);
+    // A lista de arquivos do torrent é uma lista vertical: navegação por índice evita
+    // que o cálculo geométrico pule itens quando os nomes têm comprimentos diferentes.
+    if (group?.matches('.tp-list') && (direction === 'up' || direction === 'down')) {
+      const entries = visibleFocusables(group);
+      const index = entries.indexOf(current);
+      const nextIndex = index < 0 ? 0 : Math.max(0, Math.min(entries.length - 1, index + (direction === 'down' ? 1 : -1)));
+      if (entries[nextIndex]) focus(entries[nextIndex]);
+      return;
+    }
     if (group && (direction === 'left' || direction === 'right')) {
       const localNext = nearest(current, visibleFocusables(group), direction);
       // Não faz loop infinito no trilho: na ponta, a seta sai do grupo e alcança o menu,
