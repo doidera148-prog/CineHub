@@ -208,3 +208,41 @@ test('URL local preparada não é reaberta como magnet mesmo herdando infoHash',
   assert.equal(L.isTorrentSource({ hash: 'b'.repeat(40) }), true);
   assert.equal(L.isTorrentSource({ url: 'https://cdn.example/video.mp4' }), false);
 });
+
+
+test('backup mescla favoritos e mantém o progresso mais recente sem aceitar chaves perigosas', () => {
+  const result = L.mergeBackupData(
+    [{ id: 'movie:1', name: 'Atual' }],
+    { 'movie:1': { t: 10, duration: 100, updated: 20 }, 'series:1': { t: 5, duration: 50, updated: 10 } },
+    {
+      app: 'CineHub', version: 1,
+      favs: [{ id: 'movie:1', name: 'Duplicado' }, { id: 'movie:2', name: 'Novo' }, { id: '__proto__' }],
+      progress: {
+        'movie:1': { t: 80, duration: 100, updated: 15 },
+        'series:1': { t: 30, duration: 50, updated: 30 },
+        '__proto__': { t: 999, duration: 1000, updated: 999 },
+        constructor: { t: 999, duration: 1000, updated: 999 },
+      },
+    },
+  );
+  assert.deepEqual(result.favs.map((f) => f.id), ['movie:1', 'movie:2', '__proto__']);
+  assert.equal(result.progress['movie:1'].t, 10);
+  assert.equal(result.progress['series:1'].t, 30);
+  assert.equal(Object.getPrototypeOf(result.progress), Object.prototype);
+  assert.equal(Object.hasOwn(result.progress, '__proto__'), false);
+});
+
+test('backup inválido ou de versão desconhecida não é mesclado', () => {
+  assert.throws(() => L.mergeBackupData([], {}, { app: 'Outro', version: 1 }), /backup incompatível/);
+  assert.throws(() => L.mergeBackupData([], {}, { app: 'CineHub', version: 2 }), /backup incompatível/);
+});
+
+test('registros importados de progresso não mantêm tempos negativos', () => {
+  const result = L.mergeBackupData([], {}, {
+    app: 'CineHub', version: 1,
+    progress: { 'movie:1': { t: -5, duration: -10, updated: -1 } },
+  });
+  assert.deepEqual(result.progress['movie:1'], {
+    t: 0, duration: 0, label: '', seriesId: '', type: '', name: '', poster: '', updated: 0, watched: false,
+  });
+});
