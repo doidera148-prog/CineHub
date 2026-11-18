@@ -51,7 +51,6 @@ mod windows_probe {
     impl ComPtr {
         fn new() -> Self { Self(ptr::null_mut()) }
         fn as_ptr(&self) -> *mut c_void { self.0 }
-        fn is_null(&self) -> bool { self.0.is_null() }
     }
 
     impl Drop for ComPtr {
@@ -184,11 +183,10 @@ mod windows_probe {
 
         let mut attached = false;
         let mut dcomp: Option<(ComPtr, ComPtr, ComPtr)> = None;
-        let mut ended = false;
         for _ in 0..2400 {
             match mpv.wait_event(0.05) {
-                Some(Ok(Event::EndFile(_))) => { ended = true; break; }
-                Some(Ok(Event::Shutdown)) => { ended = true; break; }
+                Some(Ok(Event::EndFile(_))) => break,
+                Some(Ok(Event::Shutdown)) => break,
                 _ => {}
             }
             if !attached {
@@ -202,7 +200,6 @@ mod windows_probe {
                     }
                 }
             }
-            if attached && ended { break; }
         }
 
         if let Some((_device, _target, _visual)) = dcomp.take() {
