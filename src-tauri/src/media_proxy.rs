@@ -38,6 +38,8 @@ struct Target {
 struct ProxyState {
     client: Client,
     sessions: Arc<RwLock<HashMap<String, Target>>>,
+    #[cfg(test)]
+    allow_loopback_targets: bool,
 }
 
 pub struct MediaProxy {
@@ -63,6 +65,8 @@ impl MediaProxy {
         let state = ProxyState {
             client,
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            #[cfg(test)]
+            allow_loopback_targets: false,
         };
         let app = Router::new()
             .route("/media/{token}", any(proxy_request))
@@ -96,7 +100,7 @@ impl MediaProxy {
         if url.path().to_ascii_lowercase().ends_with(".mpd") {
             return Err("DASH ainda não está habilitado no proxy".into());
         }
-        if !crate::addon::is_safe_url(url.as_str()).await {
+        if !is_safe_proxy_url(&state, url.as_str()).await {
             return Err("fonte bloqueada: o proxy só aceita destinos públicos".into());
         }
         let headers = parse_request_headers(hints)?;
@@ -372,6 +376,22 @@ async fn proxy_request(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
 
+/// Uses the production DNS/IP policy; tests may opt into literal loopback-only targets.
+async fn is_safe_proxy_url(state: &ProxyState, raw_url: &str) -> bool {
+    #[cfg(test)]
+    if state.allow_loopback_targets {
+        return Url::parse(raw_url)
+            .ok()
+            .and_then(|url| url.host().map(|host| host.to_owned()))
+            .is_some_and(|host| match host {
+                url::Host::Ipv4(ip) => ip.is_loopback(),
+                url::Host::Ipv6(ip) => ip.is_loopback(),
+                url::Host::Domain(_) => false,
+            });
+    }
+    crate::addon::is_safe_url(raw_url).await
+}
+
 /// Preserva cabeçalhos sensíveis somente quando o recurso continua na origem inicial.
 fn headers_for_origin(
     headers: &[(header::HeaderName, HeaderValue)],
@@ -466,7 +486,7 @@ async fn register_child(
             "URI filha inválida na playlist".into(),
         )
     })?;
-    if !crate::addon::is_safe_url(url.as_str()).await {
+    if !is_safe_proxy_url(state, url.as_str()).await {
         return Err((
             StatusCode::FORBIDDEN,
             "playlist referencia destino não permitido".into(),
@@ -506,6 +526,161 @@ async fn register_child(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn local_test_state() -> ProxyState {
+        ProxyState {
+            client: Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .unwrap(),
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            allow_loopback_targets: true,
+        }
+    }
+
+    async fn start_test_server(app: Router) -> SocketAddr {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        address
+    }
+
+    async fn add_test_target(state: &ProxyState, url: Url, force_hls: bool) -> String {
+        let token = Uuid::new_v4().simple().to_string();
+        state.sessions.write().await.insert(
+            token.clone(),
+            Target {
+                url,
+                headers: Vec::new(),
+                force_hls,
+                expires: Instant::now() + SESSION_TTL,
+            },
+        );
+        token
+    }
+
+    async fn request_test_resource(
+        state: &ProxyState,
+        token: String,
+        headers: HeaderMap,
+    ) -> Response {
+        proxy_request(
+            State(state.clone()),
+            Path(token),
+            Method::GET,
+            headers,
+        )
+        .await
+        .unwrap()
+    }
+
+    fn rewritten_token(text: &str) -> String {
+        let marker = "/media/";
+        let start = text.find(marker).expect("proxy URL missing") + marker.len();
+        text[start..]
+            .split(|ch: char| !ch.is_ascii_hexdigit())
+            .next()
+            .unwrap()
+            .to_string()
+    }
+
+    async fn master_playlist() -> &'static str {
+        "#EXTM3U\\n#EXT-X-STREAM-INF:BANDWIDTH=1200000\\nvariant.m3u8\\n"
+    }
+
+    async fn variant_playlist() -> &'static str {
+        "#EXTM3U\\n#EXT-X-KEY:METHOD=AES-128,URI=\\\"key.bin\\\"\\n#EXTINF:4,\\nsegment.ts\\n#EXT-X-ENDLIST\\n"
+    }
+
+    async fn test_segment(headers: HeaderMap) -> Response {
+        if headers
+            .get(header::RANGE)
+            .is_some_and(|value| value == "bytes=1-3")
+        {
+            Response::builder()
+                .status(StatusCode::PARTIAL_CONTENT)
+                .header(header::CONTENT_TYPE, "video/mp2t")
+                .header(header::CONTENT_RANGE, "bytes 1-3/6")
+                .header(header::ACCEPT_RANGES, "bytes")
+                .body(Body::from("bcd"))
+                .unwrap()
+        } else {
+            Response::builder()
+                .header(header::CONTENT_TYPE, "video/mp2t")
+                .body(Body::from("abcdef"))
+                .unwrap()
+        }
+    }
+
+    #[tokio::test]
+    async fn hls_proxy_integration_rewrites_master_variant_key_and_segment_range() {
+        let origin = Router::new()
+            .route("/master.m3u8", axum::routing::get(master_playlist))
+            .route("/variant.m3u8", axum::routing::get(variant_playlist))
+            .route("/segment.ts", axum::routing::get(test_segment))
+            .route(
+                "/key.bin",
+                axum::routing::get(|| async { ([(header::CONTENT_TYPE, "application/octet-stream")], "0123456789abcdef") }),
+            );
+        let origin_address = start_test_server(origin).await;
+        let state = local_test_state();
+        let master_url = Url::parse(&format!("http://{origin_address}/master.m3u8")).unwrap();
+        let master_token = add_test_target(&state, master_url, true).await;
+
+        let master_response =
+            request_test_resource(&state, master_token, HeaderMap::new()).await;
+        assert_eq!(master_response.status(), StatusCode::OK);
+        let master_body = axum::body::to_bytes(master_response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let master_text = String::from_utf8(master_body.to_vec()).unwrap();
+        assert!(master_text.contains("#EXTM3U"));
+        let variant_token = rewritten_token(&master_text);
+
+        let variant_response =
+            request_test_resource(&state, variant_token, HeaderMap::new()).await;
+        assert_eq!(variant_response.status(), StatusCode::OK);
+        let variant_body = axum::body::to_bytes(variant_response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let variant_text = String::from_utf8(variant_body.to_vec()).unwrap();
+        assert!(variant_text.contains("#EXT-X-KEY:METHOD=AES-128"));
+        let key_token = rewritten_token(
+            variant_text
+                .split("URI=\\\"")
+                .nth(1)
+                .expect("AES-128 key URI missing"),
+        );
+        let segment_token = rewritten_token(
+            variant_text
+                .lines()
+                .find(|line| line.starts_with("/media/"))
+                .expect("segment URI missing"),
+        );
+
+        let key_response = request_test_resource(&state, key_token, HeaderMap::new()).await;
+        assert_eq!(key_response.status(), StatusCode::OK);
+        let key_body = axum::body::to_bytes(key_response.into_body(), 1024)
+            .await
+            .unwrap();
+        assert_eq!(&key_body[..], b"0123456789abcdef");
+
+        let mut range_headers = HeaderMap::new();
+        range_headers.insert(header::RANGE, HeaderValue::from_static("bytes=1-3"));
+        let segment_response =
+            request_test_resource(&state, segment_token, range_headers).await;
+        assert_eq!(segment_response.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(
+            segment_response.headers().get(header::CONTENT_RANGE).unwrap(),
+            "bytes 1-3/6"
+        );
+        let segment_body = axum::body::to_bytes(segment_response.into_body(), 1024)
+            .await
+            .unwrap();
+        assert_eq!(&segment_body[..], b"bcd");
+    }
 
     #[test]
     fn proxy_headers_rejects_untrusted_framing_headers() {
