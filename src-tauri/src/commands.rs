@@ -132,7 +132,9 @@ pub async fn search(
     kind: Option<String>,
 ) -> Result<Value, String> {
     let needle: String = q.trim().chars().take(MAX_QUERY_CHARS).collect();
-    if needle.is_empty() { return Ok(json!({ "rows": [] })); }
+    if needle.is_empty() {
+        return Ok(json!({ "rows": [] }));
+    }
     let addons: Vec<Installed> = state.addons.read().await.clone();
     let mut jobs = Vec::new();
     for a in &addons {
@@ -141,7 +143,9 @@ pub async fn search(
                 Some(requested) => catalog_matches_kind(a, c, requested),
                 None => matches!(c.kind.as_str(), "movie" | "series" | "anime"),
             };
-            if c.supports_search() && matches_kind { jobs.push((a.clone(), c.clone())); }
+            if c.supports_search() && matches_kind {
+                jobs.push((a.clone(), c.clone()));
+            }
         }
     }
     let extra = format!("search={}", addon::enc(&needle));
