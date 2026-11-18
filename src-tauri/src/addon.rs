@@ -137,7 +137,7 @@ const ADDON_MAX_REDIRECTS: usize = 5;
 
 /// Resolvedor de DNS que entrega só endereços públicos. Como a conexão usa estes endereços,
 /// um nome que aponte para a rede interna é recusado mesmo que a checagem anterior tenha passado.
-struct PublicResolver;
+pub(crate) struct PublicResolver;
 
 impl Resolve for PublicResolver {
     fn resolve(&self, name: Name) -> Resolving {
