@@ -45,6 +45,7 @@ async function check(viewport, label) {
   await cards.first().focus();
   await page.keyboard.press('ArrowLeft');
   if (await page.evaluate(() => document.activeElement?.closest('.strip') === document.querySelector('.strip'))) failures.push(`[${label}] controle ficou preso no início do trilho`);
+  await cards.first().focus();
   await page.keyboard.press('Enter');
   await page.waitForTimeout(350);
   if (!(await page.evaluate(() => location.hash.startsWith('#/detail/')))) failures.push(`[${label}] Enter não ativou o card focado`);
