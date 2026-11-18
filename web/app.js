@@ -1502,21 +1502,8 @@ view.addEventListener('pointerout', (e) => {
   clearTimeout(preview.openTimer);
   if (preview.card === card) schedulePreviewClose();
 });
-// Controle remoto e teclado: o cartão abre ao focar o título.
-view.addEventListener('focusin', (e) => {
-  const card = e.target.closest('.card');
-  if (!card || card === preview.card) return;
-  clearTimeout(preview.closeTimer);
-  clearTimeout(preview.openTimer);
-  preview.openTimer = setTimeout(() => openPreview(card), 250);
-});
-view.addEventListener('focusout', (e) => {
-  const card = e.target.closest('.card');
-  if (!card) return;
-  const next = e.relatedTarget;
-  if (next && (card.contains(next) || preview.el?.contains(next))) return;
-  schedulePreviewClose();
-});
+// A prévia permanece exclusiva do ponteiro (desktop). Não abre ao focar com controle remoto,
+// evitando a mini janela sobre os cartazes na navegação da Android TV.
 // Rolagem (inclusive a dos trilhos, que o controle remoto usa): o cartão acompanha o título.
 view.addEventListener('scroll', () => {
   if (preview.card && preview.el?.classList.contains('is-open')) positionPreview(preview.el, preview.card);
