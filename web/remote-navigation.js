@@ -185,6 +185,12 @@
 
   document.addEventListener('keydown', (event) => {
     if (!['Escape', 'Backspace', 'BrowserBack', 'GoBack'].includes(event.key)) return;
+    // Em Android TV, Voltar primeiro fecha o teclado virtual da busca, sem sair da tela.
+    if (['Escape', 'BrowserBack', 'GoBack'].includes(event.key) && isTextEntry(document.activeElement)) {
+      event.preventDefault();
+      document.activeElement.blur();
+      return;
+    }
     if (event.key === 'Backspace' && isTextEntry(document.activeElement)) return;
     const dialog = document.querySelector('#confirm[open]');
     if (dialog) { event.preventDefault(); dialog.querySelector('[value="cancel"]')?.click(); return; }
@@ -198,6 +204,11 @@
   // Chamado pelo Android antes de sair do app.
   let lastBackAt = 0;
   window.__cinehubBack = () => {
+    // O callback nativo intercepta Voltar antes do WebView; tirar o foco fecha o IME.
+    if (isTextEntry(document.activeElement)) {
+      document.activeElement.blur();
+      return true;
+    }
     const dialog = document.querySelector('dialog[open]');
     if (dialog) {
       const cancel = dialog.querySelector('[value="cancel"]');
