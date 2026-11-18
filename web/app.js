@@ -1716,6 +1716,7 @@ function describeError(e) {
 
 // Motivo da última falha do player nativo (mostrado se o player web também não tocar).
 let nativeFailure = null;
+let nativePlayerActive = false;
 
 async function playNative(stream, label, id, meta, subs, segments = []) {
   const torrentToken = stream?.torrentToken || null;
@@ -1734,7 +1735,24 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
     } else args.subtitleUrl = pickSubtitles(stream, subs)[0]?.url ?? null;
     // Botão de pular no player nativo: tecla F12 (mpv, desktop) ou botão na tela (Android)
     args.segments = IS_ANDROID ? JSON.stringify(segments) : segments;
-    const res = await invoke(command, args);
+    let playback;
+    if (IS_WINDOWS) {
+      // Mostra a interface HTML do CineHub enquanto o mpv desenha apenas a superfície
+      // do vídeo. A região nativa será recortada para deixar título e botão Fechar clicáveis.
+      nativePlayerActive = true;
+      showPlayer();
+      keepScreenOn(true);
+      playback = invoke(command, args);
+      playback.catch(() => {});
+      const ready = await waitForNativePlayerShape();
+      if (!ready) {
+        await call('player_close').catch(() => {});
+        throw new Error('o Windows não conseguiu preparar a sobreposição dos controles do CineHub');
+      }
+    } else {
+      playback = invoke(command, args);
+    }
+    const res = await playback;
     completed = true;
     saveProgress(true, { t: (res?.positionMs || 0) / 1000, duration: (res?.durationMs || 0) / 1000 });
     return true;
@@ -1745,6 +1763,10 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
     logEvent('WARN', `player nativo indisponível: ${nativeFailure}`);
     return false;
   } finally {
+    if (IS_WINDOWS && nativePlayerActive) {
+      nativePlayerActive = false;
+      closePlayer(false);
+    }
     current = null;
     document.title = 'CineHub';
     // O comando nativo só resolve quando o diálogo do player é fechado.
@@ -1826,6 +1848,74 @@ function showPlayer() {
   if (!history.state?.player) history.pushState({ player: true }, '', location.href);
   $('#player-title').textContent = current?.label || '';
   player.classList.remove('hidden');
+}
+
+function nativePlayerGeometry() {
+  const box = document.querySelector('#player .player-box');
+  if (!box) return null;
+  const bounds = box.getBoundingClientRect();
+  const scale = window.devicePixelRatio || 1;
+  if (bounds.width < 16 || bounds.height < 16) return null;
+  const cutouts = ['#close-player', '#player-title']
+    .map((selector) => document.querySelector(selector))
+    .filter((element) => element && !element.hidden && element.getClientRects().length)
+    .map((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        x: Math.round((rect.left - bounds.left) * scale),
+        y: Math.round((rect.top - bounds.top) * scale),
+        width: Math.max(1, Math.ceil(rect.width * scale)),
+        height: Math.max(1, Math.ceil(rect.height * scale)),
+      };
+    });
+  return {
+    x: Math.round(bounds.left * scale),
+    y: Math.round(bounds.top * scale),
+    width: Math.max(1, Math.ceil(bounds.width * scale)),
+    height: Math.max(1, Math.ceil(bounds.height * scale)),
+    cutouts,
+  };
+}
+
+async function syncNativePlayerGeometry() {
+  if (!IS_WINDOWS || !nativePlayerActive || player.classList.contains('hidden')) return false;
+  const geometry = nativePlayerGeometry();
+  if (!geometry) return false;
+  try {
+    return await call('player_set_geometry', geometry) === true;
+  } catch (error) {
+    logEvent('WARN', `atualizar região do player nativo falhou: ${describeError(error)}`);
+    return false;
+  }
+}
+
+async function waitForNativePlayerShape() {
+  // player_play cria a janela do mpv em outra thread; tenta aplicar a região
+  // até o HWND existir, sem bloquear o início da reprodução.
+  for (let attempt = 0; attempt < 40; attempt++) {
+    if (await syncNativePlayerGeometry()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return false;
+}
+
+if (typeof ResizeObserver !== 'undefined') {
+  const nativePlayerObserver = new ResizeObserver(() => {
+    if (nativePlayerActive) void syncNativePlayerGeometry();
+  });
+  for (const element of [document.querySelector('#player .player-box'), $('#close-player'), $('#player-title')]) {
+    if (element) nativePlayerObserver.observe(element);
+  }
+}
+window.addEventListener('resize', () => { if (nativePlayerActive) void syncNativePlayerGeometry(); });
+window.addEventListener('scroll', () => { if (nativePlayerActive) void syncNativePlayerGeometry(); }, true);
+
+function requestPlayerClose() {
+  if (nativePlayerActive) {
+    void call('player_close').catch((error) => toast(`Não consegui fechar o player: ${describeError(error)}`));
+    return;
+  }
+  closePlayer(false);
 }
 
 // Mantém a tela ligada enquanto o vídeo está aberto (quando o aparelho permite).
@@ -2095,9 +2185,9 @@ function continueWatchingRow() {
   };
 }
 
-$('#close-player').onclick = () => closePlayer(false);
+$('#close-player').onclick = requestPlayerClose;
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !player.classList.contains('hidden')) closePlayer(false);
+  if (e.key === 'Escape' && !player.classList.contains('hidden')) requestPlayerClose();
 });
 window.addEventListener('popstate', () => {
   if (!player.classList.contains('hidden')) closePlayer(true);
