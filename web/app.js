@@ -200,11 +200,10 @@ function magnetFromInfoHash(hash, name = 'CineHub') {
   return `magnet:?xt=urn:btih:${clean}&dn=${encodeURIComponent(name)}`;
 }
 
-async function closeActiveTorrent() {
-  const token = activeTorrentToken;
+async function closeTorrentToken(token) {
   if (!token) return;
-  // Limpa localmente primeiro para impedir duas rotinas de fechamento concorrentes.
-  activeTorrentToken = null;
+  // Não apaga o token de uma sessão mais nova aberta enquanto esta era encerrada.
+  if (activeTorrentToken === token) activeTorrentToken = null;
   try {
     await call('torrent_close', { token });
   } catch (err) {
@@ -212,7 +211,12 @@ async function closeActiveTorrent() {
   }
 }
 
+async function closeActiveTorrent() {
+  return closeTorrentToken(activeTorrentToken);
+}
+
 async function openTorrentSource(stream, label, id, meta, subs) {
+  let openedToken = null;
   const currentUrl = String(stream?.url ?? '').trim();
   const magnet = currentUrl.startsWith('magnet:?')
     ? currentUrl
@@ -231,6 +235,7 @@ async function openTorrentSource(stream, label, id, meta, subs) {
         fileIndex: Number.isInteger(stream?.fileIndex) ? stream.fileIndex : null,
       }),
     );
+    openedToken = result.token;
     activeTorrentToken = result.token;
     const chosen = await pickTorrentVideo(result);
     const fixed = {
@@ -242,6 +247,7 @@ async function openTorrentSource(stream, label, id, meta, subs) {
     };
     await play(fixed, label, id, meta, subs);
   } catch (err) {
+    if (openedToken && activeTorrentToken === openedToken) await closeTorrentToken(openedToken);
     logEvent('WARN', `abrir torrent falhou: ${err.message || String(err)}`);
     toast(err.message || String(err));
   }
@@ -1399,6 +1405,8 @@ function describeError(e) {
 let nativeFailure = null;
 
 async function playNative(stream, label, id, meta, subs, segments = []) {
+  const torrentToken = stream?.torrentToken || null;
+  let completed = false;
   const saved = store.get('progress', {})[id];
   const startMs = saved && saved.t > 5 && !saved.watched ? saved.t * 1000 : 0;
   current = { id, label, meta, src: stream.url, mime: '' };
@@ -1413,6 +1421,7 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
     // Botão de pular no player nativo: tecla F12 (mpv, desktop) ou botão na tela (Android)
     args.segments = IS_ANDROID ? JSON.stringify(segments) : segments;
     const res = await invoke(command, args);
+    completed = true;
     saveProgress(true, { t: (res?.positionMs || 0) / 1000, duration: (res?.durationMs || 0) / 1000 });
     return true;
   } catch (e) {
@@ -1424,6 +1433,9 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
   } finally {
     current = null;
     document.title = 'CineHub';
+    // O comando nativo só resolve quando o diálogo do player é fechado.
+    // Em sucesso, libera o torrent; em falha, mantém a sessão para o fallback web.
+    if (completed && torrentToken) await closeTorrentToken(torrentToken);
   }
 }
 
