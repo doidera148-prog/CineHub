@@ -3,6 +3,35 @@
   const str = (v) => (typeof v === 'string' ? v : '');
   const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
+  // Grava várias chaves como uma operação: se alguma falhar, tenta restaurar o estado anterior.
+  function writeStorageBatch(storage, entries) {
+    if (!storage || !entries || typeof entries !== 'object') return false;
+    const keys = Object.keys(entries);
+    let previous;
+    let serialized;
+    try {
+      previous = keys.map((key) => storage.getItem(key));
+      serialized = keys.map((key) => JSON.stringify(entries[key]));
+      if (serialized.some((value) => value === undefined)) return false;
+    } catch {
+      return false;
+    }
+    try {
+      keys.forEach((key, index) => storage.setItem(key, serialized[index]));
+      return true;
+    } catch {
+      keys.forEach((key, index) => {
+        try {
+          if (previous[index] === null) storage.removeItem(key);
+          else storage.setItem(key, previous[index]);
+        } catch {
+          // A restauração é best-effort; não mascara a falha original.
+        }
+      });
+      return false;
+    }
+  }
+
   // Streams locais do motor torrent já estão preparados pelo backend e não podem passar pelo proxy externo.
   function isLocalTorrentStream(stream) {
     const url = String(stream?.url ?? '').trim();
@@ -228,6 +257,7 @@
     isWebUrl,
     cssUrl,
     cleanFav,
+    writeStorageBatch,
     mergeBackupData,
     cleanProgress,
     progressPercent,
