@@ -93,3 +93,16 @@ informada. O CI padrão não compila esses exemplos opt-in com a feature `mpv`.
 - Se a camada DirectComposition cobrir a WebView2 de forma inevitável, avaliar
   WebView2 CompositionController ou controles nativos em vez de esconder isso
   atrás de uma falsa integração HTML.
+
+
+## Compilação Windows automatizada
+
+O workflow `.github/workflows/windows-mpv-probe.yml` compila os exemplos com
+`--features mpv` em um runner Windows MSVC. Ele baixa uma versão fixa do pacote
+de desenvolvimento x86_64 do libmpv, gera a import library MSVC a partir dos
+exports da DLL e executa `cargo check --examples`. O workflow roda manualmente
+ou quando os exemplos, o manifesto Rust ou o próprio workflow mudam.
+
+Esse teste valida compilação e ligação dos exemplos, mas não testa apresentação
+de vídeo: para isso ainda é necessário executar o probe em uma sessão Windows
+com GPU/D3D11 e uma URL de mídia acessível.
