@@ -207,6 +207,7 @@ async fn rewrite_playlist(
     headers: &[(header::HeaderName, HeaderValue)],
     playlist: &str,
 ) -> Result<String, (StatusCode, String)> {
+    let playlist = playlist.trim_start_matches('\u{feff}');
     let mut output = Vec::new();
     for line in playlist.lines() {
         let trimmed = line.trim();
@@ -215,7 +216,7 @@ async fn rewrite_playlist(
         } else if trimmed.starts_with('#') {
             let mut rewritten = line.to_string();
             let mut search_from = 0;
-            while let Some(relative) = rewritten[search_from..].find("URI=\\\"") {
+            while let Some(relative) = rewritten[search_from..].find("URI=\"") {
                 let start = search_from + relative + 5;
                 let end = rewritten[start..].find('"').map(|n| start + n)
                     .ok_or((StatusCode::BAD_GATEWAY, "atributo URI inválido na playlist".into()))?;
@@ -229,7 +230,7 @@ async fn rewrite_playlist(
             output.push(register_child(state, base, trimmed, headers).await?);
         }
     }
-    Ok(format!("{}\\n", output.join("\\n")))
+    Ok(format!("{}\n", output.join("\n")))
 }
 
 async fn register_child(
