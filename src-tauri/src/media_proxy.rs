@@ -352,10 +352,7 @@ async fn proxy_request(
             match tokio::time::timeout(Duration::from_secs(45), resp.chunk()).await {
                 Ok(Ok(Some(bytes))) => Some((Ok(bytes), (resp, None))),
                 Ok(Ok(None)) => None,
-                Ok(Err(e)) => Some((
-                    Err(std::io::Error::other(e.to_string())),
-                    (resp, None),
-                )),
+                Ok(Err(e)) => Some((Err(std::io::Error::other(e.to_string())), (resp, None))),
                 Err(_) => Some((
                     Err(std::io::Error::new(
                         std::io::ErrorKind::TimedOut,
