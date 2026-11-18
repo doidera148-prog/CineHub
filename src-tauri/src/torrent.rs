@@ -237,12 +237,22 @@ impl TorrentEngine {
         match tokio::time::timeout(OPEN_TIMEOUT, handle.wait_until_initialized()).await {
             Ok(Ok(())) => {}
             Ok(Err(e)) => {
-                let _ = session.delete(TorrentIdOrHash::Id(id), true).await;
-                return Err(format!("não foi possível inicializar o torrent: {e:#}"));
+                let cleanup = delete_torrent_with_retry(&session, id).await;
+                return Err(match cleanup {
+                    Ok(()) => format!("não foi possível inicializar o torrent: {e:#}"),
+                    Err(cleanup_error) => format!(
+                        "não foi possível inicializar o torrent: {e:#}; a limpeza também falhou: {cleanup_error}"
+                    ),
+                });
             }
             Err(_) => {
-                let _ = session.delete(TorrentIdOrHash::Id(id), true).await;
-                return Err("a inicialização do torrent demorou demais".into());
+                let cleanup = delete_torrent_with_retry(&session, id).await;
+                return Err(match cleanup {
+                    Ok(()) => "a inicialização do torrent demorou demais".into(),
+                    Err(cleanup_error) => format!(
+                        "a inicialização do torrent demorou demais; a limpeza também falhou: {cleanup_error}"
+                    ),
+                });
             }
         }
 
@@ -250,7 +260,11 @@ impl TorrentEngine {
             Ok(plan) => plan,
             Err(e) => {
                 if *active != Some(id) {
-                    let _ = session.delete(TorrentIdOrHash::Id(id), true).await;
+                    if let Err(cleanup_error) = delete_torrent_with_retry(&session, id).await {
+                        return Err(format!(
+                            "{e}; não foi possível limpar o torrent incompleto: {cleanup_error}"
+                        ));
+                    }
                 }
                 return Err(e);
             }
@@ -258,10 +272,14 @@ impl TorrentEngine {
 
         if let Some(previous) = *active {
             if previous != id {
-                if let Err(error) = session.delete(TorrentIdOrHash::Id(previous), true).await {
-                    let _ = session.delete(TorrentIdOrHash::Id(id), true).await;
+                if let Err(error) = delete_torrent_with_retry(&session, previous).await {
+                    let cleanup = delete_torrent_with_retry(&session, id).await;
+                    let detail = cleanup
+                        .err()
+                        .map(|cleanup_error| format!("; a limpeza do novo torrent também falhou: {cleanup_error}"))
+                        .unwrap_or_default();
                     return Err(format!(
-                        "não foi possível encerrar o torrent anterior: {error:#}"
+                        "não foi possível encerrar o torrent anterior: {error}{detail}"
                     ));
                 }
             }
@@ -392,15 +410,32 @@ impl TorrentEngine {
                 return Err(error);
             }
         };
-        if let Err(error) = session.delete(TorrentIdOrHash::Id(id), true).await {
-            // Se o motor não conseguiu encerrar, restaura a rota para não deixar a sessão órfã.
+        if let Err(error) = delete_torrent_with_retry(&session, id).await {
+            // Se o motor não conseguiu encerrar, restaura a rota para permitir nova tentativa.
             self.files.write().await.insert(token.to_string(), file);
-            return Err(format!("não foi possível encerrar o torrent: {error:#}"));
+            return Err(format!("não foi possível encerrar o torrent: {error}"));
         }
 
         *active = None;
         Ok(true)
     }
+}
+
+/// Repete exclusões que falham por condições transitórias do motor torrent.
+async fn delete_torrent_with_retry(session: &Session, id: usize) -> Result<(), String> {
+    let mut last_error = None;
+    for attempt in 0..3 {
+        match session.delete(TorrentIdOrHash::Id(id), true).await {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                last_error = Some(format!("{error:#}"));
+                if attempt < 2 {
+                    tokio::time::sleep(Duration::from_millis(150 * (attempt as u64 + 1))).await;
+                }
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| "falha desconhecida ao excluir torrent".into()))
 }
 
 async fn prepare(
