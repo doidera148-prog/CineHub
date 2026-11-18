@@ -281,3 +281,28 @@ test('gravação em lote rejeita valores não serializáveis sem alterar o armaz
   assert.equal(L.writeStorageBatch(storage, { favs: ['new'], progress: circular }), false);
   assert.equal(values.get('favs'), 'old-favs');
 });
+
+
+test('backup exportado é canônico, sanitizado e pode ser importado novamente', () => {
+  const payload = L.createBackupData(
+    [{ id: 'movie:1', name: 'Filme', poster: 'https://img.example/poster.jpg', extra: 'não exportar' }],
+    { 'movie:1': { t: 42, duration: 100, updated: 10, watched: false, extra: 'não exportar' } },
+    '2026-11-18T12:00:00.000Z',
+  );
+  assert.deepEqual(Object.keys(payload), ['app', 'version', 'exportedAt', 'favs', 'progress']);
+  assert.equal(payload.app, 'CineHub');
+  assert.equal(payload.version, 1);
+  assert.equal(payload.favs[0].extra, undefined);
+  assert.equal(payload.progress['movie:1'].extra, undefined);
+  const restored = L.mergeBackupData([], {}, JSON.parse(JSON.stringify(payload)));
+  assert.deepEqual(restored.favs, payload.favs);
+  assert.deepEqual(restored.progress, payload.progress);
+});
+
+test('backup exportado respeita os limites de favoritos e progresso', () => {
+  const favs = Array.from({ length: 5 }, (_, i) => ({ id: 'movie:' + i, name: 'Filme ' + i }));
+  const progress = Object.fromEntries(Array.from({ length: 6 }, (_, i) => ['movie:' + i, { t: i, duration: 100, updated: i }]));
+  const payload = L.createBackupData(favs, progress, 'data', 3, 2);
+  assert.equal(payload.favs.length, 3);
+  assert.deepEqual(Object.keys(payload.progress), ['movie:5', 'movie:4']);
+});
