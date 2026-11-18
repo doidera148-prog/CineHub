@@ -8,7 +8,7 @@ import vm from 'node:vm';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(join(here, '..', '..', 'web', 'lib.js'), 'utf8');
-const ctx = {};
+const ctx = { URL };
 vm.createContext(ctx);
 vm.runInContext(src, ctx);
 const L = ctx.CineHubLib;
