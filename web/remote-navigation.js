@@ -317,7 +317,8 @@
 
   document.addEventListener('focusin', (event) => {
     if (event.target?.closest?.('#main-content') && !event.target.closest('.hidden')) lastMainFocus = event.target;
-    remoteMode = true;
+    // focusin também ocorre após toques. O modo remoto é ativado somente
+    // por uma navegação explícita via D-pad/teclado em handleDirection.
   });
   document.addEventListener('pointerdown', () => { remoteMode = false; }, true);
   window.addEventListener('hashchange', () => {
@@ -325,8 +326,10 @@
     requestAnimationFrame(() => {
       if (document.activeElement && document.activeElement !== document.body &&
           document.activeElement.isConnected && isVisible(document.activeElement)) return;
+      // Durante a troca de rota o conteúdo pode estar temporariamente vazio.
+      // Não use a busca do topo como fallback: isso rouba o foco ao abrir detalhes.
       const content = document.querySelector('#view');
-      const first = focusables(content)[0] || focusables(document.querySelector('.topbar'))[0];
+      const first = focusables(content)[0];
       if (first) focusElement(first);
     });
   });
