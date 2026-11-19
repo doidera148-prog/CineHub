@@ -1,4 +1,4 @@
-/* Interface dedicada para Android TV: navegação em coluna e conteúdo em trilhos. */
+/* Interface dedicada para Google TV: navegação em coluna e conteúdo em trilhos. */
 body.tv-mode {
   --tv-rail: 112px;
   --tv-card: clamp(176px, 13vw, 232px);
