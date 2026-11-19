@@ -140,6 +140,35 @@ await page.locator('#dialog-last').press('Tab');
 await expectFocus('dialog-first', 'Tab deve circular dentro do diálogo');
 await page.locator('#test-dialog').evaluate((el) => el.close());
 
+// Abrir detalhes por toque não pode ativar o modo remoto nem focar a busca.
+await page.evaluate(() => {
+  const card = document.querySelector('#card-1');
+  card.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' }));
+  card.focus();
+  document.querySelector('#view').replaceChildren(); // skeleton enquanto os detalhes carregam
+  location.hash = '#/detail/movie/touch-test';
+});
+await page.waitForTimeout(50);
+await expectFocus('', 'toque ao abrir detalhes não deve selecionar a busca');
+
+// Mesmo com navegação por D-pad, uma tela de carregamento vazia não deve
+// direcionar o foco para a barra de pesquisa do topo.
+await page.evaluate(() => {
+  const card = document.createElement('a');
+  card.id = 'keyboard-card';
+  card.href = '#/detail/movie/remote-test';
+  card.textContent = 'Filme';
+  document.querySelector('#view').append(card);
+  card.focus();
+});
+await press('ArrowRight'); // ativa explicitamente a navegação remota
+await page.evaluate(() => {
+  document.querySelector('#view').replaceChildren();
+  location.hash = '#/detail/movie/remote-test';
+});
+await page.waitForTimeout(50);
+await expectFocus('', 'carregamento de detalhes via D-pad não deve focar a busca');
+
 if (errors.length) failures.push(...errors.map((error) => `[remote-navigation] erro JS: ${error}`));
 await browser.close();
 server.close();
