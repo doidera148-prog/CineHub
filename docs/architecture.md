@@ -58,7 +58,7 @@ O servidor de torrent não é o proxy de mídia de addons: os dois servidores t�
 
 ## Players
 
-### Android e Android TV
+### Android e Google TV
 
 O plugin `tauri-plugin-exoplayer` usa AndroidX Media3/ExoPlayer em tela cheia. O player configura tempos de conexão/leitura maiores para fontes com buffering demorado, prefere áudio e legendas em português e oferece seleção manual de áudio e legendas, incluindo a opção de desativá-las. Também recebe segmentos opcionais para pular abertura, recapitulação, prévia e créditos.
 
@@ -66,7 +66,7 @@ O plugin `tauri-plugin-exoplayer` usa AndroidX Media3/ExoPlayer em tela cheia. O
 
 No Windows, `app.js` usa `player_play` para iniciar libmpv com aceleração de hardware automática segura. A janela filha do mpv é posicionada acima da WebView, mas não deve ocultar toda a interface: `player_set_geometry` aplica uma região Win32 limitada à caixa do vídeo e subtrai recortes retangulares para o título e o botão Fechar do CineHub. Como regiões Win32 afetam pintura e hit-testing, a WebView permanece visível e recebe cliques nos recortes. A geometria é calculada em pixels físicos a partir de `getBoundingClientRect()` e atualizada em redimensionamentos.
 
-Esta é a primeira etapa do protótipo inspirado no Ventic. Os controles de transporte continuam sendo fornecidos pelo OSC do mpv; a integração de comandos, faixas de áudio/legenda e controles HTML completos será ampliada após validar a composição em Windows real. Se a técnica de recortes apresentar instabilidade, a alternativa a comparar é uma janela de overlay separada, como a arquitetura estudada no OpenPlayer. Android e Android TV continuam usando ExoPlayer e não passam por esse caminho.
+Esta é a primeira etapa do protótipo inspirado no Ventic. Os controles de transporte continuam sendo fornecidos pelo OSC do mpv; a integração de comandos, faixas de áudio/legenda e controles HTML completos será ampliada após validar a composição em Windows real. Se a técnica de recortes apresentar instabilidade, a alternativa a comparar é uma janela de overlay separada, como a arquitetura estudada no OpenPlayer. Android e Google TV continuam usando ExoPlayer e não passam por esse caminho.
 
 ### Linux e macOS
 
@@ -76,9 +76,9 @@ A interface usa Video.js/WebView quando o player nativo não está habilitado. O
 
 Video.js é empacotado em `web/vendor/`, evitando depender de baixar a biblioteca em tempo de execução. A compatibilidade real de contêineres e codecs depende do WebView e do sistema operacional.
 
-## Android TV e foco
+## Google TV e foco
 
-Os arquivos `tv-mode.js` e `android-tv.css` ativam a apresentação de sala de estar em dispositivos Android identificados como TVs ou telas grandes sem toque. `remote-navigation.js` interpreta setas, códigos DPAD, OK e Voltar, controla o foco e limita a navegação em diálogos modais.
+Os arquivos `tv-mode.js` e `google-tv.css` ativam a apresentação de sala de estar em dispositivos Android identificados como TVs ou telas grandes sem toque. `remote-navigation.js` interpreta setas, códigos DPAD, OK e Voltar, controla o foco e limita a navegação em diálogos modais.
 
 A navegação direcional escolhe candidatos pela geometria dos elementos, priorizando alinhamento no eixo perpendicular ao movimento. Listas verticais específicas, como a seleção de arquivos de torrent, usam navegação por índice para evitar saltos.
 
@@ -95,7 +95,7 @@ A integração em `kodi.rs` e `web/kodi.js` usa JSON-RPC HTTP para conectar a um
 - `.github/workflows/build.yml`: testes Rust, lint, smoke web, builds desktop e Android e publicação de releases.
 - `.github/workflows/cleanup-actions.yml`: limpeza semanal de execuções concluídas do GitHub Actions com mais de 30 dias; permite execução manual com retenção configurável (1–365 dias) e simulação sem exclusão.
 
-O CI não substitui testes em dispositivos físicos. Especialmente em Android TV, controle remoto, codecs, rede e desempenho precisam ser validados no aparelho.
+O CI não substitui testes em dispositivos físicos. Especialmente em Google TV, controle remoto, codecs, rede e desempenho precisam ser validados no aparelho.
 
 ## Limites deliberados
 
