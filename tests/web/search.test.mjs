@@ -207,7 +207,7 @@ try {
       const sidebar = document.querySelector('.sidebar').getBoundingClientRect();
       const logo = document.querySelector('.logo').getBoundingClientRect();
       const nav = document.querySelector('#nav-main').getBoundingClientRect();
-      const topbar = document.querySelector('.topbar').getBoundingClientRect();
+      const topbar = document.querySelector('.topbar form').getBoundingClientRect();
       return {
         viewport: document.documentElement.clientWidth,
         document: document.documentElement.scrollWidth,
