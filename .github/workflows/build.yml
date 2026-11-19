@@ -21,7 +21,7 @@ jobs:
   test:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4
       - name: Selecionar o espelho Ubuntu mais rápido
         run: |
           sudo bash .github/scripts/select-ubuntu-mirror.sh
@@ -40,7 +40,7 @@ jobs:
       contents: read
       checks: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4
       - name: Dependências do Linux
         run: |
           sudo bash .github/scripts/select-ubuntu-mirror.sh
@@ -116,10 +116,10 @@ jobs:
   web-smoke:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4
       - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "24"
       - name: Instalar dependências do teste
         working-directory: tests/web
         run: npm ci
@@ -149,7 +149,7 @@ jobs:
         platform: [ubuntu-22.04, windows-latest, macos-latest]
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4
       - name: Dependências do Linux
         if: matrix.platform == 'ubuntu-22.04'
         run: |
@@ -281,7 +281,7 @@ jobs:
     # O APK arm64-v8a continua sendo gerado e verificado separadamente.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
