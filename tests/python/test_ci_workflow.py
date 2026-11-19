@@ -11,13 +11,13 @@ CHECKOUT_V5_SHA = "fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09"
 class CiWorkflowTests(unittest.TestCase):
     def test_all_checkout_steps_use_node24_compatible_v5(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        checkout_refs = re.findall(r"uses:\\s*actions/checkout@([0-9a-f]+)", workflow)
+        checkout_refs = re.findall(r"uses:\s*actions/checkout@([0-9a-f]+)", workflow)
         self.assertGreater(len(checkout_refs), 0)
         self.assertEqual(checkout_refs, [CHECKOUT_V5_SHA] * len(checkout_refs))
 
     def test_web_smoke_uses_node24(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        web_smoke = workflow.split("  web-smoke:", 1)[1].split("\\n  desktop:", 1)[0]
+        web_smoke = workflow.split("  web-smoke:", 1)[1].split("\n  desktop:", 1)[0]
         self.assertIn('node-version: "24"', web_smoke)
         self.assertNotIn('node-version: "20"', web_smoke)
 
