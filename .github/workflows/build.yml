@@ -150,11 +150,18 @@ jobs:
       - name: Instalar Tauri CLI
         if: steps.tauri-cache.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version "2.12.5" --locked --force
+      - name: Restaurar cache do pacote de desenvolvimento libmpv
+        if: matrix.platform == 'windows-latest'
+        id: mpv-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/mpv-dev
+          key: libmpv-dev-x86_64-20261108-git-55d3feb45c
       - name: Instalar 7-Zip
-        if: matrix.platform == 'windows-latest'
+        if: matrix.platform == 'windows-latest' && steps.mpv-cache.outputs.cache-hit != 'true'
         run: choco install 7zip.install --no-progress -y
-      - name: Preparar libmpv para o player MKV do Windows
-        if: matrix.platform == 'windows-latest'
+      - name: Baixar e extrair libmpv (somente quando não houver cache)
+        if: matrix.platform == 'windows-latest' && steps.mpv-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -166,8 +173,21 @@ jobs:
           $dest = Join-Path $env:RUNNER_TEMP 'mpv-dev'
           & 'C:\Program Files\7-Zip\7z.exe' x $archive "-o$dest" -y
           if ($LASTEXITCODE -ne 0) { throw 'Falha ao extrair o pacote libmpv.' }
+          if (-not (Get-ChildItem $dest -Filter 'libmpv-2.dll' -Recurse)) { throw 'libmpv-2.dll não foi encontrado após a extração.' }
+      - name: Salvar cache do pacote de desenvolvimento libmpv
+        if: matrix.platform == 'windows-latest' && steps.mpv-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/mpv-dev
+          key: libmpv-dev-x86_64-20261108-git-55d3feb45c
+      - name: Preparar DLLs e variáveis do libmpv
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dest = Join-Path $env:RUNNER_TEMP 'mpv-dev'
           $dll = Get-ChildItem $dest -Filter 'libmpv-2.dll' -Recurse | Select-Object -First 1
-          if (-not $dll) { throw 'libmpv-2.dll não foi encontrado.' }
+          if (-not $dll) { throw 'libmpv-2.dll não foi encontrado no pacote restaurado.' }
           $resources = Join-Path $env:GITHUB_WORKSPACE 'src-tauri/resources/mpv'
           New-Item -ItemType Directory -Force -Path $resources | Out-Null
           Get-ChildItem $dll.Directory.FullName -Filter '*.dll' | Copy-Item -Destination $resources -Force
