@@ -161,9 +161,10 @@ try {
 
   // Barra superior navega para a pesquisa e mantém a mesma normalização.
   await page.goto(`${base}/#/movies`);
+  const beforeTopSearch = (await calls()).length;
   await page.locator('#q').fill('  topo  ');
   await page.waitForTimeout(1200);
-  assert.equal((await calls()).length, 0, 'campo superior não deve pesquisar durante digitação');
+  assert.equal((await calls()).length, beforeTopSearch, 'campo superior não deve pesquisar durante digitação');
   await submit('#q', '#top-search-submit');
   await waitForQuery('topo', null);
   await page.waitForFunction(() => location.hash.startsWith('#/search?q=topo'));
@@ -172,9 +173,10 @@ try {
 
   // Campo específico de animes encaminha kind=anime e apresenta resultados.
   await page.goto(`${base}/#/animes`);
+  const beforeAnimeSearch = (await calls()).length;
   await page.locator('#anime-search-input').fill('naruto');
   await page.waitForTimeout(1200);
-  assert.equal((await calls()).length, 0, 'campo de animes não deve pesquisar durante digitação');
+  assert.equal((await calls()).length, beforeAnimeSearch, 'campo de animes não deve pesquisar durante digitação');
   await submit('#anime-search-input', '#anime-search-form button[type="submit"]');
   await waitForQuery('naruto', 'anime');
   await page.waitForFunction(() => document.querySelector('#anime-search-status')?.textContent === '1 resultado');
