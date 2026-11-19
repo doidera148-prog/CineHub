@@ -178,7 +178,7 @@
 
     // O cálculo global nunca inclui a sidebar. Assim, cima/baixo e movimentos
     // a partir de colunas internas não escapam para o menu.
-    const mainItems = modal ? items : focusables(document.querySelector('#main-content'));
+    const mainItems = modal ? items : focusables(document.querySelector('#main-content')).filter((el) => !el.closest('.topbar'));
     const next = nearest(current, mainItems, direction, { alignedOnly: true });
     if (next) {
       focusElement(next);
