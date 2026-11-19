@@ -39,7 +39,7 @@ function flushSearch(input, callback) {
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-// Chamadas ao backend Tauri (funciona em desktop, Android e Android TV).
+// Chamadas ao backend Tauri (funciona em desktop, Android e Google TV).
 const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
 async function call(cmd, args) {
   try {
@@ -363,7 +363,7 @@ function pickTorrentVideo(result) {
       { once: true },
     );
     dlg.showModal();
-    // No Android TV o foco inicial do dialog pode cair no filtro de idioma.
+    // No Google TV o foco inicial do dialog pode cair no filtro de idioma.
     // Leva-o diretamente ao primeiro arquivo para que o DPAD percorra os episódios.
     requestAnimationFrame(() => {
       const firstItem = dlg.querySelector('.tp-item');
@@ -1595,7 +1595,7 @@ view.addEventListener('pointerout', (e) => {
   if (preview.card === card) schedulePreviewClose();
 });
 // A prévia permanece exclusiva do ponteiro (desktop). Não abre ao focar com controle remoto,
-// evitando a mini janela sobre os cartazes na navegação da Android TV.
+// evitando a mini janela sobre os cartazes na navegação da Google TV.
 // Rolagem (inclusive a dos trilhos, que o controle remoto usa): o cartão acompanha o título.
 view.addEventListener('scroll', () => {
   if (preview.card && preview.el?.classList.contains('is-open')) positionPreview(preview.el, preview.card);
