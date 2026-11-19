@@ -105,6 +105,7 @@ try {
   await submit('#sq');
   await waitForQuery('lento', null);
   await page.locator('#sq').fill('');
+  await submit('#sq');
   await page.waitForFunction(() => !document.querySelector('#rows')?.hasAttribute('aria-busy'));
   assert.match(await page.locator('#rows').innerText(), /Digite um título/);
   await page.waitForTimeout(800);
