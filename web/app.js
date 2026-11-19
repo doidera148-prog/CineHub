@@ -1839,7 +1839,7 @@ function nativePlayerGeometry() {
   const bounds = box.getBoundingClientRect();
   const scale = window.devicePixelRatio || 1;
   if (bounds.width < 16 || bounds.height < 16) return null;
-  const cutouts = ['#close-player', '#player-title']
+  const cutouts = ['#close-player', '#player-title', '#next-ep', '#skip-seg', '#pip']
     .map((selector) => document.querySelector(selector))
     .filter((element) => element && !element.hidden && element.getClientRects().length)
     .map((element) => {
@@ -1896,7 +1896,7 @@ if (typeof ResizeObserver !== 'undefined') {
   const nativePlayerObserver = new ResizeObserver(() => {
     if (nativePlayerActive) void syncNativePlayerGeometry();
   });
-  for (const element of [document.querySelector('#player .player-box'), $('#close-player'), $('#player-title')]) {
+  for (const element of [document.querySelector('#player .player-box'), $('#close-player'), $('#player-title'), $('#next-ep'), $('#skip-seg'), $('#pip')]) {
     if (element) nativePlayerObserver.observe(element);
   }
 }
