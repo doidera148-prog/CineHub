@@ -23,17 +23,19 @@ pub struct PlayerCutout {
 /// Limites e recortes da região Win32 em coordenadas locais da janela filha.
 /// SetWindowRgn interpreta (0, 0) como o canto superior esquerdo da própria janela,
 /// não como a origem da WebView.
-fn window_region(
-    width: u32,
-    height: u32,
-    cutouts: &[PlayerCutout],
-) -> ((i32, i32, i32, i32), Vec<(i32, i32, i32, i32)>) {
+struct WindowRegion {
+    bounds: (i32, i32, i32, i32),
+    holes: Vec<(i32, i32, i32, i32)>,
+}
+
+#[cfg(any(all(windows, feature = "mpv"), test))]
+fn window_region(width: u32, height: u32, cutouts: &[PlayerCutout]) -> WindowRegion {
     let right = width.min(i32::MAX as u32) as i32;
     let bottom = height.min(i32::MAX as u32) as i32;
-    (
-        (0, 0, right, bottom),
-        clipped_cutouts(width, height, cutouts),
-    )
+    WindowRegion {
+        bounds: (0, 0, right, bottom),
+        holes: clipped_cutouts(width, height, cutouts),
+    }
 }
 
 #[cfg(any(all(windows, feature = "mpv"), test))]
@@ -388,6 +390,8 @@ mod win {
 
     const WM_CLOSE: u32 = 0x0010;
     const HWND_TOP: Hwnd = std::ptr::null_mut();
+    const SWP_NOMOVE: u32 = 0x0002;
+    const SWP_NOSIZE: u32 = 0x0001;
     const SWP_NOACTIVATE: u32 = 0x0010;
     const SWP_SHOWWINDOW: u32 = 0x0040;
     const RGN_DIFF: i32 = 4;
@@ -460,12 +464,13 @@ mod win {
             }
             // SetWindowRgn usa coordenadas locais à janela filha, não coordenadas
             // absolutas da WebView. A região começa sempre em (0, 0).
-            let (bounds, holes) = super::window_region(width, height, cutouts);
+            let region_shape = super::window_region(width, height, cutouts);
+            let bounds = region_shape.bounds;
             let region = CreateRectRgn(bounds.0, bounds.1, bounds.2, bounds.3);
             if region.is_null() {
                 return false;
             }
-            for (left, top, right, bottom) in holes {
+            for (left, top, right, bottom) in region_shape.holes {
                 let hole = CreateRectRgn(left, top, right, bottom);
                 if !hole.is_null() {
                     CombineRgn(region, region, hole, RGN_DIFF);
@@ -566,7 +571,10 @@ mod tests {
         // A região e seus recortes são locais à janela filha. A posição x/y
         // da WebView é aplicada separadamente por SetWindowPos.
         assert_eq!(
-            super::window_region(100, 100, &cuts),
+            {
+                let region = super::window_region(100, 100, &cuts);
+                (region.bounds, region.holes)
+            },
             ((0, 0, 100, 100), vec![(0, 5, 20, 25), (90, 90, 100, 100)])
         );
     }
