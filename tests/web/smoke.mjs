@@ -184,7 +184,7 @@ async function checkAndroidPlayer() {
 async function checkAndroidPlayerFallback() {
   const page = await browser.newPage({
     viewport: { width: 1280, height: 720 },
-    userAgent: 'Mozilla/5.0 (Linux; Android 11; Android TV) AppleWebKit/537.36 Chrome/120.0 Safari/537.36',
+    userAgent: 'Mozilla/5.0 (Linux; Android 11; Google TV) AppleWebKit/537.36 Chrome/120.0 Safari/537.36',
   });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -256,7 +256,7 @@ async function checkBackupImport() {
 async function checkTv(viewport, label) {
   const page = await browser.newPage({
     viewport,
-    userAgent: 'Mozilla/5.0 (Linux; Android 11; Android TV) AppleWebKit/537.36 Chrome/120.0 Safari/537.36',
+    userAgent: 'Mozilla/5.0 (Linux; Android 11; Google TV) AppleWebKit/537.36 Chrome/120.0 Safari/537.36',
   });
   await page.addInitScript(fixtures);
   await page.addInitScript(() => {
@@ -279,7 +279,7 @@ async function checkTv(viewport, label) {
   if (await page.evaluate(() => document.activeElement?.closest('.strip') === document.querySelector('.strip'))) failures.push(`[${label}] controle ficou preso na borda do trilho`);
   await page.close();
 }
-try { await check({ width: 360, height: 800 }, 'celular'); await check({ width: 1280, height: 800 }, 'desktop'); await checkTv({ width: 1280, height: 720 }, 'Android TV 720p'); await checkTv({ width: 3840, height: 2160 }, 'Android TV 4K'); await checkBackupImport(); await checkUntrustedMetadataEscaping(); await checkWindowsPlayer(); await checkWindowsNativeOverlayClose(); await checkWindowsPlayerFailure(); await checkAndroidPlayer(); await checkAndroidPlayerFallback(); }
+try { await check({ width: 360, height: 800 }, 'celular'); await check({ width: 1280, height: 800 }, 'desktop'); await checkTv({ width: 1280, height: 720 }, 'Google TV 720p'); await checkTv({ width: 3840, height: 2160 }, 'Google TV 4K'); await checkBackupImport(); await checkUntrustedMetadataEscaping(); await checkWindowsPlayer(); await checkWindowsNativeOverlayClose(); await checkWindowsPlayerFailure(); await checkAndroidPlayer(); await checkAndroidPlayerFallback(); }
 finally { await browser.close(); server.close(); }
 if (failures.length) { console.error('Falhas:\n- ' + failures.join('\n- ')); process.exit(1); }
-console.log('Smoke test ok: rotas, acessibilidade e navegação em celular, desktop e Android TV.');
+console.log('Smoke test ok: rotas, acessibilidade e navegação em celular, desktop e Google TV.');
