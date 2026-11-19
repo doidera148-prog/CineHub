@@ -239,6 +239,8 @@ mod imp {
             // Passá-las diretamente a set_option causa MPV_ERROR_OPTION_NOT_FOUND (-5).
             init.set_option("script-opts", "osc-visibility=always,osc-idlescreen=yes")?;
             init.set_option("input-default-bindings", "yes")?;
+            // O libmpv desativa input-cursor por padrão; sem isso o OSC não recebe mouse.
+            init.set_option("input-cursor", "yes")?;
             init.set_option("input-vo-keyboard", "yes")?;
             init.set_option("osd-level", "3")?;
             init.set_option("border", "no")?;
@@ -526,6 +528,7 @@ mod tests {
             init.set_option("vo", "null")?;
             init.set_option("ao", "null")?;
             init.set_option("osc", "yes")?;
+            init.set_option("input-cursor", "yes")?;
             init.set_option("script-opts", "osc-visibility=always,osc-idlescreen=yes")?;
             Ok(())
         });
