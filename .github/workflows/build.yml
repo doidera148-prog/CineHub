@@ -379,8 +379,17 @@ jobs:
           key: gradle-android-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock', 'src-tauri/tauri.conf.json', 'src-tauri/plugins/**/build.gradle*', 'src-tauri/plugins/**/gradle.properties') }}
       - name: Verificar geração dos APKs
         run: |
-          find src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -print
-          find src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -print -quit | grep -q .
+          set -euo pipefail
+          apk_root=src-tauri/gen/android/app/build/outputs/apk
+          for abi in arm arm64 x86 x86_64; do
+            apk="$apk_root/$abi/release/app-$abi-release-unsigned.apk"
+            if [ ! -s "$apk" ]; then
+              echo "::error::APK ausente ou vazio para a arquitetura $abi: $apk"
+              find "$apk_root" -type f -name '*.apk' -print || true
+              exit 1
+            fi
+            echo "APK gerado para $abi: $apk"
+          done
       - name: Assinar APK
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
