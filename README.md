@@ -7,7 +7,7 @@ Aplicativo de mídia multiplataforma, escrito em Rust + Tauri 2, com interface e
 ## Plataformas
 
 - **Android e Google TV:** APK único, com player nativo Media3/ExoPlayer. A interface detecta TVs Android de tela grande e ativa layout próprio para controle remoto.
-- **Windows:** pacote desktop Tauri com player nativo libmpv/FFmpeg incorporado à janela do CineHub. A superfície nativa é recortada para deixar elementos HTML da interface visíveis e clicáveis; a primeira etapa mantém o OSC do mpv para os controles de transporte enquanto a sobreposição é validada.
+- **Windows:** o build de release do CI inclui libmpv/FFmpeg e incorpora a superfície de vídeo à janela do CineHub. A superfície nativa é recortada para deixar elementos HTML da interface visíveis e clicáveis; os controles de transporte usam o OSC do mpv. Builds locais sem a feature `mpv` usam o player do WebView.
 - **Linux e macOS:** pacotes desktop Tauri; reprodução pelo player disponível no WebView quando o player nativo não está habilitado.
 - **iOS:** não é alvo de build nem de teste.
 
@@ -143,7 +143,7 @@ Os testes de integração Rust usam um addon falso e validam rotas do protocolo,
 ### Requisitos gerais
 - Rust estável via rustup.
 - Tauri CLI 2.
-- Node.js 20 para os testes web.
+- Node.js 24 para os testes web e as ferramentas JavaScript do CI.
 
 Instale o CLI:
 
@@ -159,7 +159,7 @@ sudo apt-get install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-
 ```
 
 ### Windows
-WebView2 (normalmente presente nas versões atuais do Windows). A reprodução usa Video.js/HTML5 dentro do WebView2; não é necessário instalar libmpv nem preparar DLLs adicionais.
+WebView2 (normalmente presente nas versões atuais do Windows). O build padrão sem a feature `mpv` usa Video.js/HTML5. Para reproduzir o build de release do CI, também é necessário preparar as DLLs de desenvolvimento do libmpv x86_64 e compilar com `--features mpv` e a configuração `tauri.windows.conf.json`.
 
 ### macOS
 Xcode Command Line Tools.
@@ -193,7 +193,7 @@ O workflow [build.yml](.github/workflows/build.yml) roda em pushes para `main` (
 - **Testes:** suíte Rust.
 - **Lint:** rustfmt, Clippy e verificação de sintaxe JavaScript; auditorias adicionais de licenças e vulnerabilidades são executadas como etapas não bloqueantes.
 - **Web:** teste de fumaça Playwright.
-- **Desktop:** Linux, Windows e macOS. No Windows, o player integrado usa WebView2/Video.js; o workflow não compila nem distribui libmpv.
+- **Desktop:** Linux, Windows e macOS. No Windows, o workflow compila o player integrado com libmpv/FFmpeg e inclui as DLLs necessárias no pacote; Linux e macOS usam Video.js/WebView no build padrão.
 - **Android:** APKs separados por ABI para arm64-v8a, armeabi-v7a, x86 e x86_64.
 - **Release:** publica os artefatos quando testes, lint, smoke web e pelo menos um build de plataforma passam; mantém as 10 releases automáticas mais recentes.
 
