@@ -13,6 +13,7 @@ const MAX_PROGRESS = 50; // quantidade de títulos guardados no progresso
 const SEARCH_MAX_CHARS = 200;
 const composingSearchInputs = new WeakSet();
 const normalizeSearchQuery = (value) => Array.from(String(value ?? '').trim()).slice(0, SEARCH_MAX_CHARS).join('');
+let debounceTimer = null;
 function flushSearch(input, callback) {
   if (composingSearchInputs.has(input)) return;
   clearTimeout(debounceTimer);
