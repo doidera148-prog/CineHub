@@ -1,4 +1,4 @@
-// Navegação D-pad unificada para Android TV, controles remotos e teclado.
+// Navegação D-pad unificada para Google TV, controles remotos e teclado.
 (() => {
   'use strict';
 
