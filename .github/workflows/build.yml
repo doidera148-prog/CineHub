@@ -498,7 +498,7 @@ jobs:
 
   release:
     # Só publica quando testes, lint e teste de fumaça da interface passaram.
-    if: ${{ always() && github.event_name != 'pull_request' && needs.test.result == 'success' && needs.lint.result == 'success' && needs.web-smoke.result == 'success' && (needs.desktop.result == 'success' || needs.android.result == 'success') }}
+    if: ${{ always() && github.event_name != 'pull_request' && needs.test.result == 'success' && needs.lint.result == 'success' && needs.web-smoke.result == 'success' && needs.desktop.result == 'success' && needs.android.result == 'success' }}
     needs: [test, lint, web-smoke, desktop, android]
     runs-on: ubuntu-22.04
     permissions:
