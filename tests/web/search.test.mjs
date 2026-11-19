@@ -51,6 +51,10 @@ page.on('pageerror', error => errors.push(error.message));
 page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
 await page.addInitScript(fixture);
 const calls = () => page.evaluate(() => window.__searchCalls);
+const submit = async (inputSelector, buttonSelector) => {
+  if (buttonSelector) await page.locator(buttonSelector).click();
+  else await page.locator(inputSelector).press('Enter');
+};
 const waitForQuery = (q, kind) => page.waitForFunction(
   ({ q, kind }) => window.__searchCalls.some(call => call.q === q && (call.kind || null) === kind),
   { q, kind }, { timeout: 3000 }
@@ -65,36 +69,40 @@ try {
   assert.equal(await page.locator('#search-status').getAttribute('role'), 'status');
   assert.equal(await page.locator('#search-status').getAttribute('aria-live'), 'polite');
   await page.locator('#sq').fill('  matrix  ');
+  await page.waitForTimeout(1500);
+  assert.equal((await calls()).length, 1, 'digitar não deve iniciar a pesquisa automaticamente');
+  await submit('#sq', '#sf button[type="submit"]');
   await waitForQuery('matrix', null);
   await page.waitForFunction(() => document.querySelector('#search-status')?.textContent === '1 resultado');
   assert.equal((await calls()).at(-1).q, 'matrix', 'a busca deve remover espaços nas extremidades');
   assert.match(await page.locator('#rows').innerText(), /Resultado matrix/);
 
-  // Uma pausa curta após a primeira letra não pode disparar a busca antes de terminar de digitar.
+  // Nenhuma pausa entre letras dispara busca; o clique no botão confirma a consulta.
   const beforePartialInput = (await calls()).length;
   await page.locator('#sq').fill('a');
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(1800);
   assert.equal((await calls()).length, beforePartialInput,
-    'uma única letra não deve iniciar a pesquisa enquanto o usuário ainda está digitando');
+    'uma letra isolada não deve iniciar a pesquisa automaticamente');
   await page.locator('#sq').fill('avatar');
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(1200);
   assert.equal((await calls()).length, beforePartialInput,
-    'a busca deve aguardar o intervalo completo após a última letra');
+    'a pesquisa deve aguardar confirmação explícita mesmo após uma pausa longa');
+  await submit('#sq', '#sf button[type="submit"]');
   await waitForQuery('avatar', null);
 
-  // Debounce: digitação rápida deve gerar apenas a consulta final.
-  const beforeDebounce = (await calls()).length;
-  await page.locator('#sq').fill('primeiro');
-  await page.waitForTimeout(120);
+  // Enter também confirma a pesquisa e uma única ação gera uma consulta.
+  const beforeEnter = (await calls()).length;
   await page.locator('#sq').fill('segundo');
-  await page.waitForTimeout(250);
-  assert.equal((await calls()).length, beforeDebounce, 'não deve pesquisar antes do debounce');
+  await page.waitForTimeout(1200);
+  assert.equal((await calls()).length, beforeEnter);
+  await submit('#sq');
   await waitForQuery('segundo', null);
-  assert.equal((await calls()).filter(call => ['primeiro', 'segundo'].includes(call.q)).length, 1,
-    'digitação rápida deve disparar somente a consulta mais recente');
+  assert.equal((await calls()).filter(call => call.q === 'segundo').length, 1,
+    'Enter deve disparar somente uma consulta');
 
   // Apagar o campo limpa resultados/estado imediatamente e invalida resposta pendente.
   await page.locator('#sq').fill('lento');
+  await submit('#sq');
   await waitForQuery('lento', null);
   await page.locator('#sq').fill('');
   await page.waitForFunction(() => !document.querySelector('#rows')?.hasAttribute('aria-busy'));
@@ -107,6 +115,7 @@ try {
   await page.locator('#sq').fill('lento');
   await waitForQuery('lento', null);
   await page.locator('#sq').fill('rapido');
+  await submit('#sq');
   await waitForQuery('rapido', null);
   await page.waitForFunction(() => document.querySelector('#rows')?.textContent.includes('Resultado rapido'));
   await page.waitForTimeout(800);
@@ -115,16 +124,19 @@ try {
 
   // Estados vazio e erro não deixam o indicador de carregamento preso.
   await page.locator('#sq').fill('vazio');
+  await submit('#sq');
   await waitForQuery('vazio', null);
   await page.waitForFunction(() => document.querySelector('#search-status')?.textContent === 'Nenhum resultado');
   assert.doesNotMatch(await page.locator('#rows').getAttribute('aria-busy') || '', /true/);
   await page.locator('#sq').fill('erro');
+  await submit('#sq');
   await waitForQuery('erro', null);
   await page.waitForFunction(() => document.querySelector('#search-status')?.textContent === 'Erro na pesquisa');
   assert.match(await page.locator('#rows').innerText(), /falha simulada/);
 
   // Escape limpa a consulta atual.
   await page.locator('#sq').fill('limpar');
+  await submit('#sq');
   await waitForQuery('limpar', null);
   await page.locator('#sq').press('Escape');
   await page.waitForFunction(() => document.querySelector('#sq')?.value === '' &&
@@ -141,11 +153,17 @@ try {
   await page.waitForTimeout(550);
   assert.equal((await calls()).length, beforeIme, 'IME não deve pesquisar durante composição');
   await page.locator('#sq').evaluate(input => input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: 'nihongo' })));
+  await page.waitForTimeout(1200);
+  assert.equal((await calls()).length, beforeIme, 'fim da composição não deve pesquisar automaticamente');
+  await submit('#sq');
   await waitForQuery('nihongo', null);
 
   // Barra superior navega para a pesquisa e mantém a mesma normalização.
   await page.goto(`${base}/#/movies`);
   await page.locator('#q').fill('  topo  ');
+  await page.waitForTimeout(1200);
+  assert.equal((await calls()).length, 0, 'campo superior não deve pesquisar durante digitação');
+  await submit('#q', '#top-search-submit');
   await waitForQuery('topo', null);
   await page.waitForFunction(() => location.hash.startsWith('#/search?q=topo'));
   await page.waitForFunction(() => document.querySelector('#search-status')?.textContent === '1 resultado');
@@ -154,6 +172,9 @@ try {
   // Campo específico de animes encaminha kind=anime e apresenta resultados.
   await page.goto(`${base}/#/animes`);
   await page.locator('#anime-search-input').fill('naruto');
+  await page.waitForTimeout(1200);
+  assert.equal((await calls()).length, 0, 'campo de animes não deve pesquisar durante digitação');
+  await submit('#anime-search-input', '#anime-search-form button[type="submit"]');
   await waitForQuery('naruto', 'anime');
   await page.waitForFunction(() => document.querySelector('#anime-search-status')?.textContent === '1 resultado');
   assert.match(await page.locator('#anime-search-results').innerText(), /Anime naruto/);
@@ -162,6 +183,7 @@ try {
   await page.goto(`${base}/#/search?q=inicial`);
   const unicodeQuery = 'ação "東京" 🎬';
   await page.locator('#sq').fill(unicodeQuery);
+  await submit('#sq');
   await waitForQuery(unicodeQuery, null);
   assert.equal((await calls()).at(-1).q, unicodeQuery, 'caracteres Unicode devem ser preservados');
 
@@ -169,11 +191,12 @@ try {
   const oversized = 'x'.repeat(260);
   await page.locator('#sq').fill(oversized);
   assert.equal(await page.locator('#sq').inputValue().then(value => value.length), 200);
+  await submit('#sq');
   await waitForQuery('x'.repeat(200), null);
   assert.equal((await calls()).at(-1).q.length, 200);
 
   assert.deepEqual(errors, [], 'a pesquisa não deve produzir erros JavaScript/console');
-  console.log('Pesquisa UI: debounce, normalização, limpar, concorrência, vazio/erro, Escape, IME, barra superior e animes — OK');
+  console.log('Pesquisa UI: confirmação explícita, normalização, limpar, concorrência, vazio/erro, Escape, IME, barra superior e animes — OK');
 } finally {
   await page.close();
   await browser.close();
