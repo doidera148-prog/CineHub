@@ -5,15 +5,15 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "build.yml"
-CHECKOUT_V5_SHA = "fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09"
+CHECKOUT_V4_SHA = "fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09"
 
 
 class CiWorkflowTests(unittest.TestCase):
-    def test_all_checkout_steps_use_node24_compatible_v5(self):
+    def test_all_checkout_steps_use_the_pinned_v4_revision(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         checkout_refs = re.findall(r"uses:\s*actions/checkout@([0-9a-f]+)", workflow)
         self.assertGreater(len(checkout_refs), 0)
-        self.assertEqual(checkout_refs, [CHECKOUT_V5_SHA] * len(checkout_refs))
+        self.assertEqual(checkout_refs, [CHECKOUT_V4_SHA] * len(checkout_refs))
 
     def test_web_smoke_uses_node24(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
