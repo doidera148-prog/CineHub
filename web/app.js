@@ -11,7 +11,7 @@ const topQ = $('#q');
 const PAGE_HINT = 20; // a partir deste tamanho, a fila mostra "Carregar mais"
 const MAX_PROGRESS = 50; // quantidade de títulos guardados no progresso
 const SEARCH_MAX_CHARS = 200;
-const SEARCH_DEBOUNCE_MS = 450;
+const SEARCH_DEBOUNCE_MS = 1000;
 const composingSearchInputs = new WeakSet();
 const normalizeSearchQuery = (value) => Array.from(String(value ?? '').trim()).slice(0, SEARCH_MAX_CHARS).join('');
 function scheduleSearch(input, callback) {
