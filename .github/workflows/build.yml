@@ -354,7 +354,7 @@ jobs:
             [ "$booted" = "1" ] && break
             sleep 5
           done
-          [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ] || { echo "Emulador Android TV não iniciou"; exit 1; }
+          [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ] || { echo "Emulador Google TV não iniciou"; exit 1; }
           apk=$(for candidate in signed/*.apk; do
             [ -f "$candidate" ] || continue
             if unzip -Z1 "$candidate" | grep -q '^lib/x86/'; then echo "$candidate"; break; fi
