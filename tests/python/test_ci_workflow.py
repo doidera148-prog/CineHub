@@ -25,12 +25,12 @@ class CiWorkflowTests(unittest.TestCase):
     def test_release_requires_all_platform_builds(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         release = workflow.split("  release:", 1)[1]
-        condition = re.search(r"if:\s*\\$\\{\\{(.*?)\\}\\}", release, re.DOTALL)
+        condition = re.search(r"if:\s*\$\{\{(.*?)\}\}", release, re.DOTALL)
         self.assertIsNotNone(condition, "release precisa ter condição explícita")
         expression = condition.group(1)
         self.assertIn("needs.desktop.result == 'success'", expression)
         self.assertIn("needs.android.result == 'success'", expression)
-        self.assertNotRegex(expression, r"needs\\.desktop\\.result == 'success'\\s*\\|\\|\\s*needs\\.android\\.result == 'success'")
+        self.assertNotRegex(expression, r"needs\.desktop\.result == 'success'\s*\|\|\s*needs\.android\.result == 'success'")
 
     def test_android_keeps_all_four_requested_abis(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
