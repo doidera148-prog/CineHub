@@ -389,7 +389,7 @@ jobs:
           name: CineHub build ${{ github.run_number }}
           body: |
             Build automático do commit `${{ github.sha }}`.
-            Instaladores: Windows (.msi/.exe), macOS (.dmg), Linux (.deb/.AppImage) e Android (.apk, celular e Android TV).
+            Instaladores: Windows (.msi/.exe), macOS (.dmg), Linux (.deb/.AppImage) e Android (.apk, celular e Google TV).
           files: |
             artifacts/**/*.msi
             artifacts/**/*.exe
