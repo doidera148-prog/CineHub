@@ -53,7 +53,9 @@ class PlayArgs {
 internal object ExoPlayerUrlValidator {
     fun isPlayableUrl(raw: String): Boolean {
         return try {
-            val uri = Uri.parse(raw.trim())
+            // java.net.URI funciona em testes JVM locais; android.net.Uri é um stub
+            // nesses testes e retorna valores nulos fora de um dispositivo Android.
+            val uri = java.net.URI(raw.trim())
             (uri.scheme.equals("http", ignoreCase = true) ||
                 uri.scheme.equals("https", ignoreCase = true)) &&
                 !uri.host.isNullOrBlank()
