@@ -40,6 +40,18 @@ class CiWorkflowTests(unittest.TestCase):
             workflow,
         )
 
+    def test_android_requires_an_apk_for_each_abi(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        verification = workflow.split(
+            "      - name: Verificar geração dos APKs", 1
+        )[1].split("      - name: Assinar APK", 1)[0]
+        self.assertIn("for abi in arm arm64 x86 x86_64; do", verification)
+        self.assertIn(
+            'apk="$apk_root/$abi/release/app-$abi-release-unsigned.apk"',
+            verification,
+        )
+        self.assertIn('[ ! -s "$apk" ]', verification)
+
 
 if __name__ == "__main__":
     unittest.main()
