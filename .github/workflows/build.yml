@@ -277,9 +277,9 @@ jobs:
             !src-tauri/target/release/bundle/**/*.d
 
   android:
-    # O runner Intel oferece aceleração para o emulador Google TV x86 (imagem oficial API 34).
+    # Ubuntu 24.04 LTS oferece KVM para acelerar o emulador Google TV x86 (API 34).
     # O APK arm64-v8a continua sendo gerado e verificado separadamente.
-    runs-on: macos-15-intel
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-java@v6
@@ -419,10 +419,19 @@ jobs:
           done)
           test -n "$arm64_apk" || { echo "APK com bibliotecas nativas arm64-v8a não foi gerado"; exit 1; }
           echo "APK ARM64 gerado e validado: $arm64_apk"
+      - name: Habilitar aceleração KVM no Ubuntu
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -e /dev/kvm
+          ls -l /dev/kvm
       - name: Instalar e iniciar CineHub em emulador Google TV
         timeout-minutes: 20
         run: |
           set -euo pipefail
+          "$ANDROID_HOME/emulator/emulator" -accel-check
           SDKMANAGER=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -1)
           SDKTOOLS=$(dirname "$SDKMANAGER")
           yes | "$SDKMANAGER" --licenses > /dev/null || true
