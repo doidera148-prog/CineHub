@@ -11,24 +11,8 @@ const topQ = $('#q');
 const PAGE_HINT = 20; // a partir deste tamanho, a fila mostra "Carregar mais"
 const MAX_PROGRESS = 50; // quantidade de títulos guardados no progresso
 const SEARCH_MAX_CHARS = 200;
-const SEARCH_DEBOUNCE_MS = 1000;
 const composingSearchInputs = new WeakSet();
 const normalizeSearchQuery = (value) => Array.from(String(value ?? '').trim()).slice(0, SEARCH_MAX_CHARS).join('');
-function scheduleSearch(input, callback) {
-  if (composingSearchInputs.has(input)) return;
-  clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(() => callback(input.value), SEARCH_DEBOUNCE_MS);
-}
-function queueSearchInput(input, callback, clearWhenEmpty = false) {
-  if (composingSearchInputs.has(input)) return;
-  if (clearWhenEmpty && !normalizeSearchQuery(input.value)) {
-    clearTimeout(debounceTimer);
-    debounceTimer = null;
-    callback('');
-    return;
-  }
-  scheduleSearch(input, callback);
-}
 function flushSearch(input, callback) {
   if (composingSearchInputs.has(input)) return;
   clearTimeout(debounceTimer);
@@ -485,13 +469,12 @@ function renderBillboard(rows) {
 
 async function catalogPage(kind, title, alive) {
   if (kind === 'anime') {
-    setView('<h1>Animes</h1><form id="anime-search-form" role="search"><input id="anime-search-input" type="search" maxlength="200" placeholder="Pesquisar animes…" autocomplete="off" aria-label="Pesquisar animes"></form><p id="anime-search-status" class="muted small" role="status" aria-live="polite">Pesquise para encontrar títulos nos addons de anime.</p><div id="anime-search-results"></div><h2 class="section-heading">Catálogos</h2><div id="rows">' + skeleton() + skeleton() + '</div>');
+    setView('<h1>Animes</h1><form id="anime-search-form" role="search"><input id="anime-search-input" type="search" maxlength="200" placeholder="Pesquisar animes…" autocomplete="off" aria-label="Pesquisar animes"><button type="submit">Pesquisar</button></form><p id="anime-search-status" class="muted small" role="status" aria-live="polite">Pesquise para encontrar títulos nos addons de anime.</p><div id="anime-search-results"></div><h2 class="section-heading">Catálogos</h2><div id="rows">' + skeleton() + skeleton() + '</div>');
     const input = $('#anime-search-input');
     const submit = (event) => { event?.preventDefault(); flushSearch(input, (value) => runAnimeSearch(value)); };
     $('#anime-search-form').onsubmit = submit;
     input.addEventListener('compositionstart', () => composingSearchInputs.add(input));
-    input.addEventListener('input', () => queueSearchInput(input, (value) => runAnimeSearch(value), true));
-    input.addEventListener('compositionend', () => { composingSearchInputs.delete(input); queueSearchInput(input, (value) => runAnimeSearch(value), true); });
+    input.addEventListener('compositionend', () => composingSearchInputs.delete(input));
     const { rows } = await call('home', { kind });
     if (!alive()) return;
     renderRows(rows, 'Nenhum catálogo disponível. Use a pesquisa acima para consultar addons que exigem um termo de busca.');
@@ -531,8 +514,7 @@ async function runAnimeSearch(raw) {
     if (status) status.textContent = 'Erro na pesquisa de animes';
   }
 }
-// Pesquisa: a busca roda enquanto o usuário digita (com espera de 450 ms) e ignora respostas antigas.
-let debounceTimer = null;
+// Pesquisa: só executa após confirmação explícita (Enter ou botão); ignora respostas antigas.
 let searchSeq = 0;
 
 function searchPage(raw) {
@@ -540,7 +522,7 @@ function searchPage(raw) {
   topQ.value = q;
   setView(`
     <h1>Pesquisar</h1>
-    <form id="sf" role="search"><input id="sq" type="search" maxlength="200" value="${esc(q)}" placeholder="Digite um título…" autocomplete="off" aria-label="Pesquisar título" aria-controls="rows"></form>
+    <form id="sf" role="search"><input id="sq" type="search" maxlength="200" value="${esc(q)}" placeholder="Digite um título…" autocomplete="off" aria-label="Pesquisar título" aria-controls="rows"><button type="submit">Pesquisar</button></form>
     <p id="search-status" class="muted small" role="status" aria-live="polite"></p>
     <div id="rows"></div>`);
   const input = $('#sq');
@@ -549,8 +531,6 @@ function searchPage(raw) {
     if (event.key === 'Escape' && input.value) {
       event.preventDefault();
       input.value = '';
-      clearTimeout(debounceTimer);
-      debounceTimer = null;
       setSearch('');
     }
   });
@@ -559,8 +539,7 @@ function searchPage(raw) {
     flushSearch(input, (value) => setSearch(value));
   };
   input.addEventListener('compositionstart', () => composingSearchInputs.add(input));
-  input.addEventListener('input', () => queueSearchInput(input, (value) => setSearch(value), true));
-  input.addEventListener('compositionend', () => { composingSearchInputs.delete(input); queueSearchInput(input, (value) => setSearch(value), true); });
+  input.addEventListener('compositionend', () => composingSearchInputs.delete(input));
   runSearch(q);
 }
 
@@ -2382,7 +2361,6 @@ let routeSeq = 0;
 async function route() {
   const seq = ++routeSeq;
   const alive = () => seq === routeSeq;
-  clearTimeout(debounceTimer);
   if (sectionOf() !== 'settings' && torrentStatsTimer !== null) {
     clearInterval(torrentStatsTimer);
     torrentStatsTimer = null;
@@ -2438,14 +2416,11 @@ function focusContent() {
 
 topQ.maxLength = SEARCH_MAX_CHARS;
 topQ.addEventListener('compositionstart', () => composingSearchInputs.add(topQ));
-topQ.addEventListener('input', () => queueSearchInput(topQ, (value) => { if (normalizeSearchQuery(value) || sectionOf() === 'search') setSearch(value); }, true));
-topQ.addEventListener('compositionend', () => { composingSearchInputs.delete(topQ); queueSearchInput(topQ, (value) => { if (normalizeSearchQuery(value) || sectionOf() === 'search') setSearch(value); }, true); });
-topQ.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter' && !event.isComposing && event.keyCode !== 229) {
-    event.preventDefault();
-    flushSearch(topQ, (value) => setSearch(value));
-  }
-});
+topQ.addEventListener('compositionend', () => composingSearchInputs.delete(topQ));
+$('#top-search-form').onsubmit = (event) => {
+  event.preventDefault();
+  flushSearch(topQ, (value) => setSearch(value));
+};
 
 logEvent('INFO', `app iniciado (${IS_ANDROID ? 'android' : 'desktop'})`);
 window.addEventListener('hashchange', route);
