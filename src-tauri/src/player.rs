@@ -241,6 +241,9 @@ mod imp {
             init.set_option("input-default-bindings", "yes")?;
             // O libmpv desativa input-cursor por padrão; sem isso o OSC não recebe mouse.
             init.set_option("input-cursor", "yes")?;
+            // O player está embutido sobre a WebView: impedir que o backend encaminhe
+            // os cliques do OSC para a janela subjacente em vez de tratá-los no mpv.
+            init.set_option("input-cursor-passthrough", "no")?;
             init.set_option("input-vo-keyboard", "yes")?;
             init.set_option("osd-level", "3")?;
             init.set_option("border", "no")?;
@@ -529,6 +532,7 @@ mod tests {
             init.set_option("ao", "null")?;
             init.set_option("osc", "yes")?;
             init.set_option("input-cursor", "yes")?;
+            init.set_option("input-cursor-passthrough", "no")?;
             init.set_option("script-opts", "osc-visibility=always,osc-idlescreen=yes")?;
             Ok(())
         });
