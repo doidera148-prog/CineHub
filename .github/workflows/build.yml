@@ -270,9 +270,9 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri
-      - name: Cache do Tauri CLI
+      - name: Restaurar cache do Tauri CLI
         id: tauri-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/bin/cargo-tauri
@@ -281,8 +281,17 @@ jobs:
       - name: Instalar Tauri CLI
         if: steps.tauri-cache.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version "2.12.5" --locked
-      - name: Cache do Gradle Android
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Salvar cache do Tauri CLI
+        if: steps.tauri-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin/cargo-tauri
+            ~/.cargo/bin/cargo-tauri.exe
+          key: tauri-cli-2.12.5-${{ runner.os }}-${{ runner.arch }}
+      - name: Restaurar cache do Gradle Android
+        id: gradle-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.gradle/caches
@@ -308,6 +317,14 @@ jobs:
       - name: Testes unitários do plugin ExoPlayer
         working-directory: src-tauri/gen/android
         run: ./gradlew testDebugUnitTest
+      - name: Salvar cache do Gradle Android
+        if: always() && steps.gradle-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-android-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock', 'src-tauri/tauri.conf.json', 'src-tauri/plugins/**/build.gradle*', 'src-tauri/plugins/**/gradle.properties') }}
       - name: Verificar geração dos APKs
         run: |
           find src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -print
@@ -351,7 +368,7 @@ jobs:
           test -n "$arm64_apk" || { echo "APK com bibliotecas nativas arm64-v8a não foi gerado"; exit 1; }
           echo "APK ARM64 gerado e validado: $arm64_apk"
       - name: Instalar e iniciar CineHub em emulador Google TV
-        timeout-minutes: 12
+        timeout-minutes: 20
         run: |
           set -euo pipefail
           SDKMANAGER=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -1)
@@ -360,14 +377,32 @@ jobs:
           "$SDKMANAGER" "system-images;android-34;google-tv;x86"
           echo no | "$SDKTOOLS/avdmanager" create avd -n cinehub-google-tv-x86 -k "system-images;android-34;google-tv;x86" -d tv_1080p --force
           command -v adb
-          "$ANDROID_HOME/emulator/emulator" -avd cinehub-google-tv-x86 -no-window -no-audio -no-boot-anim -accel on -gpu host &
-          adb wait-for-device
+          EMULATOR_LOG="$RUNNER_TEMP/google-tv-emulator.log"
+          "$ANDROID_HOME/emulator/emulator" -avd cinehub-google-tv-x86 -no-window -no-audio -no-boot-anim -no-snapshot -no-snapshot-save -accel on -gpu swiftshader_indirect >"$EMULATOR_LOG" 2>&1 &
           for attempt in $(seq 1 60); do
-            booted=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+            if adb devices | grep -qE '^emulator-[0-9]+[[:space:]]+device$'; then
+              break
+            fi
+            sleep 5
+          done
+          if ! adb devices | grep -qE '^emulator-[0-9]+[[:space:]]+device$'; then
+            echo "::error::O emulador Google TV não ficou disponível no ADB em 5 minutos."
+            adb devices || true
+            tail -n 200 "$EMULATOR_LOG" || true
+            exit 1
+          fi
+          for attempt in $(seq 1 96); do
+            booted=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)
             [ "$booted" = "1" ] && break
             sleep 5
           done
-          [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ] || { echo "Emulador Google TV x86 não iniciou"; exit 1; }
+          if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)" != "1" ]; then
+            echo "::error::Emulador Google TV x86 conectou ao ADB, mas não concluiu a inicialização em 8 minutos."
+            adb devices || true
+            adb logcat -d -t 300 || true
+            tail -n 200 "$EMULATOR_LOG" || true
+            exit 1
+          fi
           apk=$(for candidate in signed/*.apk; do
             [ -f "$candidate" ] || continue
             if unzip -Z1 "$candidate" | grep -q '^lib/x86/'; then echo "$candidate"; break; fi
