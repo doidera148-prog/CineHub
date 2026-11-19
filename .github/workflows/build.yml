@@ -451,8 +451,12 @@ jobs:
           test -s "$ANDROID_AVD_HOME/cinehub-google-tv-x86.ini"
           test -f "$ANDROID_AVD_HOME/cinehub-google-tv-x86.avd/config.ini"
           command -v adb
+          # O runner é efêmero: reinicia o servidor ADB e desativa a autorização
+          # por chave RSA do emulador para evitar o estado "device unauthorized".
+          adb kill-server || true
+          adb start-server
           EMULATOR_LOG="$RUNNER_TEMP/google-tv-emulator.log"
-          "$ANDROID_HOME/emulator/emulator" -avd cinehub-google-tv-x86 -no-window -no-audio -no-boot-anim -no-snapshot -no-snapshot-save -accel on -gpu swiftshader_indirect >"$EMULATOR_LOG" 2>&1 &
+          "$ANDROID_HOME/emulator/emulator" -avd cinehub-google-tv-x86 -no-window -no-audio -no-boot-anim -no-snapshot -no-snapshot-save -skip-adb-auth -accel on -gpu swiftshader_indirect >"$EMULATOR_LOG" 2>&1 &
           for attempt in $(seq 1 60); do
             if adb devices | grep -qE '^emulator-[0-9]+[[:space:]]+device$'; then
               break
