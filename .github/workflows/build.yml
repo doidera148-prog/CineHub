@@ -436,7 +436,11 @@ jobs:
           SDKTOOLS=$(dirname "$SDKMANAGER")
           yes | "$SDKMANAGER" --licenses > /dev/null || true
           "$SDKMANAGER" "system-images;android-34;google-tv;x86"
-          echo no | "$SDKTOOLS/avdmanager" create avd -n cinehub-google-tv-x86 -k "system-images;android-34;google-tv;x86" -d tv_1080p --force
+          export ANDROID_AVD_HOME="$HOME/.android/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          printf 'no\\n' | "$SDKTOOLS/avdmanager" create avd --name cinehub-google-tv-x86 --package "system-images;android-34;google-tv;x86" --device tv_1080p --path "$ANDROID_AVD_HOME/cinehub-google-tv-x86.avd" --force
+          test -s "$ANDROID_AVD_HOME/cinehub-google-tv-x86.ini"
+          test -f "$ANDROID_AVD_HOME/cinehub-google-tv-x86.avd/config.ini"
           command -v adb
           EMULATOR_LOG="$RUNNER_TEMP/google-tv-emulator.log"
           "$ANDROID_HOME/emulator/emulator" -avd cinehub-google-tv-x86 -no-window -no-audio -no-boot-anim -no-snapshot -no-snapshot-save -accel on -gpu swiftshader_indirect >"$EMULATOR_LOG" 2>&1 &
