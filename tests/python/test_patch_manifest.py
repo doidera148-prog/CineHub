@@ -1,4 +1,4 @@
-"""Testes do ajuste de manifesto Android TV usado no build."""
+"""Testes do ajuste de manifesto Google TV usado no build."""
 import importlib.util
 import pathlib
 import tempfile
