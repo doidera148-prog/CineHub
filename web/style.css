@@ -222,6 +222,11 @@ body.animes-active .topbar { display: none; }
   z-index: 41;
   margin: 0;
 }
+.topbar form {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
 .topbar input {
   width: 15rem;
   height: 2.4rem;
@@ -236,6 +241,7 @@ body.animes-active .topbar { display: none; }
 .topbar input:hover { background: rgba(255, 255, 255, 0.09); }
 .topbar input:focus { width: 22rem; background: rgba(0, 0, 0, 0.85); border-color: rgba(255, 255, 255, 0.55); }
 .topbar input::placeholder { color: var(--muted); opacity: 1; }
+.topbar button { min-height: 2.4rem; padding: 0 0.85rem; white-space: nowrap; }
 :root[data-theme="light"] .topbar input { background: var(--bg-raised); }
 
 /* ---------- Botões e chips ---------- */
