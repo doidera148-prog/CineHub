@@ -227,8 +227,9 @@ jobs:
             !src-tauri/target/release/bundle/**/*.d
 
   android:
-    # Apple Silicon executa nativamente a imagem Google TV arm64-v8a.
-    runs-on: macos-15
+    # O runner Intel oferece aceleração de virtualização para o emulador x86_64.
+    # O APK arm64-v8a continua sendo gerado e verificado separadamente.
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-java@v6
@@ -331,16 +332,26 @@ jobs:
             "$BT/apksigner" verify --verbose "$out"
           done
           ls -la signed
+      - name: Verificar APK Google TV ARM64
+        run: |
+          set -euo pipefail
+          arm64_apk=$(for candidate in signed/*.apk; do
+            [ -f "$candidate" ] || continue
+            if unzip -Z1 "$candidate" | grep -q '^lib/arm64-v8a/'; then echo "$candidate"; break; fi
+          done)
+          test -n "$arm64_apk" || { echo "APK com bibliotecas nativas arm64-v8a não foi gerado"; exit 1; }
+          echo "APK ARM64 gerado e validado: $arm64_apk"
       - name: Instalar e iniciar CineHub em emulador Google TV
         timeout-minutes: 12
         run: |
+          set -euo pipefail
           SDKMANAGER=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -1)
           SDKTOOLS=$(dirname "$SDKMANAGER")
           yes | "$SDKMANAGER" --licenses > /dev/null || true
-          "$SDKMANAGER" "system-images;android-34;google-tv;arm64-v8a"
-          echo no | "$SDKTOOLS/avdmanager" create avd -n cinehub-google-tv-arm64 -k "system-images;android-34;google-tv;arm64-v8a" -d tv_1080p --force
+          "$SDKMANAGER" "system-images;android-34;google-tv;x86_64"
+          echo no | "$SDKTOOLS/avdmanager" create avd -n cinehub-google-tv-x86_64 -k "system-images;android-34;google-tv;x86_64" -d tv_1080p --force
           command -v adb
-          "$ANDROID_HOME/emulator/emulator" -avd cinehub-google-tv-arm64 -no-window -no-audio -no-boot-anim -gpu host &
+          "$ANDROID_HOME/emulator/emulator" -avd cinehub-google-tv-x86_64 -no-window -no-audio -no-boot-anim -accel on -gpu host &
           adb wait-for-device
           for attempt in $(seq 1 60); do
             booted=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
@@ -350,9 +361,9 @@ jobs:
           [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ] || { echo "Emulador Google TV ARM64 não iniciou"; exit 1; }
           apk=$(for candidate in signed/*.apk; do
             [ -f "$candidate" ] || continue
-            if unzip -Z1 "$candidate" | grep -q '^lib/arm64-v8a/'; then echo "$candidate"; break; fi
+            if unzip -Z1 "$candidate" | grep -q '^lib/x86_64/'; then echo "$candidate"; break; fi
           done)
-          test -n "$apk" || { echo "APK com bibliotecas nativas arm64-v8a não foi gerado"; exit 1; }
+          test -n "$apk" || { echo "APK com bibliotecas nativas x86_64 para o teste no emulador não foi gerado"; exit 1; }
           adb install -r "$apk"
           adb logcat -c
           adb shell monkey -p com.cinehub.app 1
