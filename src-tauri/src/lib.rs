@@ -1,7 +1,7 @@
 //! CineHub: aplicativo de streaming compatível com os addons do Stremio.
 //!
 //! O backend (este crate) fala com os addons pelo protocolo do Stremio e expõe comandos
-//! que a interface web chama via `invoke`. Roda no Windows, macOS, Linux, Android e Android TV.
+//! que a interface web chama via `invoke`. Roda no Windows, macOS, Linux, Android e Google TV.
 
 pub mod addon;
 pub mod commands;
