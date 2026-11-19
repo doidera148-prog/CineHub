@@ -77,7 +77,7 @@ private data class Skip(val kind: String, val start: Double, val end: Double) {
         }
 }
 
-/** Player Android/Android TV em tela cheia, com controles Media3 acessíveis por toque e D-pad. */
+/** Player Android/Google TV em tela cheia, com controles Media3 acessíveis por toque e D-pad. */
 @TauriPlugin
 class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
     /**
