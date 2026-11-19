@@ -227,7 +227,7 @@ jobs:
             !src-tauri/target/release/bundle/**/*.d
 
   android:
-    # O runner Intel oferece aceleração de virtualização para o emulador x86_64.
+    # O runner Intel oferece aceleração para o emulador Google TV x86 (imagem oficial API 34).
     # O APK arm64-v8a continua sendo gerado e verificado separadamente.
     runs-on: macos-15-intel
     steps:
@@ -348,8 +348,8 @@ jobs:
           SDKMANAGER=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -1)
           SDKTOOLS=$(dirname "$SDKMANAGER")
           yes | "$SDKMANAGER" --licenses > /dev/null || true
-          "$SDKMANAGER" "system-images;android-34;google-tv;x86_64"
-          echo no | "$SDKTOOLS/avdmanager" create avd -n cinehub-google-tv-x86_64 -k "system-images;android-34;google-tv;x86_64" -d tv_1080p --force
+          "$SDKMANAGER" "system-images;android-34;google-tv;x86"
+          echo no | "$SDKTOOLS/avdmanager" create avd -n cinehub-google-tv-x86 -k "system-images;android-34;google-tv;x86_64" -d tv_1080p --force
           command -v adb
           "$ANDROID_HOME/emulator/emulator" -avd cinehub-google-tv-x86_64 -no-window -no-audio -no-boot-anim -accel on -gpu host &
           adb wait-for-device
@@ -358,12 +358,12 @@ jobs:
             [ "$booted" = "1" ] && break
             sleep 5
           done
-          [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ] || { echo "Emulador Google TV ARM64 não iniciou"; exit 1; }
+          [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ] || { echo "Emulador Google TV x86 não iniciou"; exit 1; }
           apk=$(for candidate in signed/*.apk; do
             [ -f "$candidate" ] || continue
-            if unzip -Z1 "$candidate" | grep -q '^lib/x86_64/'; then echo "$candidate"; break; fi
+            if unzip -Z1 "$candidate" | grep -q '^lib/x86/'; then echo "$candidate"; break; fi
           done)
-          test -n "$apk" || { echo "APK com bibliotecas nativas x86_64 para o teste no emulador não foi gerado"; exit 1; }
+          test -n "$apk" || { echo "APK com bibliotecas nativas x86 para o teste no emulador não foi gerado"; exit 1; }
           adb install -r "$apk"
           adb logcat -c
           adb shell monkey -p com.cinehub.app 1
