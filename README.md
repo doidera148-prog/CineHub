@@ -79,7 +79,7 @@ src-tauri/
     diag.rs                  diagnósticos
   plugins/tauri-plugin-exoplayer/
                              player Android/Google TV baseado em Media3
-  android-tv/
+  google-tv/
     patch_manifest.py        ajustes do manifesto Android para Google TV
     banner.png               banner do launcher de TV
   capabilities/              permissões Tauri
