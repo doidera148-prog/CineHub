@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "src-tauri" / "android-tv" / "patch_manifest.py"
+SCRIPT = ROOT / "src-tauri" / "google-tv" / "patch_manifest.py"
 SPEC = importlib.util.spec_from_file_location("patch_manifest", SCRIPT)
 PATCH = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PATCH)
