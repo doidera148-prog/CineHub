@@ -146,7 +146,7 @@ jobs:
           path: |
             ~/.cargo/bin/cargo-tauri
             ~/.cargo/bin/cargo-tauri.exe
-          key: tauri-cli-2-${{ runner.os }}-${{ hashFiles('.github/workflows/build.yml') }}
+          key: tauri-cli-v2-${{ runner.os }}
       - name: Instalar Tauri CLI
         if: steps.tauri-cache.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version "^2" --locked --force
@@ -266,7 +266,7 @@ jobs:
           fi
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          targets: aarch64-linux-android,i686-linux-android
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri
@@ -281,6 +281,15 @@ jobs:
       - name: Instalar Tauri CLI
         if: steps.tauri-cache.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version "^2" --locked
+      - name: Cache do Gradle Android
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-android-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock', 'src-tauri/tauri.conf.json', 'src-tauri/plugins/**/build.gradle*', 'src-tauri/plugins/**/gradle.properties') }}
+          restore-keys: |
+            gradle-android-${{ runner.os }}-
       - name: Inicializar projeto Android
         working-directory: src-tauri
         run: cargo tauri android init
@@ -349,9 +358,9 @@ jobs:
           SDKTOOLS=$(dirname "$SDKMANAGER")
           yes | "$SDKMANAGER" --licenses > /dev/null || true
           "$SDKMANAGER" "system-images;android-34;google-tv;x86"
-          echo no | "$SDKTOOLS/avdmanager" create avd -n cinehub-google-tv-x86 -k "system-images;android-34;google-tv;x86_64" -d tv_1080p --force
+          echo no | "$SDKTOOLS/avdmanager" create avd -n cinehub-google-tv-x86 -k "system-images;android-34;google-tv;x86" -d tv_1080p --force
           command -v adb
-          "$ANDROID_HOME/emulator/emulator" -avd cinehub-google-tv-x86_64 -no-window -no-audio -no-boot-anim -accel on -gpu host &
+          "$ANDROID_HOME/emulator/emulator" -avd cinehub-google-tv-x86 -no-window -no-audio -no-boot-anim -accel on -gpu host &
           adb wait-for-device
           for attempt in $(seq 1 60); do
             booted=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
