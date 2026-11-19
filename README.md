@@ -6,7 +6,7 @@ Aplicativo de mídia multiplataforma, escrito em Rust + Tauri 2, com interface e
 
 ## Plataformas
 
-- **Android e Android TV:** APK único, com player nativo Media3/ExoPlayer. A interface detecta TVs Android de tela grande e ativa layout próprio para controle remoto.
+- **Android e Google TV:** APK único, com player nativo Media3/ExoPlayer. A interface detecta TVs Android de tela grande e ativa layout próprio para controle remoto.
 - **Windows:** pacote desktop Tauri com player nativo libmpv/FFmpeg incorporado à janela do CineHub. A superfície nativa é recortada para deixar elementos HTML da interface visíveis e clicáveis; a primeira etapa mantém o OSC do mpv para os controles de transporte enquanto a sobreposição é validada.
 - **Linux e macOS:** pacotes desktop Tauri; reprodução pelo player disponível no WebView quando o player nativo não está habilitado.
 - **iOS:** não é alvo de build nem de teste.
@@ -22,7 +22,7 @@ Aplicativo de mídia multiplataforma, escrito em Rust + Tauri 2, com interface e
 - Fontes de addons podem fornecer metadados, streams, faixas de áudio e legendas, conforme o que cada addon publica.
 
 ### Reprodução
-- **Android/Android TV:** player nativo baseado em AndroidX Media3/ExoPlayer, com seleção manual de áudio, seleção e desativação de legendas, preferência por português, controle por D-pad e ações para pular segmentos quando disponíveis.
+- **Android/Google TV:** player nativo baseado em AndroidX Media3/ExoPlayer, com seleção manual de áudio, seleção e desativação de legendas, preferência por português, controle por D-pad e ações para pular segmentos quando disponíveis.
 - **Windows:** player nativo libmpv, usando os codecs e contêineres suportados pelo mpv/FFmpeg, sem limitar a escolha pela extensão do arquivo. A janela de vídeo usa regiões Win32 para preservar os elementos HTML do CineHub sobre a superfície nativa.
 - **Linux e macOS:** player baseado em Video.js/WebView; o player nativo só é usado se estiver habilitado em uma compilação específica.
 - Proxy HTTP local para streams HTTP/HTTPS, com suporte a respostas em blocos, solicitações Range e reescrita de playlists HLS e seus recursos filhos.
@@ -35,7 +35,7 @@ Aplicativo de mídia multiplataforma, escrito em Rust + Tauri 2, com interface e
 - Tokens de streaming separados por seleção de episódio para evitar que requisições HTTP antigas passem a apontar para o episódio recém-selecionado.
 - Estatísticas de rede incluem estado, velocidade, peers e progresso.
 
-### Android TV e controle remoto
+### Google TV e controle remoto
 - Layout de sala de estar com menu lateral, cartazes maiores e alvos de foco ampliados.
 - Navegação por setas/DPAD e ativação por OK.
 - Navegação direcional considera alinhamento e proximidade para reduzir saltos diagonais.
@@ -57,10 +57,10 @@ web/
   app.js                     rotas, telas, catálogos, detalhes e integração com addons
   lib.js                     utilitários compartilhados
   style.css                  estilos gerais
-  android-tv.css             layout para Android TV
+  google-tv.css             layout para Google TV
   remote-navigation.js       teclado, DPAD, foco e botão Voltar
   accessibility.js           recursos de acessibilidade
-  tv-mode.js                 detecção do modo Android TV
+  tv-mode.js                 detecção do modo Google TV
   torrent-playback.js        fluxo de reprodução por torrent
   kodi.js                    interface de integração Kodi
   vendor/                    bibliotecas web empacotadas
@@ -78,9 +78,9 @@ src-tauri/
     skip.rs                  segmentos de reprodução
     diag.rs                  diagnósticos
   plugins/tauri-plugin-exoplayer/
-                             player Android/Android TV baseado em Media3
+                             player Android/Google TV baseado em Media3
   android-tv/
-    patch_manifest.py        ajustes do manifesto Android para Android TV
+    patch_manifest.py        ajustes do manifesto Android para Google TV
     banner.png               banner do launcher de TV
   capabilities/              permissões Tauri
 
@@ -172,14 +172,14 @@ cargo tauri dev
 cargo tauri build
 ```
 
-### Android e Android TV
+### Android e Google TV
 Requer Java 17, Android SDK/NDK e as variáveis `ANDROID_HOME` e `NDK_HOME`.
 
 ```bash
 rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
 cd src-tauri
 cargo tauri android init
-python3 android-tv/patch_manifest.py gen/android/app/src/main/AndroidManifest.xml
+python3 google-tv/patch_manifest.py gen/android/app/src/main/AndroidManifest.xml
 cargo tauri android dev
 cargo tauri android build --apk
 ```
