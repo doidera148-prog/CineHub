@@ -30,7 +30,10 @@ fn window_region(
 ) -> ((i32, i32, i32, i32), Vec<(i32, i32, i32, i32)>) {
     let right = width.min(i32::MAX as u32) as i32;
     let bottom = height.min(i32::MAX as u32) as i32;
-    ((0, 0, right, bottom), clipped_cutouts(width, height, cutouts))
+    (
+        (0, 0, right, bottom),
+        clipped_cutouts(width, height, cutouts),
+    )
 }
 
 #[cfg(any(all(windows, feature = "mpv"), test))]
@@ -451,7 +454,8 @@ mod win {
                 window_width,
                 window_height,
                 SWP_NOACTIVATE | SWP_SHOWWINDOW,
-            ) == 0 {
+            ) == 0
+            {
                 return false;
             }
             // SetWindowRgn usa coordenadas locais à janela filha, não coordenadas
