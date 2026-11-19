@@ -67,7 +67,7 @@ jobs:
         run: |
           find web tests -type f \( -name '*.js' -o -name '*.mjs' \) -not -path 'web/vendor/*' -print0 | xargs -0 -r npx --yes eslint@10.15.0 --no-config-lookup --rule 'no-unused-vars:error'
       - name: Validar sintaxe Python
-        run: python3 -m compileall -q src-tauri/android-tv tests/python
+        run: python3 -m compileall -q src-tauri/google-tv tests/python
       - name: Testes de regressão dos scripts Python
         run: python3 -m unittest discover -s tests/python -v
       - name: Validar metadados e dependências Rust
@@ -285,7 +285,7 @@ jobs:
         run: cargo tauri android init
       - name: Ajustar manifesto para Google TV
         working-directory: src-tauri
-        run: python3 android-tv/patch_manifest.py gen/android/app/src/main/AndroidManifest.xml
+        run: python3 google-tv/patch_manifest.py gen/android/app/src/main/AndroidManifest.xml
       - name: Gerar APK
         working-directory: src-tauri
         run: cargo tauri android build --apk --split-per-abi
