@@ -20,6 +20,20 @@ pub struct PlayerCutout {
 }
 
 #[cfg(any(all(windows, feature = "mpv"), test))]
+/// Limites e recortes da região Win32 em coordenadas locais da janela filha.
+/// SetWindowRgn interpreta (0, 0) como o canto superior esquerdo da própria janela,
+/// não como a origem da WebView.
+fn window_region(
+    width: u32,
+    height: u32,
+    cutouts: &[PlayerCutout],
+) -> ((i32, i32, i32, i32), Vec<(i32, i32, i32, i32)>) {
+    let right = width.min(i32::MAX as u32) as i32;
+    let bottom = height.min(i32::MAX as u32) as i32;
+    ((0, 0, right, bottom), clipped_cutouts(width, height, cutouts))
+}
+
+#[cfg(any(all(windows, feature = "mpv"), test))]
 /// Recorta retângulos de controle aos limites da caixa do vídeo, evitando
 /// regiões Win32 negativas, vazias ou fora da superfície nativa.
 fn clipped_cutouts(width: u32, height: u32, cutouts: &[PlayerCutout]) -> Vec<(i32, i32, i32, i32)> {
@@ -371,8 +385,6 @@ mod win {
 
     const WM_CLOSE: u32 = 0x0010;
     const HWND_TOP: Hwnd = std::ptr::null_mut();
-    const SWP_NOSIZE: u32 = 0x0001;
-    const SWP_NOMOVE: u32 = 0x0002;
     const SWP_NOACTIVATE: u32 = 0x0010;
     const SWP_SHOWWINDOW: u32 = 0x0040;
     const RGN_DIFF: i32 = 4;
@@ -426,25 +438,31 @@ mod win {
         }
         // SAFETY: os handles de região são criados e liberados nesta função.
         unsafe {
-            // A WebView pode recuperar o z-order depois de receber um clique nos recortes.
-            // Recoloca o vídeo no topo sem roubar o foco da interface.
-            SetWindowPos(
+            // O HWND do mpv é filho da janela principal: x/y são relativos à área cliente
+            // da WebView. Redimensioná-lo aqui mantém o vídeo alinhado ao player-box.
+            // Não roubar o foco permite clicar nos recortes HTML.
+            let window_width = width.min(i32::MAX as u32) as i32;
+            let window_height = height.min(i32::MAX as u32) as i32;
+            if SetWindowPos(
                 video as usize as Hwnd,
                 HWND_TOP,
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-            );
-            let right_edge = x.saturating_add(width.min(i32::MAX as u32) as i32);
-            let bottom_edge = y.saturating_add(height.min(i32::MAX as u32) as i32);
-            let region = CreateRectRgn(x, y, right_edge, bottom_edge);
+                x,
+                y,
+                window_width,
+                window_height,
+                SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            ) == 0 {
+                return false;
+            }
+            // SetWindowRgn usa coordenadas locais à janela filha, não coordenadas
+            // absolutas da WebView. A região começa sempre em (0, 0).
+            let (bounds, holes) = super::window_region(width, height, cutouts);
+            let region = CreateRectRgn(bounds.0, bounds.1, bounds.2, bounds.3);
             if region.is_null() {
                 return false;
             }
-            for (left, top, right, bottom) in super::clipped_cutouts(width, height, cutouts) {
-                let hole = CreateRectRgn(x + left, y + top, x + right, y + bottom);
+            for (left, top, right, bottom) in holes {
+                let hole = CreateRectRgn(left, top, right, bottom);
                 if !hole.is_null() {
                     CombineRgn(region, region, hole, RGN_DIFF);
                     DeleteObject(hole);
@@ -540,6 +558,12 @@ mod tests {
         assert_eq!(
             super::clipped_cutouts(100, 100, &cuts),
             vec![(0, 5, 20, 25), (90, 90, 100, 100)]
+        );
+        // A região e seus recortes são locais à janela filha. A posição x/y
+        // da WebView é aplicada separadamente por SetWindowPos.
+        assert_eq!(
+            super::window_region(100, 100, &cuts),
+            ((0, 0, 100, 100), vec![(0, 5, 20, 25), (90, 90, 100, 100)])
         );
     }
 
