@@ -1746,8 +1746,11 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
       playback.catch(() => {});
       const ready = await waitForNativePlayerShape();
       if (!ready) {
-        await call('player_close').catch(() => {});
-        throw new Error('o Windows não conseguiu preparar a sobreposição dos controles do CineHub');
+        // A sobreposição HTML é melhoria visual, não pré-requisito para reproduzir.
+        // Mantém o vídeo aberto com o OSC nativo do mpv e tenta aplicar os recortes
+        // novamente caso a janela filha do libmpv ainda esteja sendo criada.
+        toast('Vídeo iniciado. Os controles nativos do mpv serão usados enquanto a interface do CineHub é preparada.');
+        void retryNativePlayerGeometry();
       }
     } else {
       playback = invoke(command, args);
@@ -1895,6 +1898,16 @@ async function waitForNativePlayerShape() {
   for (let attempt = 0; attempt < 40; attempt++) {
     if (await syncNativePlayerGeometry()) return true;
     await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return false;
+}
+
+async function retryNativePlayerGeometry() {
+  // Uma falha temporária de HWND/região não encerra o vídeo. Continua tentando
+  // por alguns segundos enquanto a reprodução estiver ativa.
+  for (let attempt = 0; attempt < 40 && nativePlayerActive; attempt++) {
+    if (await syncNativePlayerGeometry()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
   return false;
 }
