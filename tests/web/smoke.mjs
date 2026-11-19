@@ -162,7 +162,7 @@ async function checkWindowsPlayerFailure() {
 async function checkAndroidPlayer() {
   const page = await browser.newPage({
     viewport: { width: 1280, height: 720 },
-    userAgent: 'Mozilla/5.0 (Linux; Android 11; Android TV) AppleWebKit/537.36 Chrome/120.0 Safari/537.36',
+    userAgent: 'Mozilla/5.0 (Linux; Android 11; Google TV) AppleWebKit/537.36 Chrome/120.0 Safari/537.36',
   });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
