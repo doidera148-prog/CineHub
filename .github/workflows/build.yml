@@ -282,7 +282,7 @@ jobs:
       - name: Inicializar projeto Android
         working-directory: src-tauri
         run: cargo tauri android init
-      - name: Ajustar manifesto para Android TV
+      - name: Ajustar manifesto para Google TV
         working-directory: src-tauri
         run: python3 android-tv/patch_manifest.py gen/android/app/src/main/AndroidManifest.xml
       - name: Gerar APK
@@ -330,24 +330,24 @@ jobs:
             "$BT/apksigner" verify --verbose "$out"
           done
           ls -la signed
-      - name: Instalar e iniciar CineHub em emulador Android TV
+      - name: Instalar e iniciar CineHub em emulador Google TV
         timeout-minutes: 12
         run: |
           SDKMANAGER=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -1)
           SDKTOOLS=$(dirname "$SDKMANAGER")
           yes | "$SDKMANAGER" --licenses > /dev/null || true
-          "$SDKMANAGER" "system-images;android-34;google_apis;x86_64"
-          echo no | "$SDKTOOLS/avdmanager" create avd -n cinehub-tv -k "system-images;android-34;google_apis;x86_64" -d tv_1080p --force
+          "$SDKMANAGER" "system-images;android-34;google-tv;x86"
+          echo no | "$SDKTOOLS/avdmanager" create avd -n cinehub-google-tv -k "system-images;android-34;google-tv;x86" -d tv_1080p --force
           # Os runners Ubuntu possuem /dev/kvm, mas o usuário runner pode não ter
           # permissão por padrão. Habilita acesso para aceleração do emulador.
           if [ -e /dev/kvm ]; then
             sudo chmod 666 /dev/kvm
           else
-            echo "::error::/dev/kvm não está disponível; não é possível iniciar o emulador x86_64."
+            echo "::error::/dev/kvm não está disponível; não é possível iniciar o emulador Google TV x86."
             exit 1
           fi
           command -v adb
-          "$ANDROID_HOME/emulator/emulator" -avd cinehub-tv -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect &
+          "$ANDROID_HOME/emulator/emulator" -avd cinehub-google-tv -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect &
           adb wait-for-device
           for attempt in $(seq 1 60); do
             booted=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
@@ -355,8 +355,11 @@ jobs:
             sleep 5
           done
           [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ] || { echo "Emulador Android TV não iniciou"; exit 1; }
-          apk=$(find signed -type f -iname '*x86_64*.apk' -print -quit)
-          test -n "$apk" || { echo "APK x86_64 não foi gerado"; exit 1; }
+          apk=$(for candidate in signed/*.apk; do
+            [ -f "$candidate" ] || continue
+            if unzip -Z1 "$candidate" | grep -q '^lib/x86/'; then echo "$candidate"; break; fi
+          done)
+          test -n "$apk" || { echo "APK com bibliotecas nativas x86 não foi gerado"; exit 1; }
           adb install -r "$apk"
           adb logcat -c
           adb shell monkey -p com.cinehub.app 1
