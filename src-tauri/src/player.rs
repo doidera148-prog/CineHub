@@ -390,6 +390,9 @@ mod win {
         ) -> Bool;
         fn SetFocus(hwnd: Hwnd) -> Hwnd;
         fn SetForegroundWindow(hwnd: Hwnd) -> Bool;
+        fn GetCurrentThreadId() -> u32;
+        fn GetWindowThreadProcessId(hwnd: Hwnd, process_id: *mut u32) -> u32;
+        fn AttachThreadInput(attach: u32, attach_to: u32, attach_input: Bool) -> Bool;
         fn PostMessageW(hwnd: Hwnd, msg: u32, wparam: usize, lparam: isize) -> Bool;
     }
 
@@ -422,7 +425,21 @@ mod win {
         // SAFETY: video é o HWND retornado pelo próprio libmpv.
         unsafe {
             SetForegroundWindow(video);
-            SetFocus(video);
+
+            // WM_MOUSEWHEEL é entregue à janela com foco, não necessariamente à janela
+            // sob o ponteiro. O HWND do mpv pode pertencer a outra thread; nesse caso,
+            // SetFocus falha se as filas de entrada não estiverem temporariamente anexadas.
+            let current_thread = GetCurrentThreadId();
+            let video_thread = GetWindowThreadProcessId(video, std::ptr::null_mut());
+            if video_thread != 0 && video_thread != current_thread {
+                if AttachThreadInput(current_thread, video_thread, 1) != 0 {
+                    SetFocus(video);
+                    AttachThreadInput(current_thread, video_thread, 0);
+                }
+            } else if video_thread == current_thread {
+                SetFocus(video);
+            }
+
             SetWindowPos(
                 video,
                 HWND_TOP,
