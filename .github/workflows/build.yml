@@ -79,12 +79,25 @@ jobs:
             exit 1
           fi
           cargo tree --manifest-path src-tauri/Cargo.toml --locked -i ringbuf@0.5.3 | grep -q 'librqbit-utp'
+      - name: Restaurar cache do cargo-machete
+        id: machete-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-machete
+          key: cargo-machete-v0-${{ runner.os }}-${{ runner.arch }}
+      - name: Instalar cargo-machete
+        if: steps.machete-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-machete --locked
+      - name: Salvar cache do cargo-machete
+        if: steps.machete-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-machete
+          key: cargo-machete-v0-${{ runner.os }}-${{ runner.arch }}
       - name: Detectar dependências Rust não utilizadas
-        run: |
-          cargo install cargo-machete --locked
-          cargo machete --with-metadata
-      - name: Verificação de compilação Rust (todos os targets)
-        run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets --locked
+        run: cargo machete --with-metadata
+      # Clippy já compila todos os targets; um cargo check imediatamente antes
+      # repetia a mesma compilação sem acrescentar cobertura de lint.
       - name: Clippy (avisos viram erro)
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
       - name: Segurança, avisos, licenças e fontes das dependências (cargo-deny)
