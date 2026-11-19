@@ -70,6 +70,18 @@ try {
   assert.equal((await calls()).at(-1).q, 'matrix', 'a busca deve remover espaços nas extremidades');
   assert.match(await page.locator('#rows').innerText(), /Resultado matrix/);
 
+  // Uma pausa curta após a primeira letra não pode disparar a busca antes de terminar de digitar.
+  const beforePartialInput = (await calls()).length;
+  await page.locator('#sq').fill('a');
+  await page.waitForTimeout(700);
+  assert.equal((await calls()).length, beforePartialInput,
+    'uma única letra não deve iniciar a pesquisa enquanto o usuário ainda está digitando');
+  await page.locator('#sq').fill('avatar');
+  await page.waitForTimeout(500);
+  assert.equal((await calls()).length, beforePartialInput,
+    'a busca deve aguardar o intervalo completo após a última letra');
+  await waitForQuery('avatar', null);
+
   // Debounce: digitação rápida deve gerar apenas a consulta final.
   const beforeDebounce = (await calls()).length;
   await page.locator('#sq').fill('primeiro');
