@@ -37,9 +37,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .logo { order: 1; font-size: 1.9rem; margin-right: 0; }
   .topbar {
     position: static;
-    order: 2;
-    margin: 0 0 0 auto;
+    display: flex;
+    justify-content: flex-end;
+    margin: 0 0 0.35rem;
   }
+  .topbar form { margin-left: auto; }
   .topbar form { gap: 0.35rem; }
   .topbar input { width: clamp(8rem, 18vw, 13rem); }
   .topbar input:focus { width: clamp(10rem, 24vw, 16rem); }
