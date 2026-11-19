@@ -198,6 +198,41 @@ try {
   await waitForQuery('x'.repeat(200), null);
   assert.equal((await calls()).at(-1).q.length, 200);
 
+
+  // Layout desktop: cabeçalho em duas faixas sem sobrepor marca, navegação e pesquisa.
+  await page.goto(`${base}/#/movies`);
+  for (const width of [768, 900, 1024, 1100, 1280, 1920]) {
+    await page.setViewportSize({ width, height: 800 });
+    const layout = await page.evaluate(() => {
+      const sidebar = document.querySelector('.sidebar').getBoundingClientRect();
+      const logo = document.querySelector('.logo').getBoundingClientRect();
+      const nav = document.querySelector('#nav-main').getBoundingClientRect();
+      const topbar = document.querySelector('.topbar').getBoundingClientRect();
+      return {
+        viewport: document.documentElement.clientWidth,
+        document: document.documentElement.scrollWidth,
+        sidebarBottom: sidebar.bottom,
+        logoRight: logo.right,
+        logoBottom: logo.bottom,
+        navTop: nav.top,
+        navBottom: nav.bottom,
+        topbarLeft: topbar.left,
+        topbarRight: topbar.right,
+        navWidth: nav.width,
+      };
+    });
+    assert.ok(layout.document <= layout.viewport,
+      `layout desktop não deve criar rolagem horizontal em ${width}px: ${JSON.stringify(layout)}`);
+    assert.ok(layout.navBottom <= layout.sidebarBottom + 1,
+      `navegação deve permanecer dentro do cabeçalho em ${width}px: ${JSON.stringify(layout)}`);
+    if (width <= 1100) {
+      assert.ok(layout.navTop >= layout.logoBottom - 1,
+        `navegação deve ocupar uma faixa abaixo da marca em ${width}px: ${JSON.stringify(layout)}`);
+      assert.ok(layout.topbarLeft >= layout.logoRight,
+        `pesquisa não deve sobrepor a marca em ${width}px: ${JSON.stringify(layout)}`);
+    }
+  }
+
   assert.deepEqual(errors, [], 'a pesquisa não deve produzir erros JavaScript/console');
   console.log('Pesquisa UI: confirmação explícita, normalização, limpar, concorrência, vazio/erro, Escape, IME, barra superior e animes — OK');
 } finally {
