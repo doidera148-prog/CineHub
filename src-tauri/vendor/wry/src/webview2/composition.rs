@@ -42,7 +42,7 @@ impl CompositionHost {
 
     let handler = CreateCoreWebView2CompositionControllerCompletedHandler::create(Box::new(
       move |error_code, composition_controller| {
-        let result = (|| {
+        let result: webview2_com::Result<ICoreWebView2CompositionController> = (|| {
           error_code?;
           composition_controller
             .ok_or_else(|| windows::core::Error::from(E_POINTER).into())
