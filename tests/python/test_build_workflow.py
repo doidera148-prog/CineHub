@@ -266,7 +266,7 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
                 self.assertIn(marker, android)
         self.assertGreaterEqual(android.count("set -euo pipefail"), 4)
 
-    def test_windows_composition_host_is_opt_in_and_keeps_standard_fallback(self):
+    def test_windows_composition_host_selection_cleanup_and_fallback(self):
         wry = (ROOT / "src-tauri/vendor/wry/src/webview2/mod.rs").read_text(
             encoding="utf-8"
         )
@@ -295,6 +295,28 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         )
         self.assertIn("SetRootVisualTarget", composition)
         self.assertIn("SetWindowSubclass", composition)
+        registration = composition.split(
+            "if let Err(error) = register_composition_surface(parent, &surface)", 1
+        )
+        self.assertEqual(len(registration), 2, "Falha de registro precisa de rollback explícito")
+        registration_cleanup = registration[1].split(
+            "let mut input_state = Box::new", 1
+        )[0]
+        for cleanup in (
+            "remove_CursorChanged(cursor_changed_token)",
+            "SetRootVisualTarget(None::<&IUnknown>)",
+            "device.Commit()",
+        ):
+            with self.subTest(registration_cleanup=cleanup):
+                self.assertIn(cleanup, registration_cleanup)
+        self.assertLess(
+            composition.index("register_composition_surface(parent, &surface)"),
+            composition.index("let mut input_state = Box::new"),
+            "A superfície deve ser registrada antes de publicar o estado do callback",
+        )
+        self.assertIn("let input_state_ptr = (&mut *input_state) as *mut CompositionInputState;", composition)
+        self.assertIn("let input_state = Box::into_raw(input_state);", composition)
+        self.assertIn("unregister_composition_surface(parent.0 as isize);", composition)
         self.assertIn("Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass}", composition)
         self.assertIn("KeyboardAndMouse::{", composition)
         self.assertIn("Pointer::{", composition)
