@@ -393,6 +393,12 @@ mod win {
         fn MapWindowPoints(from: Hwnd, to: Hwnd, points: *mut Point, count: i32) -> i32;
         fn GetCursorPos(point: *mut Point) -> Bool;
         fn ScreenToClient(hwnd: Hwnd, point: *mut Point) -> Bool;
+        fn EnumChildWindows(
+            parent: Hwnd,
+            callback: Option<unsafe extern "system" fn(Hwnd, isize) -> Bool>,
+            parameter: isize,
+        ) -> Bool;
+        fn IsChild(parent: Hwnd, child: Hwnd) -> Bool;
     }
 
     #[link(name = "comctl32")]
@@ -460,6 +466,8 @@ mod win {
     static INPUT_GEOMETRY: std::sync::Mutex<
         Option<(i32, i32, u32, u32, Vec<super::PlayerCutout>)>,
     > = std::sync::Mutex::new(None);
+    /// Todas as janelas que recebem mensagens de entrada da WebView ou da janela principal.
+    static SUBCLASS_WINDOWS: std::sync::Mutex<Vec<isize>> = std::sync::Mutex::new(Vec::new());
 
     pub(super) fn point_is_in_video(
         parent_x: i32,
@@ -518,6 +526,22 @@ mod win {
         ) || (WM_IME_FIRST..=WM_IME_LAST).contains(&msg)
     }
 
+    unsafe extern "system" fn install_child_input_subclass(child: Hwnd, _parameter: isize) -> Bool {
+        let video = VIDEO.load(std::sync::atomic::Ordering::SeqCst) as usize as Hwnd;
+        // Nunca subclassificar a janela do mpv nem seus descendentes: isso causaria
+        // encaminhamento recursivo de uma mensagem para a própria janela.
+        if child == video || (!video.is_null() && IsChild(video, child) != 0) {
+            return 1;
+        }
+        if SetWindowSubclass(child, Some(parent_subclass_proc), SUBCLASS_ID, 0) != 0 {
+            SUBCLASS_WINDOWS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(child as usize as isize);
+        }
+        1
+    }
+
     unsafe extern "system" fn parent_subclass_proc(
         hwnd: Hwnd,
         msg: u32,
@@ -548,7 +572,11 @@ mod win {
             );
             if is_mouse_message {
                 let mut cursor = Point { x: 0, y: 0 };
-                if GetCursorPos(&mut cursor) != 0 && ScreenToClient(hwnd, &mut cursor) != 0 {
+                let parent = PARENT.load(std::sync::atomic::Ordering::SeqCst);
+                if parent != 0
+                    && GetCursorPos(&mut cursor) != 0
+                    && ScreenToClient(parent as usize as Hwnd, &mut cursor) != 0
+                {
                     let geometry = INPUT_GEOMETRY.lock().unwrap_or_else(|e| e.into_inner());
                     if let Some((x, y, width, height, cutouts)) = geometry.as_ref() {
                         if !point_is_in_video(cursor.x, cursor.y, *x, *y, *width, *height, cutouts)
@@ -614,7 +642,21 @@ mod win {
             // O mpv.net encaminha as mensagens recebidas pela janela hospedeira
             // diretamente ao HWND filho do mpv. Isso também funciona quando o filho
             // está marcado WS_DISABLED e não recebe hit-testing normal do Windows.
-            SetWindowSubclass(parent, Some(parent_subclass_proc), SUBCLASS_ID, 0);
+            SUBCLASS_WINDOWS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clear();
+            if SetWindowSubclass(parent, Some(parent_subclass_proc), SUBCLASS_ID, 0) != 0 {
+                SUBCLASS_WINDOWS
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(parent as usize as isize);
+            }
+            // O HWND retornado pelo Tauri é a janela de topo. O WebView2 recebe
+            // WM_MOUSE* nas próprias janelas-filhas, portanto também precisamos
+            // interceptar a árvore de filhos para que o mpv.net-style forwarding
+            // veja cliques e rolagem que nunca chegam ao WndProc da janela de topo.
+            EnumChildWindows(parent, Some(install_child_input_subclass), 0);
             SetForegroundWindow(parent);
             SetWindowPos(
                 video,
@@ -692,9 +734,14 @@ mod win {
         let parent = PARENT.swap(0, std::sync::atomic::Ordering::SeqCst);
         // SAFETY: a subclass é removida da janela hospedeira antes de liberar o HWND do mpv.
         unsafe {
-            if parent != 0 {
+            let subclass_windows = std::mem::take(
+                &mut *SUBCLASS_WINDOWS
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()),
+            );
+            for hwnd in subclass_windows {
                 RemoveWindowSubclass(
-                    parent as usize as Hwnd,
+                    hwnd as usize as Hwnd,
                     Some(parent_subclass_proc),
                     SUBCLASS_ID,
                 );
