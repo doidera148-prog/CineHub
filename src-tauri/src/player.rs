@@ -927,15 +927,14 @@ mod tests {
             })
             .expect("libmpv precisa inicializar o render backend libmpv");
 
-            let (device, swap_chain, driver) = super::mpv_d3d11::create_smoke_swap_chain()
-                .expect("Windows precisa criar um dispositivo D3D11 e uma swap chain de composição");
+            let (device, swap_chain, driver) = super::mpv_d3d11::create_smoke_swap_chain().expect(
+                "Windows precisa criar um dispositivo D3D11 e uma swap chain de composição",
+            );
             let renderer = super::mpv_d3d11::D3d11RenderContext::new(&d3d_mpv, &device)
                 .expect("libmpv precisa criar o render context D3D11");
 
-            let frame_path = std::env::temp_dir().join(format!(
-                "cinehub-d3d11-smoke-{}.ppm",
-                std::process::id()
-            ));
+            let frame_path = std::env::temp_dir()
+                .join(format!("cinehub-d3d11-smoke-{}.ppm", std::process::id()));
             let mut ppm = b"P6\n64 64\n255\n".to_vec();
             for y in 0..64 {
                 for x in 0..64 {
@@ -956,9 +955,9 @@ mod tests {
             for _ in 0..100 {
                 let _ = d3d_mpv.wait_event(0.05);
                 if renderer.frame_is_pending() {
-                    renderer
-                        .render_to_smoke_swap_chain(&swap_chain)
-                        .expect("libmpv precisa renderizar e apresentar o quadro na swap chain DXGI");
+                    renderer.render_to_smoke_swap_chain(&swap_chain).expect(
+                        "libmpv precisa renderizar e apresentar o quadro na swap chain DXGI",
+                    );
                     rendered_frame = true;
                     break;
                 }
