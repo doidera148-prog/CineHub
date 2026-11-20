@@ -339,9 +339,7 @@ inspect_node(root)
     def test_step_ids_are_unique_and_every_steps_reference_exists(self):
         for name in re.findall(r"(?m)^  ([a-zA-Z0-9_-]+):\\s*$", self.workflow):
             block = job_block(self.workflow, name)
-            ids = re.findall(r"(?m)^      - name:.*?\\n        id: ([a-zA-Z0-9_-]+)\\s*$", block)
-            # Também reconhece steps que declaram id antes de name.
-            ids.extend(re.findall(r"(?m)^        id: ([a-zA-Z0-9_-]+)\\s*$", block))
+            ids = re.findall(r"(?m)^        id: ([a-zA-Z0-9_-]+)\\s*$", block)
             self.assertEqual(len(ids), len(set(ids)), f"IDs de steps duplicados no job {name}")
             referenced = set(re.findall(r"steps\\.([a-zA-Z0-9_-]+)\\.", block))
             missing = referenced - set(ids)
