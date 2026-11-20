@@ -16,7 +16,7 @@ use webview2_com::{
 };
 use windows::{
   Win32::{
-    Foundation::{E_POINTER, E_UNEXPECTED, HWND, POINT, RECT},
+    Foundation::{E_FAIL, E_POINTER, E_UNEXPECTED, HWND, POINT, RECT},
     Graphics::{
       DirectComposition::{
         DCompositionCreateDevice2, IDCompositionDesktopDevice, IDCompositionTarget,
@@ -32,7 +32,7 @@ use windows::{
       WindowsAndMessaging::{
         GetClientRect, SetCursor, WM_CAPTURECHANGED, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
         WM_LBUTTONUP, WM_MBUTTONDBLCLK, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL,
-        WM_MOUSELEAVE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN,
+        WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN,
         WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_XBUTTONDBLCLK, WM_XBUTTONDOWN, WM_XBUTTONUP,
         SIZE_MINIMIZED,
       },
@@ -45,6 +45,9 @@ use crate::Result;
 
 const COMPOSITION_INPUT_SUBCLASS_ID: u32 = 0x4348_0001;
 const MOUSE_BUTTON_MASK: usize = 0x0073;
+// WM_MOUSELEAVE (winuser.h); windows 0.62.2 does not expose this binding
+// through the enabled WindowsAndMessaging feature set.
+const WM_MOUSELEAVE: u32 = 0x02A3;
 
 struct CompositionInputState {
   controller: ICoreWebView2Controller,
@@ -140,7 +143,9 @@ impl CompositionHost {
         drop(Box::from_raw(input_state));
         let _ = composition_controller.remove_CursorChanged(cursor_changed_token);
       }
-      return Err(windows::core::Error::from_win32().into());
+      return Err(
+        windows::core::Error::new(E_FAIL, "SetWindowSubclass failed").into(),
+      );
     }
 
     Ok(Self {
