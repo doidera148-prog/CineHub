@@ -296,9 +296,6 @@ pub(super) fn create_smoke_swap_chain(
                 IDXGIAdapter, IDXGIDevice, IDXGIFactory2, IDXGIOutput, DXGI_SCALING_STRETCH,
                 DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT,
             },
-            Dxgi::Common::{
-                DXGI_ALPHA_MODE_PREMULTIPLIED, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC,
-            },
         },
     };
 
