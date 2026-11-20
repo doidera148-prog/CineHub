@@ -484,10 +484,12 @@ mod win {
             let result = task();
             let _ = sender.send(result);
         })
-        .map_err(|error| format!("não consegui agendar operação Win32 na thread principal: {error}"))?;
-        receiver
-            .recv()
-            .map_err(|error| format!("a thread principal encerrou antes da operação Win32: {error}"))
+        .map_err(|error| {
+            format!("não consegui agendar operação Win32 na thread principal: {error}")
+        })?;
+        receiver.recv().map_err(|error| {
+            format!("a thread principal encerrou antes da operação Win32: {error}")
+        })
     }
 
     pub(super) fn point_is_in_video(
@@ -767,8 +769,9 @@ mod win {
             PARENT.store(0, std::sync::atomic::Ordering::SeqCst);
             // SAFETY: esta closure roda na thread proprietária das janelas subclassificadas.
             unsafe {
-                let subclass_windows =
-                    std::mem::take(&mut *SUBCLASS_WINDOWS.lock().unwrap_or_else(|e| e.into_inner()));
+                let subclass_windows = std::mem::take(
+                    &mut *SUBCLASS_WINDOWS.lock().unwrap_or_else(|e| e.into_inner()),
+                );
                 for hwnd in subclass_windows {
                     RemoveWindowSubclass(
                         hwnd as usize as Hwnd,
@@ -784,8 +787,7 @@ mod win {
         }) {
             VIDEO.store(0, std::sync::atomic::Ordering::SeqCst);
             PARENT.store(0, std::sync::atomic::Ordering::SeqCst);
-            *INPUT_GEOMETRY.lock().unwrap_or_else(|e| e.into_inner()) =
-                None;
+            *INPUT_GEOMETRY.lock().unwrap_or_else(|e| e.into_inner()) = None;
             eprintln!("aviso: não consegui restaurar as subclasses do player: {error}");
         }
     }
