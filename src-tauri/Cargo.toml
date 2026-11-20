@@ -61,3 +61,5 @@ ignored = ["tauri-build"]
 # Este commit oficial já usa ringbuf 0.5.2+, corrigindo RUSTSEC-2026-0293.
 [patch.crates-io]
 librqbit-utp = { git = "https://github.com/ikatson/librqbit-utp.git", rev = "06e1c53c8df6edb2830d6aab64a6d4bed8479908" }
+# Wry pinned locally so the Windows WebView2 host can be extended without a separate fork.
+wry = { path = "vendor/wry" }
