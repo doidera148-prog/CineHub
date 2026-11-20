@@ -308,7 +308,7 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("screen_rect_to_client", composition)
         self.assertIn("native_info.pointerType != PT_TOUCH && native_info.pointerType != PT_PEN", composition)
         self.assertIn("GetCapture, ReleaseCapture, SetCapture, TrackMouseEvent", composition)
-        self.assertIn("Gdi::ScreenToClient", composition)
+        self.assertIn("Gdi::{ClientToScreen, ScreenToClient}", composition)
         self.assertIn("SetCursor(Some(cursor))", composition)
         self.assertIn("SetWindowSubclass(", composition)
         self.assertIn(".as_bool()", composition)
