@@ -927,8 +927,8 @@ mod tests {
             })
             .expect("libmpv precisa inicializar o render backend libmpv");
 
-            let (device, texture, driver) = super::mpv_d3d11::create_smoke_render_target()
-                .expect("Windows precisa criar um dispositivo e uma textura D3D11");
+            let (device, swap_chain, driver) = super::mpv_d3d11::create_smoke_swap_chain()
+                .expect("Windows precisa criar um dispositivo D3D11 e uma swap chain de composição");
             let renderer = super::mpv_d3d11::D3d11RenderContext::new(&d3d_mpv, &device)
                 .expect("libmpv precisa criar o render context D3D11");
 
@@ -957,8 +957,8 @@ mod tests {
                 let _ = d3d_mpv.wait_event(0.05);
                 if renderer.frame_is_pending() {
                     renderer
-                        .render(&texture)
-                        .expect("libmpv precisa renderizar o quadro na textura D3D11");
+                        .render_to_smoke_swap_chain(&swap_chain)
+                        .expect("libmpv precisa renderizar e apresentar o quadro na swap chain DXGI");
                     rendered_frame = true;
                     break;
                 }
