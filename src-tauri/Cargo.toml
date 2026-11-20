@@ -34,7 +34,7 @@ libmpv2 = { version = "7.0.1", optional = true }
 
 [features]
 # Player nativo de desktop (libmpv). Exige libmpv instalada no sistema para compilar.
-mpv = ["dep:libmpv2"]
+mpv = ["dep:libmpv2", "dep:windows"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "sync"] }
@@ -46,6 +46,10 @@ codegen-units = 1
 strip = "symbols"
 opt-level = "s"
 
+
+# Dependência D3D11 usada apenas pelo renderizador experimental do Windows.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", optional = true, features = ["Win32_Graphics_Direct3D11"] }
 
 # Atalho global (Esc durante o vídeo): só desktop.
 [target.'cfg(not(target_os = "android"))'.dependencies]
