@@ -133,6 +133,11 @@ async function checkWindowsNativeOverlayClose() {
   await page.addInitScript(`window.__holdNativePlayer = true; ${fixtures}`);
   await page.goto(`${base}/#/detail/movie/tt1`);
   await page.locator('.stream').waitFor({ state: 'visible' });
+  await page.evaluate(() => {
+    localStorage.setItem('playerAudioLanguage', JSON.stringify('en'));
+    localStorage.setItem('playerSubtitleLanguage', JSON.stringify('en'));
+    localStorage.setItem('playerSubtitlesDisabled', JSON.stringify(false));
+  });
   await page.locator('.stream').click();
   await page.waitForFunction(() => window.__calls.some((call) => call.cmd === 'player_set_geometry'));
   if (await page.locator('#player').isHidden()) failures.push('[windows-player-overlay] camada HTML não ficou visível durante a reprodução nativa');
@@ -148,6 +153,7 @@ async function checkWindowsNativeOverlayClose() {
     ],
     subtitleTracks: [
       { id: 3, title: 'Português', language: 'pt', codec: 'SubRip', selected: true },
+      { id: 4, title: 'English', language: 'en', codec: 'SubRip', selected: false },
     ],
   }));
   await page.waitForFunction(() =>
@@ -164,19 +170,43 @@ async function checkWindowsNativeOverlayClose() {
   if (await page.locator('#native-subtitle-track option').first().textContent() !== 'Desativada') {
     failures.push('[windows-player-tracks] opção de desligar legenda não apareceu');
   }
-  await page.locator('#native-audio-track').selectOption('1');
   await page.waitForFunction(() => window.__calls.some((call) =>
     call.cmd === 'player_control' && call.args?.action === 'select-audio' && call.args?.value === 1,
+  ) && window.__calls.some((call) =>
+    call.cmd === 'player_control' && call.args?.action === 'select-subtitle' && call.args?.value === 4,
   ));
+  await page.evaluate(() => window.__emitTauriEvent('player-state', {
+    positionMs: 43000, durationMs: 100000, paused: true, volume: 65, muted: false,
+    audioTracks: [
+      { id: 1, title: 'English', language: 'en', codec: 'AAC', selected: true },
+      { id: 2, title: 'Português', language: 'pt', codec: 'AAC', selected: false },
+    ],
+    subtitleTracks: [
+      { id: 3, title: 'Português', language: 'pt', codec: 'SubRip', selected: false },
+      { id: 4, title: 'English', language: 'en', codec: 'SubRip', selected: true },
+    ],
+  }));
+  await page.waitForFunction(() =>
+    document.querySelector('#native-audio-track')?.value === '1'
+    && document.querySelector('#native-subtitle-track')?.value === '4',
+  );
+  await page.locator('#native-audio-track').selectOption('2');
+  await page.waitForFunction(() => window.__calls.some((call) =>
+    call.cmd === 'player_control' && call.args?.action === 'select-audio' && call.args?.value === 2,
+  ));
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('playerAudioLanguage') || 'null') === 'pt');
   await page.locator('#native-subtitle-track').selectOption('');
   await page.waitForFunction(() => window.__calls.some((call) =>
     call.cmd === 'player_control' && call.args?.action === 'select-subtitle'
       && !Object.hasOwn(call.args || {}, 'value'),
   ));
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('playerSubtitlesDisabled') || 'false') === true);
   await page.locator('#native-subtitle-track').selectOption('3');
   await page.waitForFunction(() => window.__calls.some((call) =>
     call.cmd === 'player_control' && call.args?.action === 'select-subtitle' && call.args?.value === 3,
   ));
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('playerSubtitleLanguage') || 'null') === 'pt'
+    && JSON.parse(localStorage.getItem('playerSubtitlesDisabled') || 'true') === false);
   await page.locator('#native-mute').click();
   await page.waitForFunction(() => window.__calls.some((call) => call.cmd === 'player_control' && call.args?.action === 'toggle-mute'));
   await page.locator('#native-seek').evaluate((input) => {
@@ -296,6 +326,7 @@ async function checkAndroidPlayer() {
   if (subtitles[0]?.language !== 'pt' || subtitles[0]?.isDefault !== true) failures.push('[android-player] idioma/preferência da legenda não foi preservado');
   if (!subtitles[0]?.data?.length) failures.push('[android-player] conteúdo VTT não foi codificado para o ExoPlayer');
   if (args?.subtitlesDisabled !== false) failures.push('[android-player] preferência padrão de legendas foi enviada incorretamente');
+  if (args?.subtitleLanguage !== 'pt') failures.push('[android-player] idioma de legenda preferido não foi enviado ao ExoPlayer');
   if (errors.length) failures.push(...errors.map((e) => `[android-player] ${e}`));
   await page.close();
 }

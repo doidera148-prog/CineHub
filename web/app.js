@@ -732,6 +732,12 @@ function subPref() {
   return Object.prototype.hasOwnProperty.call(SUB_LANGS, v) ? v : 'pt';
 }
 
+function nativeTrackForLanguage(tracks, language) {
+  return (Array.isArray(tracks) ? tracks : []).find((track) =>
+    window.CineHubLib.trackMatchesLanguage(track?.language, language),
+  ) || null;
+}
+
 const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
 const MAX_FAVS = 500;
 
@@ -1701,6 +1707,7 @@ let nativePlayerCompositionActive = false;
 let nativeStateUnlisten = null;
 let nativeSeeking = false;
 let nativePlayerState = null;
+let nativeTrackRestorePending = { audio: true, subtitle: true };
 let nativeFullscreen = false;
 let nativeControlsHideTimer = null;
 let nativeKeyboardInteraction = false;
@@ -1794,12 +1801,52 @@ function updateNativeTrackSelectors(state) {
   return audioChanged || subtitlesChanged;
 }
 
+function restoreNativeTrackPreferences(state) {
+  const audioTracks = Array.isArray(state.audioTracks) ? state.audioTracks : [];
+  if (nativeTrackRestorePending.audio && audioTracks.length) {
+    const preferred = store.get('playerAudioLanguage', '');
+    if (!preferred) nativeTrackRestorePending.audio = false;
+    else {
+      const match = nativeTrackForLanguage(audioTracks, preferred);
+      if (match) {
+        nativeTrackRestorePending.audio = false;
+        const active = audioTracks.find((track) => track.selected === true);
+        if (match.id !== active?.id) void sendNativePlayerControl('select-audio', match.id);
+      }
+    }
+  }
+
+  const subtitleTracks = Array.isArray(state.subtitleTracks) ? state.subtitleTracks : [];
+  if (nativeTrackRestorePending.subtitle && subtitleTracks.length) {
+    const disabled = store.get('playerSubtitlesDisabled', false) === true || subPref() === 'off';
+    if (disabled) {
+      nativeTrackRestorePending.subtitle = false;
+      if (subtitleTracks.some((track) => track.selected === true)) {
+        void sendNativePlayerControl('select-subtitle');
+      }
+    } else {
+      const preferred = store.get('playerSubtitleLanguage', '') || subPref();
+      if (!preferred) nativeTrackRestorePending.subtitle = false;
+      else {
+        const match = nativeTrackForLanguage(subtitleTracks, preferred);
+        if (match) {
+          nativeTrackRestorePending.subtitle = false;
+          const active = subtitleTracks.find((track) => track.selected === true);
+          if (match.id !== active?.id) void sendNativePlayerControl('select-subtitle', match.id);
+        }
+      }
+    }
+  }
+}
+
 function updateNativePlayerState(state) {
   if (!state || !nativePlayerCompositionActive) return;
+  nativePlayerState = { ...state };
   if (updateNativeTrackSelectors(state)) void syncNativePlayerGeometry();
+  restoreNativeTrackPreferences(state);
   const position = Math.max(0, Number(state.positionMs) / 1000 || 0);
   const duration = Math.max(0, Number(state.durationMs) / 1000 || 0);
-  nativePlayerState = { ...state, positionSeconds: position, durationSeconds: duration };
+  nativePlayerState = { ...nativePlayerState, ...state, positionSeconds: position, durationSeconds: duration };
   nativeSeek.max = String(Math.max(1, duration));
   if (!nativeSeeking) nativeSeek.value = String(Math.min(position, duration || position));
   $('#native-current-time').textContent = formatNativeTime(position);
@@ -1837,6 +1884,7 @@ function stopNativePlayerStateListener() {
     nativeStateUnlisten = null;
   }
   nativePlayerState = null;
+  nativeTrackRestorePending = { audio: false, subtitle: false };
   nativeSeeking = false;
   for (const [controlId, selectId] of [
     ['native-audio-track-control', 'native-audio-track'],
@@ -1850,14 +1898,16 @@ function stopNativePlayerStateListener() {
 }
 
 async function sendNativePlayerControl(action, value) {
-  if (!nativePlayerCompositionActive) return;
+  if (!nativePlayerCompositionActive) return false;
   const args = { action };
   if (value !== undefined) args.value = value;
   try {
     await call('player_control', args);
+    return true;
   } catch (error) {
     logEvent('WARN', `comando do player falhou (${action}): ${describeError(error)}`);
     toast(`Não consegui controlar a reprodução: ${describeError(error)}`);
+    return false;
   }
 }
 
@@ -1867,15 +1917,32 @@ $('#native-play-pause').onclick = () => sendNativePlayerControl('toggle-pause');
 $('#native-mute').onclick = () => sendNativePlayerControl('toggle-mute');
 $('#native-audio-track').addEventListener('change', (event) => {
   const id = Number(event.currentTarget.value);
-  if (Number.isSafeInteger(id) && id >= 0) sendNativePlayerControl('select-audio', id);
+  if (!Number.isSafeInteger(id) || id < 0) return;
+  const track = nativePlayerState?.audioTracks?.find((item) => item.id === id);
+  void sendNativePlayerControl('select-audio', id).then((success) => {
+    if (success) store.set('playerAudioLanguage', window.CineHubLib.normalizeTrackLanguage(track?.language));
+  });
 });
 $('#native-subtitle-track').addEventListener('change', (event) => {
   const value = event.currentTarget.value;
-  if (value === '') sendNativePlayerControl('select-subtitle');
-  else {
-    const id = Number(value);
-    if (Number.isSafeInteger(id) && id >= 0) sendNativePlayerControl('select-subtitle', id);
+  if (value === '') {
+    void sendNativePlayerControl('select-subtitle').then((success) => {
+      if (success) {
+        store.set('playerSubtitlesDisabled', true);
+        store.set('playerSubtitleLanguage', '');
+      }
+    });
+    return;
   }
+  const id = Number(value);
+  if (!Number.isSafeInteger(id) || id < 0) return;
+  const track = nativePlayerState?.subtitleTracks?.find((item) => item.id === id);
+  void sendNativePlayerControl('select-subtitle', id).then((success) => {
+    if (success) {
+      store.set('playerSubtitlesDisabled', false);
+      store.set('playerSubtitleLanguage', window.CineHubLib.normalizeTrackLanguage(track?.language));
+    }
+  });
 });
 
 async function setNativeFullscreen(enabled, quiet = false) {
@@ -1925,6 +1992,7 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
     : false;
   nativeControls.hidden = !compositionMode;
   nativePlayerCompositionActive = compositionMode;
+  nativeTrackRestorePending = { audio: true, subtitle: true };
   nativeFullscreen = false;
   document.body.classList.remove('native-player-fullscreen', 'native-controls-idle');
   $('#native-fullscreen').textContent = 'Tela cheia';
@@ -1949,6 +2017,8 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
     if (IS_ANDROID) {
       args.subtitles = await subtitlePayload(stream, subs);
       args.subtitlesDisabled = subPref() === 'off';
+      args.audioLanguage = store.get('playerAudioLanguage', '');
+      args.subtitleLanguage = subPref() === 'off' ? '' : subPref();
     } else args.subtitleUrl = pickSubtitles(stream, subs)[0]?.url ?? null;
     // Botão de pular no player nativo: tecla F12 (mpv, desktop) ou botão na tela (Android)
     args.segments = IS_ANDROID ? JSON.stringify(segments) : segments;

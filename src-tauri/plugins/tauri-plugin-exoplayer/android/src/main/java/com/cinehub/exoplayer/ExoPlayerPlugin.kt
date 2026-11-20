@@ -1,6 +1,7 @@
 package com.cinehub.exoplayer
 
 import android.app.Activity
+import android.content.Context
 import android.app.AlertDialog
 import android.app.Dialog
 import android.view.ViewGroup
@@ -45,8 +46,31 @@ class PlayArgs {
     /** Lista JSON de legendas VTT em base64, com idioma, rótulo e preferência inicial. */
     var subtitles: String? = null
     var subtitlesDisabled: Boolean = false
+    var audioLanguage: String? = null
+    var subtitleLanguage: String? = null
     /** Trechos para pular, como JSON: [{"type":"intro","start":5,"end":90}, ...] (opcional). */
     var segments: String? = null
+}
+
+internal object TrackLanguagePreference {
+    fun normalize(value: String?): String? {
+        val raw = value?.trim()?.lowercase()?.replace('_', '-') ?: return null
+        if (raw.isBlank() || raw == "und" || raw == "unknown") return null
+        val token = raw.substringBefore('-').substringBefore(' ')
+        return when (token) {
+            "por", "pt", "portuguese", "português" -> "pt"
+            "eng", "en", "english" -> "en"
+            "spa", "es", "spanish" -> "es"
+            "fre", "fra", "fr", "french" -> "fr"
+            "ger", "deu", "de", "german" -> "de"
+            "ita", "it" -> "it"
+            "jpn", "ja" -> "ja"
+            "zho", "chi", "zh" -> "zh"
+            "kor", "ko" -> "ko"
+            "rus", "ru" -> "ru"
+            else -> token.takeIf { it.matches(Regex("[a-z]{2,3}")) }
+        }
+    }
 }
 
 /** Validação isolada para permitir testes unitários sem iniciar a Activity/player. */
@@ -131,10 +155,18 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         val player = ExoPlayer.Builder(act, renderers)
             .setMediaSourceFactory(mediaSource)
             .build()
-        // Prioriza português brasileiro; usa português genérico como fallback.
+        val preferences = act.getSharedPreferences("cinehub_player_preferences", Context.MODE_PRIVATE)
+        val preferredAudio = TrackLanguagePreference.normalize(preferences.getString("audioLanguage", null))
+            ?: TrackLanguagePreference.normalize(args.audioLanguage)
+        val preferredSubtitle = TrackLanguagePreference.normalize(preferences.getString("subtitleLanguage", null))
+            ?: TrackLanguagePreference.normalize(args.subtitleLanguage)
+        // A escolha feita pelo usuário prevalece; sem escolha salva, mantém português como padrão.
+        val audioLanguages = listOfNotNull(preferredAudio, "pt-BR", "pt").distinct()
+        val subtitleLanguages = listOfNotNull(preferredSubtitle, "pt-BR", "pt").distinct()
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-            .setPreferredAudioLanguages("pt-BR", "pt")
-            .setPreferredTextLanguages("pt-BR", "pt")
+            .setPreferredAudioLanguages(*audioLanguages.toTypedArray())
+            .setPreferredTextLanguages(*subtitleLanguages.toTypedArray())
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, preferences.getBoolean("subtitlesDisabled", args.subtitlesDisabled))
             .build()
 
         val view = PlayerView(act).apply {
@@ -150,7 +182,8 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         }
         val dialog = Dialog(act, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
 
-        // Permite trocar manualmente a faixa de áudio em arquivos com múltiplos idiomas.
+        // Guarda a preferência pelo idioma da faixa, pois o ID muda entre arquivos.
+        var availableAudioTracks: List<Pair<Tracks.Group, Int>> = emptyList()
         val audioButton = Button(act).apply {
             text = "Áudio"
             isAllCaps = false
@@ -158,12 +191,32 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
             isFocusable = true
             isFocusableInTouchMode = true
             setOnClickListener {
-                androidx.media3.ui.TrackSelectionDialogBuilder(
-                    act,
-                    "Faixa de áudio",
-                    player,
-                    C.TRACK_TYPE_AUDIO
-                ).build().show()
+                val tracks = availableAudioTracks
+                if (tracks.isEmpty()) return@setOnClickListener
+                val choices = tracks.mapIndexed { index, entry ->
+                    val format = entry.first.getTrackFormat(entry.second)
+                    format.label?.takeIf { it.isNotBlank() }
+                        ?: format.language?.takeIf { it.isNotBlank() }
+                        ?: "Áudio ${index + 1}"
+                }
+                val selected = tracks.indexOfFirst { it.first.isTrackSelected(it.second) }
+                AlertDialog.Builder(act).setTitle("Faixa de áudio")
+                    .setSingleChoiceItems(choices.toTypedArray(), selected) { dialog, which ->
+                        val (group, trackIndex) = tracks[which]
+                        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                            .addOverride(TrackSelectionOverride(group.mediaTrackGroup, listOf(trackIndex)))
+                            .build()
+                        val format = group.getTrackFormat(trackIndex)
+                        val language = TrackLanguagePreference.normalize(format.language ?: format.label)
+                        val editor = preferences.edit()
+                        if (language == null) editor.remove("audioLanguage")
+                        else editor.putString("audioLanguage", language)
+                        editor.apply()
+                        audioButton.text = "Áudio: ${choices[which]} ▾"
+                        dialog.dismiss()
+                    }.setNegativeButton("Fechar", null).show()
             }
         }
         // Seletor de legendas: lista todas as faixas e oferece a opção Desativadas.
@@ -198,11 +251,19 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
                                 .clearOverridesOfType(C.TRACK_TYPE_TEXT)
                             if (which == 0) {
                                 builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                                preferences.edit().putBoolean("subtitlesDisabled", true)
+                                    .remove("subtitleLanguage").apply()
                                 subtitleButton.text = "Legendas: desativadas ▾"
                             } else {
                                 val (group, trackIndex) = tracks[which - 1]
                                 builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
                                     .addOverride(TrackSelectionOverride(group.mediaTrackGroup, listOf(trackIndex)))
+                                val format = group.getTrackFormat(trackIndex)
+                                val language = TrackLanguagePreference.normalize(format.language ?: format.label)
+                                val editor = preferences.edit().putBoolean("subtitlesDisabled", false)
+                                if (language == null) editor.remove("subtitleLanguage")
+                                else editor.putString("subtitleLanguage", language)
+                                editor.apply()
                                 subtitleButton.text = "Legendas: " + choices[which] + " ▾"
                             }
                             player.trackSelectionParameters = builder.build()
@@ -219,9 +280,13 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         }
         player.addListener(object : Player.Listener {
             override fun onTracksChanged(tracks: Tracks) {
-                hasMultipleAudioTracks = tracks.groups
+                availableAudioTracks = tracks.groups
                     .filter { it.type == C.TRACK_TYPE_AUDIO }
-                    .sumOf { group -> (0 until group.length).count { group.isTrackSupported(it) } } > 1
+                    .flatMap { group -> (0 until group.length)
+                        .filter { group.isTrackSupported(it) || group.isTrackSelected(it) }
+                        .map { index -> group to index }
+                    }
+                hasMultipleAudioTracks = availableAudioTracks.size > 1
                 availableSubtitleTracks = tracks.groups
                     .filter { it.type == C.TRACK_TYPE_TEXT }
                     .flatMap { group -> (0 until group.length)
@@ -351,7 +416,7 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         }
         if (subtitleConfigurations.isNotEmpty()) item.setSubtitleConfigurations(subtitleConfigurations)
         player.setMediaItem(item.build())
-        if (args.subtitlesDisabled) {
+        if (preferences.getBoolean("subtitlesDisabled", args.subtitlesDisabled)) {
             player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
                 .build()

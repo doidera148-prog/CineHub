@@ -34,6 +34,17 @@ test('seleciona todas as legendas externas e prioriza o idioma preferido', () =>
   assert.equal(L.selectSubtitles(stream, addons, 'off').every((item) => !item.isDefault), true);
 });
 
+test('normaliza idiomas de faixas para memorizar escolhas entre arquivos', () => {
+  assert.equal(L.normalizeTrackLanguage('pt-BR'), 'pt');
+  assert.equal(L.normalizeTrackLanguage('por'), 'pt');
+  assert.equal(L.normalizeTrackLanguage('Português (Brasil)'), 'pt');
+  assert.equal(L.normalizeTrackLanguage('en-US'), 'en');
+  assert.equal(L.normalizeTrackLanguage('English'), 'en');
+  assert.equal(L.normalizeTrackLanguage('und'), '');
+  assert.equal(L.trackMatchesLanguage('eng', 'en-US'), true);
+  assert.equal(L.trackMatchesLanguage('pt-BR', 'en'), false);
+});
+
 test('ignora legendas sem URL e remove URLs duplicadas', () => {
   const selected = L.selectSubtitles({ subtitles: [
     { lang: 'pt', url: 'https://subs.test/a.vtt' },
