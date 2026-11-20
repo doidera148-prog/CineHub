@@ -243,7 +243,7 @@ impl InnerWebView {
 
     let class = WNDCLASSEXW {
       cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
-      style: CS_HREDRAW | CS_VREDRAW,
+      style: CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS,
       lpfnWndProc: Some(default_window_proc),
       cbClsExtra: 0,
       cbWndExtra: 0,
