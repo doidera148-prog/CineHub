@@ -55,6 +55,14 @@
         <span id="native-duration" class="native-time">0:00</span>
         <button id="native-mute" type="button" aria-label="Silenciar" title="Silenciar">Silenciar</button>
         <input id="native-volume" class="native-volume" type="range" min="0" max="100" step="1" value="100" aria-label="Volume">
+        <label id="native-audio-track-control" class="native-track-control" hidden>
+          <span>Áudio</span>
+          <select id="native-audio-track" aria-label="Faixa de áudio"></select>
+        </label>
+        <label id="native-subtitle-track-control" class="native-track-control" hidden>
+          <span>Legenda</span>
+          <select id="native-subtitle-track" aria-label="Faixa de legenda"></select>
+        </label>
         <button id="native-fullscreen" type="button" aria-label="Tela cheia" title="Tela cheia" aria-pressed="false">Tela cheia</button>
       </div>
     </div>
