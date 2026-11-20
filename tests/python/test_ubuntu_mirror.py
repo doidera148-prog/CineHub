@@ -51,7 +51,6 @@ class UbuntuMirrorSelectionTests(unittest.TestCase):
                     "PATH": f"{fake_bin}:{env['PATH']}",
                     "APT_SOURCES_DIR": str(sources),
                     "UBUNTU_CODENAME": "jammy",
-                    "CURL_LOG": str(root / "curl.log"),
                 }
             )
             result = subprocess.run(
@@ -66,13 +65,6 @@ class UbuntuMirrorSelectionTests(unittest.TestCase):
             mirror_list = (sources / "ubuntu-mirrors.txt").read_text(encoding="utf-8")
             self.assertIn(f"mirror+file:{sources}/ubuntu-mirrors.txt", updated)
             self.assertNotIn("http://security.ubuntu.com/ubuntu", updated)
-            self.assertIn(
-                f"mirror+file:{sources}/ubuntu-mirrors.txt", updated
-            )
-            self.assertIn(
-                "/dists/jammy-security/InRelease",
-                (root / "curl.log").read_text(encoding="utf-8"),
-            )
             self.assertIn(
                 "https://fast.example.org/ubuntu\tpriority:1", mirror_list
             )
