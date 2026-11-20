@@ -177,7 +177,7 @@ function askConfirm(msg, okLabel) {
 }
 
 // Funções puras (URLs seguras, ordenação de fontes, próximo episódio) vêm de lib.js, testadas com node.
-const { isWebUrl, cssUrl, str, num, mergeBackupData, createBackupData, writeStorageBatch, progressPercent, sortStreams, nextEpisode, torrentLanguage, isSeriesLike, typeLabel, qualityLabel, filterStreams, sortStreamsBy } = window.CineHubLib;
+const { isWebUrl, cssUrl, str, num, mergeBackupData, createBackupData, writeStorageBatch, progressPercent, sortStreams, nextEpisode, torrentLanguage, isSeriesLike, typeLabel, qualityLabel, filterStreams, sortStreamsBy, activeSegment } = window.CineHubLib;
 
 const STREAM_LANG = { pt: 'Português', en: 'Inglês', other: 'Outros' };
 const STREAM_SORTS = [
