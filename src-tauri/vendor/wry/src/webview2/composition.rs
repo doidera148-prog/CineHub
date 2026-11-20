@@ -328,8 +328,8 @@ impl CompositionHost {
       x: rect.right,
       y: rect.bottom,
     };
-    if unsafe { ScreenToClient(hwnd, &mut top_left) }.is_err()
-      || unsafe { ScreenToClient(hwnd, &mut bottom_right) }.is_err()
+    if !unsafe { ScreenToClient(hwnd, &mut top_left) }.as_bool()
+      || !unsafe { ScreenToClient(hwnd, &mut bottom_right) }.as_bool()
     {
       return None;
     }
@@ -413,7 +413,7 @@ impl CompositionHost {
       return false;
     };
     let mut client_origin_screen = POINT::default();
-    if unsafe { ClientToScreen(hwnd, &mut client_origin_screen) }.is_err() {
+    if !unsafe { ClientToScreen(hwnd, &mut client_origin_screen) }.as_bool() {
       return false;
     }
     let Some(himetric_origin) =
