@@ -596,7 +596,7 @@ mod imp {
                 let render_result = match (wid, render_context.as_ref()) {
                     (Some(parent), Some(renderer)) if renderer.frame_is_pending() => {
                         Some((parent, super::mpv_d3d11::render_to_host(parent, renderer)))
-                    },
+                    }
                     _ => None,
                 };
 
