@@ -221,6 +221,11 @@ sha2 = "0.10"
 base64 = "0.23"
 dom_query = { version = "0.29.0", default-features = false }
 
+# These are upstream Wry development dependencies used by examples and platform-specific
+# test helpers; cargo-machete does not resolve all of those non-library references.
+[package.metadata.cargo-machete]
+ignored = ["getrandom", "glow", "http-range", "libloading", "pollster", "tao", "wgpu", "winit"]
+
 [lints.rust.unexpected_cfgs]
 level = "warn"
 check-cfg = ["cfg(linux)", "cfg(gtk)"]
