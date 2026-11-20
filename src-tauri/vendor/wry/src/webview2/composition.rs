@@ -36,7 +36,7 @@ use windows::{
       },
       Dxgi::{
         IDXGIAdapter, IDXGIDevice, IDXGIFactory2, IDXGIOutput, IDXGISwapChain1,
-        DXGI_PRESENT, DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_FLAG_NONE,
+        DXGI_PRESENT, DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_FLAG,
         DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT,
       },
       Dxgi::Common::{
@@ -106,7 +106,7 @@ impl RenderSurface {
           width,
           height,
           DXGI_FORMAT_UNKNOWN,
-          DXGI_SWAP_CHAIN_FLAG_NONE,
+          DXGI_SWAP_CHAIN_FLAG(0),
         )
       }
       .is_err()
@@ -199,7 +199,7 @@ fn unregister_composition_surface(parent: isize) {
   }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn cinehub_wry_composition_get_device(parent: isize) -> *mut c_void {
   let Some(surface) = find_composition_surface(parent) else {
     return ptr::null_mut();
@@ -212,7 +212,7 @@ pub extern "C" fn cinehub_wry_composition_get_device(parent: isize) -> *mut c_vo
     .into_raw()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn cinehub_wry_composition_get_backbuffer(parent: isize) -> *mut c_void {
   let Some(surface) = find_composition_surface(parent) else {
     return ptr::null_mut();
@@ -223,7 +223,7 @@ pub extern "C" fn cinehub_wry_composition_get_backbuffer(parent: isize) -> *mut 
     .acquire_backbuffer()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn cinehub_wry_composition_present(parent: isize) -> i32 {
   let Some(surface) = find_composition_surface(parent) else {
     return E_POINTER.0;
@@ -234,7 +234,7 @@ pub extern "C" fn cinehub_wry_composition_present(parent: isize) -> i32 {
     .present()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn cinehub_wry_composition_set_video_rect(
   parent: isize,
   x: i32,
@@ -257,8 +257,8 @@ pub extern "C" fn cinehub_wry_composition_set_video_rect(
     SendMessageW(
       host_hwnd,
       WM_CINEHUB_SET_VIDEO_RECT,
-      WPARAM(0),
-      LPARAM(0),
+      Some(WPARAM(0)),
+      Some(LPARAM(0)),
     )
   };
   result.0 as i32
@@ -343,14 +343,14 @@ impl CompositionHost {
       Width: initial_width,
       Height: initial_height,
       Format: DXGI_FORMAT_B8G8R8A8_UNORM,
-      Stereo: windows::Win32::Foundation::BOOL(0),
+      Stereo: Default::default(),
       SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
       BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
       BufferCount: 2,
       Scaling: DXGI_SCALING_STRETCH,
       SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
       AlphaMode: DXGI_ALPHA_MODE_PREMULTIPLIED,
-      Flags: 0,
+      Flags: DXGI_SWAP_CHAIN_FLAG(0),
     };
     let swap_chain = unsafe {
       factory.CreateSwapChainForComposition(
@@ -360,8 +360,9 @@ impl CompositionHost {
       )?
     };
 
+    let dcomp_rendering_device = dxgi_device.cast::<IUnknown>()?;
     let device = unsafe {
-      DCompositionCreateDevice2::<_, IDCompositionDesktopDevice>(Some(&dxgi_device))?
+      DCompositionCreateDevice2::<_, IDCompositionDesktopDevice>(Some(&dcomp_rendering_device))?
     };
     let target = unsafe { device.CreateTargetForHwnd(parent, true)? };
     let root_visual = unsafe { device.CreateVisual()? };
@@ -480,7 +481,7 @@ impl CompositionHost {
           let Some((x, y, width, height)) = rect else {
             return windows::Win32::Foundation::LRESULT(0);
           };
-          let result: windows::core::Result<()> = (|| unsafe {
+          let result: windows::core::Result<()> = (|| {
             state.video_visual.SetOffsetX2(x as f32)?;
             state.video_visual.SetOffsetY2(y as f32)?;
             state.video_visual3.SetVisible(width > 0 && height > 0)?;
