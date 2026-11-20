@@ -22,7 +22,7 @@ use windows::{
   core::Interface,
 };
 
-use crate::{Error, Result};
+use crate::Result;
 
 pub(super) struct CompositionHost {
   pub controller: ICoreWebView2Controller,
