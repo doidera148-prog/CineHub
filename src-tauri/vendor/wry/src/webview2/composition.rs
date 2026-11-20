@@ -428,6 +428,25 @@ impl CompositionHost {
         y: i32::try_from(i64::from(point.y) - i64::from(himetric_origin.y)).ok()?,
       })
     };
+    let to_client_himetric_rect = |rect: RECT| -> Option<RECT> {
+      let top_left = to_client_himetric(POINT {
+        x: rect.left,
+        y: rect.top,
+      })?;
+      let bottom_right = to_client_himetric(POINT {
+        x: rect.right,
+        y: rect.bottom,
+      })?;
+      Some(RECT {
+        left: top_left.x,
+        top: top_left.y,
+        right: bottom_right.x,
+        bottom: bottom_right.y,
+      })
+    };
+    let Some(pointer_device_rect_client) = to_client_himetric_rect(pointer_device_rect) else {
+      return false;
+    };
     let Some(himetric_location) = to_client_himetric(native_info.ptHimetricLocation) else {
       return false;
     };
@@ -465,7 +484,7 @@ impl CompositionHost {
       pointer_info.SetPointerId(native_info.pointerId)?;
       pointer_info.SetFrameId(native_info.frameId)?;
       pointer_info.SetPointerFlags(native_info.pointerFlags.0)?;
-      pointer_info.SetPointerDeviceRect(pointer_device_rect)?;
+      pointer_info.SetPointerDeviceRect(pointer_device_rect_client)?;
       pointer_info.SetDisplayRect(display_rect_client)?;
       pointer_info.SetPixelLocation(POINT {
         x: pixel_location.left,
