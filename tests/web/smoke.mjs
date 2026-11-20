@@ -18,7 +18,7 @@ const server = createServer(async (req, res) => {
 });
 await new Promise((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
 const base = `http://127.0.0.1:${server.address().port}`;
-const fixtures = `window.__calls=[];window.__eventListeners={};window.__emitTauriEvent=(name,payload)=>window.__eventListeners[name]?.({payload});window.__TAURI__={event:{listen:async(name,callback)=>{window.__eventListeners[name]=callback;return()=>delete window.__eventListeners[name];}},core:{invoke:async(cmd,args)=>{window.__calls.push({cmd,args});const metas=(n,p)=>Array.from({length:n},(_,i)=>({id:'tt'+p+i,type:'movie',name:p+' filme '+i,releaseInfo:'2026'}));switch(cmd){case'home':return{rows:[{title:'Populares',addon:'Teste',transportUrl:'https://test.invalid/manifest.json',type:args.kind,catalogId:'top',metas:metas(20,'home')}]};case'search':return{rows:[]};case'catalog_page':return{metas:[]};case'list_addons':return[];case'meta':return{meta:{id:args.id,type:'movie',name:window.__maliciousMetaName || 'Título de teste',description:'Descrição'}};case'streams':if(args.id==='tt2')throw Error('offline');return{streams:[window.__streamForTest || {name:'Fonte MP4 de teste',title:'1080p',url:'https://stream.test/sample.mp4',mimeType:'video/mp4'}],subtitles:[{lang:'pt',url:'https://subs.test/sample.vtt'}],errors:[]};case'media_proxy_url':return window.__preserveMediaUrl?args.url:'${base}/sample.mp4';case'subtitle':return'WEBVTT\\n\\n00:00:00.000 --> 00:00:01.000\\nLegenda de teste';case'skip_segments':return{segments:[]};case'plugin:exoplayer|play':if(window.__rejectNativePlayer)throw Error('falha nativa simulada');return{positionMs:0,durationMs:0};case'player_play':if(window.__rejectNativePlayer)throw Error('falha mpv simulada');if(window.__holdNativePlayer)return new Promise(resolve=>{window.__finishNativePlayer=resolve});return{positionMs:0,durationMs:0};case'player_composition_enabled':return window.__compositionEnabled!==false;case'player_control':return{};case'player_set_geometry':return window.__rejectNativeGeometry?false:true;case'player_close':return{};case'torrent_stats':return{active:true,state:'Live',downloadSpeedBytes:1250000,uploadSpeedBytes:64000,peers:8,peersSeen:14,downloadedBytes:500000000,totalBytes:1000000000,error:null};default:return{};}}}};`;
+const fixtures = `window.__calls=[];window.__eventListeners={};window.__emitTauriEvent=(name,payload)=>window.__eventListeners[name]?.({payload});window.__TAURI__={event:{listen:async(name,callback)=>{window.__eventListeners[name]=callback;return()=>delete window.__eventListeners[name];}},core:{invoke:async(cmd,args)=>{window.__calls.push({cmd,args});const metas=(n,p)=>Array.from({length:n},(_,i)=>({id:'tt'+p+i,type:'movie',name:p+' filme '+i,releaseInfo:'2026'}));switch(cmd){case'home':return{rows:[{title:'Populares',addon:'Teste',transportUrl:'https://test.invalid/manifest.json',type:args.kind,catalogId:'top',metas:metas(20,'home')}]};case'search':return{rows:[]};case'catalog_page':return{metas:[]};case'list_addons':return[];case'meta':return{meta:{id:args.id,type:'movie',name:window.__maliciousMetaName || 'Título de teste',description:'Descrição'}};case'streams':if(args.id==='tt2')throw Error('offline');return{streams:[window.__streamForTest || {name:'Fonte MP4 de teste',title:'1080p',url:'https://stream.test/sample.mp4',mimeType:'video/mp4'}],subtitles:[{lang:'pt',url:'https://subs.test/sample.vtt'}],errors:[]};case'media_proxy_url':return window.__preserveMediaUrl?args.url:'${base}/sample.mp4';case'subtitle':return'WEBVTT\\n\\n00:00:00.000 --> 00:00:01.000\\nLegenda de teste';case'skip_segments':return{segments:[]};case'plugin:exoplayer|play':if(window.__rejectNativePlayer)throw Error('falha nativa simulada');return{positionMs:0,durationMs:0};case'player_play':if(window.__rejectNativePlayer)throw Error('falha mpv simulada');if(window.__holdNativePlayer)return new Promise(resolve=>{window.__finishNativePlayer=resolve});return{positionMs:0,durationMs:0};case'player_composition_enabled':return window.__compositionEnabled!==false;case'player_control':return{};case'player_set_fullscreen':return{};case'player_set_geometry':return window.__rejectNativeGeometry?false:true;case'player_close':return{};case'torrent_stats':return{active:true,state:'Live',downloadSpeedBytes:1250000,uploadSpeedBytes:64000,peers:8,peersSeen:14,downloadedBytes:500000000,totalBytes:1000000000,error:null};default:return{};}}}};`;
 const routes = ['#/', '#/movies', '#/series', '#/animes', '#/search?q=filme', '#/library', '#/addons', '#/detail/movie/tt1'];
 const failures = [];
 const browser = await chromium.launch();
@@ -157,6 +157,33 @@ async function checkWindowsNativeOverlayClose() {
     input.dispatchEvent(new Event('change', { bubbles: true }));
   });
   await page.waitForFunction(() => window.__calls.some((call) => call.cmd === 'player_control' && call.args?.action === 'set-volume' && call.args?.value === 35));
+  await page.locator('#native-fullscreen').click();
+  await page.waitForFunction(() => window.__calls.some((call) =>
+    call.cmd === 'player_set_fullscreen' && call.args?.enabled === true,
+  ));
+  if (!(await page.evaluate(() => document.body.classList.contains('native-player-fullscreen')))) {
+    failures.push('[windows-player-fullscreen] classe de tela cheia não foi ativada');
+  }
+  await page.locator('#native-fullscreen').click();
+  await page.waitForFunction(() => window.__calls.some((call) =>
+    call.cmd === 'player_set_fullscreen' && call.args?.enabled === false,
+  ));
+  if (await page.evaluate(() => document.body.classList.contains('native-player-fullscreen'))) {
+    failures.push('[windows-player-fullscreen] classe de tela cheia não foi removida');
+  }
+
+  await page.mouse.move(640, 360);
+  await page.waitForFunction(() => document.body.classList.contains('native-controls-idle'), null, { timeout: 5000 });
+  const hiddenControls = await page.evaluate(() => ({
+    visibility: getComputedStyle(document.querySelector('#native-controls')).visibility,
+    geometry: window.__calls.filter((call) => call.cmd === 'player_set_geometry').at(-1)?.args,
+  }));
+  if (hiddenControls.visibility !== 'hidden') failures.push('[windows-player-auto-hide] barra não desapareceu após inatividade');
+  if (hiddenControls.geometry?.cutouts?.length) failures.push('[windows-player-auto-hide] superfície nativa ainda reserva recortes para controles ocultos');
+  await page.mouse.move(660, 360);
+  await page.waitForFunction(() => !document.body.classList.contains('native-controls-idle'));
+  if (await page.locator('#native-controls').isHidden()) failures.push('[windows-player-auto-hide] barra não reapareceu ao mover o mouse');
+
   await page.locator('#close-player').click();
   await page.waitForFunction(() => window.__calls.some((call) => call.cmd === 'player_close'));
   await page.evaluate(() => window.__finishNativePlayer?.({ positionMs: 1000, durationMs: 5000 }));
