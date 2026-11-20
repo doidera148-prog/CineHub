@@ -228,7 +228,7 @@ mod imp {
         wid: Option<i64>,
         subtitle: Option<&str>,
         segments: &[Segment],
-        app: tauri::AppHandle,
+        _app: tauri::AppHandle,
     ) -> Result<PlayerResult, String> {
         let mpv = Mpv::with_initializer(|init| {
             init.set_option("vo", "gpu")?;
@@ -316,7 +316,7 @@ mod imp {
             #[cfg(all(windows, feature = "mpv"))]
             if let (Some(parent), false) = (wid, embedded) {
                 if let Ok(video) = mpv.get_property::<i64>("window-id") {
-                    if super::win::take_over(&app, parent, video) {
+                    if super::win::take_over(&_app, parent, video) {
                         embedded = true;
                     }
                 }
@@ -351,7 +351,7 @@ mod imp {
         }
 
         #[cfg(all(windows, feature = "mpv"))]
-        super::win::restore(&app);
+        super::win::restore(&_app);
 
         if failed {
             return Err("o mpv não conseguiu tocar este vídeo".into());
