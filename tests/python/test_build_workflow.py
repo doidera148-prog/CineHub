@@ -276,6 +276,7 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("CINEHUB_WEBVIEW2_COMPOSITION_POC", wry)
         self.assertIn("Some(host) => host.controller.clone()", wry)
         self.assertIn("None => Self::create_controller(", wry)
+        self.assertIn("host.shutdown();", wry)
         self.assertIn("CreateCoreWebView2CompositionController", composition)
         self.assertIn("CreateCoreWebView2CompositionControllerCompletedHandler", composition)
         self.assertIn(
@@ -288,8 +289,33 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
             composition,
         )
         self.assertIn("SetRootVisualTarget", composition)
-        # Input forwarding is a separate, not-yet-implemented POC gate.
-        self.assertNotIn("SendMouseInput", composition)
+        self.assertIn("SetWindowSubclass", composition)
+        self.assertIn("SendMouseInput", composition)
+        for message in (
+            "WM_MOUSEMOVE",
+            "WM_MOUSELEAVE",
+            "WM_LBUTTONDOWN",
+            "WM_LBUTTONUP",
+            "WM_RBUTTONDOWN",
+            "WM_RBUTTONUP",
+            "WM_MBUTTONDOWN",
+            "WM_MBUTTONUP",
+            "WM_XBUTTONDOWN",
+            "WM_XBUTTONUP",
+            "WM_MOUSEWHEEL",
+            "WM_MOUSEHWHEEL",
+        ):
+            with self.subTest(message=message):
+                self.assertIn(message, composition)
+        self.assertIn("CursorChangedEventHandler", composition)
+        self.assertIn("add_CursorChanged", composition)
+        self.assertIn("MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC)", composition)
+        self.assertIn("controller.SetBounds(bounds)", composition)
+        self.assertIn("TrackMouseEvent", composition)
+        self.assertIn("SetCapture(hwnd)", composition)
+        self.assertIn("ReleaseCapture()", composition)
+        self.assertIn("remove_CursorChanged", composition)
+        self.assertIn("RemoveWindowSubclass", composition)
 
     def test_only_optional_ffmpeg_download_can_fail_without_stopping_android_job(self):
         android = job_block(self.workflow, "android")
