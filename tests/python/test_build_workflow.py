@@ -290,6 +290,17 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         )
         self.assertIn("SetRootVisualTarget", composition)
         self.assertIn("SetWindowSubclass", composition)
+        self.assertIn("Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass}", composition)
+        self.assertIn("Input::KeyboardAndMouse::{", composition)
+        self.assertIn("GetCapture, ReleaseCapture, SetCapture, TrackMouseEvent", composition)
+        self.assertIn("Gdi::ScreenToClient", composition)
+        self.assertIn("SetCursor(Some(cursor))", composition)
+        self.assertIn("SetWindowSubclass(", composition)
+        self.assertIn(".as_bool()", composition)
+        self.assertIn("composition_controller: ICoreWebView2CompositionController", composition)
+        self.assertIn("controller: ICoreWebView2Controller", composition)
+        self.assertIn(".composition_controller\n        .SendMouseInput(", composition)
+        self.assertNotIn("state\n        .controller\n        .SendMouseInput(", composition)
         self.assertIn("SendMouseInput", composition)
         for message in (
             "WM_MOUSEMOVE",
