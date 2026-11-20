@@ -278,6 +278,10 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("None => Self::create_controller(", wry)
         self.assertIn("CreateCoreWebView2CompositionController", composition)
         self.assertIn("CreateCoreWebView2CompositionControllerCompletedHandler", composition)
+        self.assertIn(
+            "let result: webview2_com::Result<ICoreWebView2CompositionController>",
+            composition,
+        )
         self.assertIn("DCompositionCreateDevice2::<_, IDCompositionDesktopDevice>", composition)
         self.assertIn(
             "let composition_controller = webview2_com::wait_with_pump(rx)??;",
