@@ -17,18 +17,25 @@ use webview2_com::{
 use windows::{
   Win32::{
     Foundation::{E_POINTER, E_UNEXPECTED, HWND, POINT, RECT},
-    Graphics::DirectComposition::{
-      DCompositionCreateDevice2, IDCompositionDesktopDevice, IDCompositionTarget,
-      IDCompositionVisual,
+    Graphics::{
+      DirectComposition::{
+        DCompositionCreateDevice2, IDCompositionDesktopDevice, IDCompositionTarget,
+        IDCompositionVisual,
+      },
+      Gdi::ScreenToClient,
     },
-    UI::WindowsAndMessaging::{
-      DefSubclassProc, GetCapture, GetClientRect, ReleaseCapture, RemoveWindowSubclass,
-      ScreenToClient, SetCapture, SetCursor, SetWindowSubclass, TrackMouseEvent,
-      TRACKMOUSEEVENT, TME_LEAVE, WM_CAPTURECHANGED, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
-      WM_LBUTTONUP, WM_MBUTTONDBLCLK, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL,
-      WM_MOUSELEAVE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN,
-      WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_XBUTTONDBLCLK, WM_XBUTTONDOWN, WM_XBUTTONUP,
-      SIZE_MINIMIZED,
+    UI::{
+      Input::KeyboardAndMouse::{
+        GetCapture, ReleaseCapture, SetCapture, TrackMouseEvent, TRACKMOUSEEVENT, TME_LEAVE,
+      },
+      Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
+      WindowsAndMessaging::{
+        GetClientRect, SetCursor, WM_CAPTURECHANGED, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
+        WM_LBUTTONUP, WM_MBUTTONDBLCLK, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL,
+        WM_MOUSELEAVE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN,
+        WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_XBUTTONDBLCLK, WM_XBUTTONDOWN, WM_XBUTTONUP,
+        SIZE_MINIMIZED,
+      },
     },
   },
   core::{Interface, IUnknown},
@@ -40,7 +47,8 @@ const COMPOSITION_INPUT_SUBCLASS_ID: u32 = 0x4348_0001;
 const MOUSE_BUTTON_MASK: usize = 0x0073;
 
 struct CompositionInputState {
-  controller: ICoreWebView2CompositionController,
+  controller: ICoreWebView2Controller,
+  composition_controller: ICoreWebView2CompositionController,
   mouse_tracking: bool,
   captured: bool,
 }
@@ -101,7 +109,7 @@ impl CompositionHost {
       let mut cursor = Default::default();
       unsafe {
         cursor_controller.Cursor(&mut cursor)?;
-        SetCursor(cursor);
+        SetCursor(Some(cursor));
       }
       Ok(())
     }));
@@ -113,23 +121,26 @@ impl CompositionHost {
     // Composition mode has no child WebView HWND to receive input. Subclass the
     // Wry container and translate its mouse messages to WebView2 SendMouseInput.
     let input_state = Box::into_raw(Box::new(CompositionInputState {
-      controller: composition_controller.clone(),
+      controller: controller.clone(),
+      composition_controller: composition_controller.clone(),
       mouse_tracking: false,
       captured: false,
     }));
-    if let Err(error) = unsafe {
+    if !unsafe {
       SetWindowSubclass(
         hwnd,
         Some(Self::input_subclass_proc),
         COMPOSITION_INPUT_SUBCLASS_ID as _,
         input_state as usize,
       )
-    } {
+    }
+    .as_bool()
+    {
       unsafe {
         drop(Box::from_raw(input_state));
         let _ = composition_controller.remove_CursorChanged(cursor_changed_token);
       }
-      return Err(error.into());
+      return Err(windows::core::Error::from_win32().into());
     }
 
     Ok(Self {
@@ -190,7 +201,7 @@ impl CompositionHost {
         }
         WM_MOUSELEAVE => {
           state.mouse_tracking = false;
-          let _ = state.controller.SendMouseInput(
+          let _ = state.composition_controller.SendMouseInput(
             COREWEBVIEW2_MOUSE_EVENT_KIND_LEAVE,
             COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS(0),
             0,
@@ -290,7 +301,7 @@ impl CompositionHost {
     if !self.input_state.is_null() {
       unsafe {
         let state = &mut *self.input_state;
-        let _ = state.controller.SendMouseInput(
+        let _ = state.composition_controller.SendMouseInput(
           COREWEBVIEW2_MOUSE_EVENT_KIND_LEAVE,
           COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS(0),
           0,
