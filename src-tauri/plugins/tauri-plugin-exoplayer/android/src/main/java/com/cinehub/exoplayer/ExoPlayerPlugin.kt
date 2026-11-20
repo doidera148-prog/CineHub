@@ -184,7 +184,8 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
 
         // Guarda a preferência pelo idioma da faixa, pois o ID muda entre arquivos.
         var availableAudioTracks: List<Pair<Tracks.Group, Int>> = emptyList()
-        val audioButton = Button(act).apply {
+        lateinit var audioButton: Button
+        audioButton = Button(act).apply {
             text = "Áudio"
             isAllCaps = false
             visibility = View.GONE
