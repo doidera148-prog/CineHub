@@ -32,6 +32,8 @@ enum PlayerControl {
     SeekAbsolute(f64),
     ToggleMute,
     SetVolume(f64),
+    SelectAudio(i64),
+    SelectSubtitle(Option<i64>),
 }
 
 static PLAYER_CONTROL_SENDER: std::sync::Mutex<Option<std::sync::mpsc::Sender<PlayerControl>>> =
@@ -62,8 +64,25 @@ fn parse_player_control(action: &str, value: Option<f64>) -> Result<PlayerContro
             }
             Ok(PlayerControl::SetVolume(volume.clamp(0.0, 100.0)))
         }
+        "select-audio" => Ok(PlayerControl::SelectAudio(parse_track_id(
+            value,
+            "faixa de áudio",
+        )?)),
+        "select-subtitle" => Ok(PlayerControl::SelectSubtitle(
+            value
+                .map(|id| parse_track_id(Some(id), "faixa de legenda"))
+                .transpose()?,
+        )),
         _ => Err("comando de player desconhecido".into()),
     }
+}
+
+fn parse_track_id(value: Option<f64>, description: &str) -> Result<i64, String> {
+    let id = value.ok_or_else(|| format!("{description} ausente"))?;
+    if !id.is_finite() || id < 0.0 || id.fract() != 0.0 || id > i64::MAX as f64 {
+        return Err(format!("{description} inválida"));
+    }
+    Ok(id as i64)
 }
 
 #[cfg(any(all(windows, feature = "mpv"), test))]
@@ -199,6 +218,20 @@ struct PlayerPlaybackState {
     paused: bool,
     volume: f64,
     muted: bool,
+    audio_tracks: Vec<PlayerTrack>,
+    subtitle_tracks: Vec<PlayerTrack>,
+}
+
+#[cfg(feature = "mpv")]
+#[derive(Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct PlayerTrack {
+    id: i64,
+    title: Option<String>,
+    language: Option<String>,
+    codec: Option<String>,
+    external: bool,
+    selected: bool,
 }
 
 /// Só aceita http/https: o mpv não pode abrir arquivos locais nem opções de linha de comando.
@@ -357,6 +390,57 @@ mod imp {
         COMPOSITION_CLOSE_REQUESTED.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
+    fn track_text(mpv: &Mpv, property: &str) -> Option<String> {
+        mpv.get_property::<String>(property)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    }
+
+    fn collect_tracks(mpv: &Mpv) -> (Vec<PlayerTrack>, Vec<PlayerTrack>) {
+        let count = mpv
+            .get_property::<i64>("track-list/count")
+            .unwrap_or(0)
+            .clamp(0, 128);
+        let mut audio = Vec::new();
+        let mut subtitles = Vec::new();
+
+        for index in 0..count {
+            let prefix = format!("track-list/{index}");
+            let Ok(id) = mpv.get_property::<i64>(&format!("{prefix}/id")) else {
+                continue;
+            };
+            let Ok(kind) = mpv.get_property::<String>(&format!("{prefix}/type")) else {
+                continue;
+            };
+            if kind != "audio" && kind != "sub" {
+                continue;
+            }
+
+            let track = PlayerTrack {
+                id,
+                title: track_text(mpv, &format!("{prefix}/title")),
+                language: track_text(mpv, &format!("{prefix}/lang")),
+                codec: track_text(mpv, &format!("{prefix}/codec-desc"))
+                    .or_else(|| track_text(mpv, &format!("{prefix}/codec"))),
+                external: mpv
+                    .get_property::<bool>(&format!("{prefix}/external"))
+                    .unwrap_or(false),
+                selected: mpv
+                    .get_property::<bool>(&format!("{prefix}/selected"))
+                    .unwrap_or(false),
+            };
+
+            if kind == "audio" {
+                audio.push(track);
+            } else {
+                subtitles.push(track);
+            }
+        }
+
+        (audio, subtitles)
+    }
+
     pub fn play(
         url: &str,
         start_ms: i64,
@@ -389,7 +473,8 @@ mod imp {
             // os cliques do OSC para a janela subjacente em vez de tratá-los no mpv.
             init.set_option("input-cursor-passthrough", "no")?;
             init.set_option("input-vo-keyboard", "yes")?;
-            init.set_option("osd-level", "3")?;
+            // Desativa texto/progresso do OSD, mas mantém as legendas do vídeo visíveis.
+            init.set_option("osd-level", "0")?;
             init.set_option("border", "no")?;
             // Sem yt-dlp: a URL é sempre um vídeo direto vindo de um addon ou do torrent local.
             init.set_option("ytdl", "no")?;
@@ -490,6 +575,14 @@ mod imp {
                         let volume = format!("{volume:.1}");
                         mpv.command("set", &["volume", &volume])
                     }
+                    PlayerControl::SelectAudio(id) => {
+                        let id = id.to_string();
+                        mpv.command("set", &["aid", &id])
+                    }
+                    PlayerControl::SelectSubtitle(track_id) => {
+                        let id = track_id.map_or_else(|| "no".to_string(), |id| id.to_string());
+                        mpv.command("set", &["sid", &id])
+                    }
                 };
                 if let Err(error) = result {
                     eprintln!("aviso: comando do player não foi aplicado: {error}");
@@ -532,12 +625,15 @@ mod imp {
                 && last_state_emit.elapsed() >= std::time::Duration::from_millis(200)
             {
                 use tauri::Emitter;
+                let (audio_tracks, subtitle_tracks) = collect_tracks(&mpv);
                 let state = PlayerPlaybackState {
                     position_ms: (position.max(0.0) * 1000.0) as i64,
                     duration_ms: (duration.max(0.0) * 1000.0) as i64,
                     paused: mpv.get_property::<bool>("pause").unwrap_or(false),
                     volume: mpv.get_property::<f64>("volume").unwrap_or(100.0),
                     muted: mpv.get_property::<bool>("mute").unwrap_or(false),
+                    audio_tracks,
+                    subtitle_tracks,
                 };
                 let _ = app.emit("player-state", state);
                 last_state_emit = std::time::Instant::now();
@@ -1046,6 +1142,21 @@ mod tests {
             _ => panic!("volume deve ser limitado a 100%"),
         }
         assert!(super::parse_player_control("set-volume", Some(f64::NAN)).is_err());
+        assert!(matches!(
+            super::parse_player_control("select-audio", Some(2.0)),
+            Ok(super::PlayerControl::SelectAudio(2))
+        ));
+        assert!(matches!(
+            super::parse_player_control("select-subtitle", None),
+            Ok(super::PlayerControl::SelectSubtitle(None))
+        ));
+        assert!(matches!(
+            super::parse_player_control("select-subtitle", Some(3.0)),
+            Ok(super::PlayerControl::SelectSubtitle(Some(3)))
+        ));
+        assert!(super::parse_player_control("select-audio", Some(1.5)).is_err());
+        assert!(super::parse_player_control("select-subtitle", Some(-1.0)).is_err());
+        assert!(super::parse_player_control("select-audio", None).is_err());
         assert!(super::parse_player_control("unknown", None).is_err());
     }
 
@@ -1061,6 +1172,7 @@ mod tests {
             init.set_option("input-cursor", "yes")?;
             init.set_option("input-cursor-passthrough", "no")?;
             init.set_option("script-opts", "osc-visibility=always,osc-idlescreen=yes")?;
+            init.set_option("osd-level", "0")?;
             Ok(())
         });
         assert!(
