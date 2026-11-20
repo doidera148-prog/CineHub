@@ -279,6 +279,10 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("CreateCoreWebView2CompositionController", composition)
         self.assertIn("CreateCoreWebView2CompositionControllerCompletedHandler", composition)
         self.assertIn("DCompositionCreateDevice2::<_, IDCompositionDesktopDevice>", composition)
+        self.assertIn(
+            "let composition_controller = webview2_com::wait_with_pump(rx)??;",
+            composition,
+        )
         self.assertIn("SetRootVisualTarget", composition)
         # Input forwarding is a separate, not-yet-implemented POC gate.
         self.assertNotIn("SendMouseInput", composition)
