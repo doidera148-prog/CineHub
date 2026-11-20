@@ -73,3 +73,33 @@ Proceed in this order:
 - Only after this passes, connect the mpv D3D11 render texture into the same DirectComposition visual tree. Keep the existing player path until the full acceptance criteria above pass.
 
 No dependency override, player switch, or production code path is changed by this investigation.
+
+
+## Source-level Wry inspection
+
+The upstream Windows backend source inspected at `src/webview2/mod.rs` confirms the key ownership seam:
+
+- `InnerWebView` currently owns `hwnd`, `is_child`, `controller: ICoreWebView2Controller`, `webview: ICoreWebView2`, and `env: ICoreWebView2Environment`.
+- `InnerWebView::new_in_hwnd` creates the container HWND, calls `create_controller`, then passes the standard controller into `init_webview`.
+- `create_controller` uses `CreateCoreWebView2Controller` or `CreateCoreWebView2ControllerWithOptions`, then waits for the asynchronous completion handler.
+- `init_webview` registers navigation, IPC, permissions and other handlers against the common `ICoreWebView2` interface, then calls controller methods for visibility and focus and attaches the parent subclass.
+- `Drop for InnerWebView` closes the controller and destroys/detaches the HWND host.
+
+This means a safe fork must preserve the common `ICoreWebView2` initialization and event-registration path while making the visual host and controller ownership polymorphic. The standard HWND path cannot simply be deleted: it remains the fallback and is still required by other platforms' existing behavior.
+
+### Required fork patch boundaries
+
+The first fork patch should be deliberately limited to:
+
+1. Add a Windows-only hosting-mode option with the existing HWND mode as the default.
+2. Add composition-controller creation and retain the composition interface alongside the common controller interface.
+3. Add a UI-thread-owned DirectComposition host object responsible for device/target/visual creation, RootVisualTarget assignment, bounds/DPI updates and deterministic teardown.
+4. Route host pointer/mouse events to the composition controller and handle cursor/focus/keyboard integration.
+5. Keep existing navigation, IPC, permission, custom-protocol, download, drag/drop and event registration using the same common WebView interface.
+6. Add a focused host diagnostic/test target before wiring this mode into CineHub's normal window creation.
+
+Do not begin the libmpv D3D11 renderer patch until this hosting-only change builds and its pointer/resize/recreate checks pass.
+
+### Fork creation status
+
+The exact upstream source seam has been identified, but no Wry fork or production source patch is claimed by this commit. The available GitHub integration for this task can create and update files/branches in accessible repositories, but does not expose the GitHub **Fork repository** operation. Creating a new repository fork therefore requires the repository owner to create the fork in GitHub first; after that, the fork can be updated with the pinned patch and referenced from CineHub. No unverified repository URL or dependency override should be added.
