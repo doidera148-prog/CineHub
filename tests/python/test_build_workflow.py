@@ -17,14 +17,6 @@ def job_block(workflow, name):
     return match.group(1)
 
 
-def step_block(job, step_name):
-    pattern = rf"(?ms)^      - name: {re.escape(step_name)}\\n(.*?)(?=^      - |\\Z)"
-    match = re.search(pattern, job)
-    if not match:
-        raise AssertionError(f"Etapa '{step_name}' não encontrada")
-    return match.group(1)
-
-
 class BuildWorkflowRegressionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -35,11 +27,11 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
             with self.subTest(trigger=trigger):
                 self.assertIn(trigger, self.workflow)
         self.assertIn("cancel-in-progress: true", self.workflow)
-        self.assertIn("group: build-${{ github.ref }}", self.workflow)
+        self.assertIn("group: build-" + "$" + "{{ github.ref }}", self.workflow)
 
-    def test_workflow_declares_required_jobs(self):
+    def test_workflow_declares_required_jobs_without_duplicates(self):
         expected = ("test", "lint", "web-smoke", "desktop", "android", "release")
-        declared = re.findall(r"(?m)^  ([a-zA-Z0-9_-]+):\\s*$", job_block(self.workflow, "test") if False else self.workflow)
+        declared = re.findall(r"(?m)^  ([a-zA-Z0-9_-]+):\\s*$", self.workflow)
         for name in expected:
             with self.subTest(job=name):
                 self.assertIn(name, declared, f"Job obrigatório ausente: {name}")
@@ -87,7 +79,7 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         )
         self.assertIn("find .github src-tauri tests", lint)
 
-    def test_web_smoke_runs_security_and_existing_regression_suites_once(self):
+    def test_web_smoke_runs_security_and_regression_suites_once(self):
         web = job_block(self.workflow, "web-smoke")
         for command in (
             "npm ci",
@@ -101,15 +93,21 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(web.count(command), 1)
 
-    def test_desktop_matrix_preserves_all_platforms_and_windows_mpv_build(self):
+    def test_desktop_matrix_preserves_platforms_and_windows_mpv_build(self):
         desktop = job_block(self.workflow, "desktop")
         for platform in ("ubuntu-22.04", "windows-latest", "macos-latest"):
             with self.subTest(platform=platform):
                 self.assertIn(platform, desktop)
-        self.assertIn("cargo tauri build --config tauri.windows.conf.json --features mpv", desktop)
-        self.assertIn("cargo test --features mpv --lib mpv_osc_script_options_are_valid", desktop)
+        self.assertIn(
+            "cargo tauri build --config tauri.windows.conf.json --features mpv",
+            desktop,
+        )
+        self.assertIn(
+            "cargo test --features mpv --lib mpv_osc_script_options_are_valid",
+            desktop,
+        )
         self.assertIn("actions/upload-artifact@", desktop)
-        self.assertIn("cinehub-${{ matrix.platform }}", desktop)
+        self.assertIn("cinehub-" + "$" + "{{ matrix.platform }}", desktop)
 
     def test_android_preserves_four_abis_signing_and_google_tv_smoke(self):
         android = job_block(self.workflow, "android")
@@ -119,17 +117,17 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
             "i686-linux-android",
             "x86_64-linux-android",
         )
-        target_line = next((line for line in android.splitlines() if "targets:" in line), "")
+        target_line = next(
+            (line for line in android.splitlines() if "targets:" in line), ""
+        )
         for target in targets:
             with self.subTest(target=target):
                 self.assertIn(target, target_line)
-        for abi in ("arm", "arm64", "x86", "x86_64"):
-            with self.subTest(abi=abi):
-                self.assertIn(f'for abi in arm arm64 x86 x86_64', android)
-                self.assertIn(f'app-$abi-release-unsigned.apk', android)
         for required in (
+            "for abi in arm arm64 x86 x86_64; do",
+            'app-$abi-release-unsigned.apk',
             "zipalign",
-            "apksigner",
+            "apksigner sign",
             "apksigner verify",
             "system-images;android-34;google-tv;x86",
             "-skip-adb-auth",
@@ -145,19 +143,31 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         release = job_block(self.workflow, "release")
         for dependency in ("test", "lint", "web-smoke", "desktop", "android"):
             with self.subTest(dependency=dependency):
-                self.assertRegex(release, rf"needs:\\s*\\[[^\\]]*\\b{dependency}\\b")
+                self.assertRegex(
+                    release,
+                    rf"needs:\\s*\\[[^\\]]*\\b{dependency}\\b",
+                )
                 self.assertIn(f"needs.{dependency}.result == 'success'", release)
         for artifact in ("*.apk", "*.msi", "*.exe", "*.dmg", "*.deb", "*.AppImage"):
             with self.subTest(artifact=artifact):
                 self.assertIn(artifact, release)
 
     def test_workflow_uses_minimal_default_and_scoped_release_permissions(self):
-        self.assertRegex(self.workflow, r"(?ms)^permissions:\\n  contents: read\\s")
+        self.assertRegex(
+            self.workflow,
+            r"(?m)^permissions:\\n  contents: read\\s",
+        )
         release = job_block(self.workflow, "release")
-        self.assertRegex(release, r"(?m)^    permissions:\\n      contents: write\\s")
+        self.assertRegex(
+            release,
+            r"(?m)^    permissions:\\n      contents: write\\s",
+        )
         for job in ("test", "lint", "web-smoke", "desktop", "android"):
             with self.subTest(job=job):
-                self.assertNotRegex(job_block(self.workflow, job), r"(?m)^    permissions:\\n      contents: write")
+                self.assertNotRegex(
+                    job_block(self.workflow, job),
+                    r"(?m)^    permissions:\\n      contents: write",
+                )
 
 
 if __name__ == "__main__":
