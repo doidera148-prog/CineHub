@@ -168,7 +168,7 @@ pub struct PlayerResult {
     pub duration_ms: i64,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PlayerPlaybackState {
     position_ms: i64,
@@ -492,7 +492,7 @@ mod imp {
             if !composition_mode {
                 if let (Some(parent), false) = (wid, embedded) {
                     if let Ok(video) = mpv.get_property::<i64>("window-id") {
-                        if super::win::take_over(&_app, parent, video) {
+                        if super::win::take_over(&app, parent, video) {
                             embedded = true;
                         }
                     }
@@ -543,7 +543,7 @@ mod imp {
 
         #[cfg(all(windows, feature = "mpv"))]
         if !composition_mode {
-            super::win::restore(&_app);
+            super::win::restore(&app);
         }
 
         if failed {
