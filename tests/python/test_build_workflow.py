@@ -468,8 +468,10 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
             "cinehub_wry_composition_get_backbuffer_error",
             "cinehub_wry_composition_recreate_device",
             "fn recreate_device(",
+            "dcomp_target.take()",
             "SetRoot(None::<&IDCompositionVisual>)",
             "SetRootVisualTarget(None::<&IUnknown>)",
+            "state.video_rect",
             "ResizeBuffers(",
         ):
             with self.subTest(required=required):
