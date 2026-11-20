@@ -516,8 +516,12 @@ impl CompositionHost {
 
     let mut client_bounds = RECT::default();
     unsafe { GetClientRect(hwnd, &mut client_bounds)? };
-    let width = (client_bounds.right - client_bounds.left).max(1) as u32;
-    let height = (client_bounds.bottom - client_bounds.top).max(1) as u32;
+    let client_width = (client_bounds.right - client_bounds.left).max(1) as u32;
+    let client_height = (client_bounds.bottom - client_bounds.top).max(1) as u32;
+    let (width, height) = state
+      .video_rect
+      .map(|(_, _, video_width, video_height)| (video_width.max(1), video_height.max(1)))
+      .unwrap_or((client_width, client_height));
     let swap_chain_desc = windows::Win32::Graphics::Dxgi::DXGI_SWAP_CHAIN_DESC1 {
       Width: width,
       Height: height,
