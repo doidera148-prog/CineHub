@@ -1,5 +1,6 @@
 import pathlib
 import re
+import subprocess
 import unittest
 
 
@@ -127,8 +128,8 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
             "for abi in arm arm64 x86 x86_64; do",
             'app-$abi-release-unsigned.apk',
             "zipalign",
-            "apksigner sign",
-            "apksigner verify",
+            '"$BT/apksigner" sign',
+            '"$BT/apksigner" verify',
             "system-images;android-34;google-tv;x86",
             "-skip-adb-auth",
             "adb install -r",
