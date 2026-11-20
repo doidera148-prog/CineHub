@@ -210,6 +210,7 @@ pub fn run() {
             player::player_set_geometry,
             player::player_composition_enabled,
             player::player_close,
+            player::player_set_fullscreen,
             player::player_control,
             skip::skip_segments,
         ])
