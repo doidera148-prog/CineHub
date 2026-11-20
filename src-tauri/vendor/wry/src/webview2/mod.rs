@@ -152,8 +152,8 @@ impl InnerWebView {
     } else {
       Self::create_environment(&attributes, pl_attrs.clone())?
     };
-    // Explicit opt-in for the isolated composition-hosting POC. Production remains on
-    // the proven standard controller until pointer forwarding and lifecycle checks pass.
+    // Use composition hosting only when the embedding application enables it before
+    // WebView creation. When the flag is absent, preserve the standard HWND controller.
     let composition_host =
       if !is_child && std::env::var_os("CINEHUB_WEBVIEW2_COMPOSITION_POC").is_some() {
         Some(CompositionHost::new(parent, hwnd, &env)?)

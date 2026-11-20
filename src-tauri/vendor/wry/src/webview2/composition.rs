@@ -407,9 +407,21 @@ impl CompositionHost {
       composition_controller.add_CursorChanged(&cursor_handler, &mut cursor_changed_token)?;
     }
 
-    // Composition mode has no child WebView HWND to receive input. Subclass the
-    // Wry container and translate its mouse messages to WebView2 SendMouseInput.
-    let input_state = Box::into_raw(Box::new(CompositionInputState {
+    // Register the shared rendering surface before publishing the raw input-state
+    // pointer to Win32. If registration fails, roll back the WebView2 visual and
+    // cursor callback while all COM objects are still locally owned.
+    if let Err(error) = register_composition_surface(parent, &surface) {
+      unsafe {
+        let _ = composition_controller.remove_CursorChanged(cursor_changed_token);
+        let _ = composition_controller.SetRootVisualTarget(None::<&IUnknown>);
+        let _ = device.Commit();
+      }
+      return Err(error);
+    }
+
+    // Keep ownership in a Box until SetWindowSubclass succeeds. This avoids leaking
+    // the callback state if Win32 rejects the subclass installation.
+    let mut input_state = Box::new(CompositionInputState {
       controller: controller.clone(),
       composition_controller: composition_controller.clone(),
       environment: environment.clone(),
@@ -419,27 +431,27 @@ impl CompositionHost {
       dcomp_device: device.clone(),
       video_visual: video_visual.clone(),
       video_visual3,
-    }));
-    register_composition_surface(parent, &surface)?;
+    });
+    let input_state_ptr = (&mut *input_state) as *mut CompositionInputState;
     if !unsafe {
       SetWindowSubclass(
         hwnd,
         Some(Self::input_subclass_proc),
         COMPOSITION_INPUT_SUBCLASS_ID as _,
-        input_state as usize,
+        input_state_ptr as usize,
       )
     }
     .as_bool()
     {
       unsafe {
-        drop(Box::from_raw(input_state));
         unregister_composition_surface(parent.0 as isize);
         let _ = composition_controller.remove_CursorChanged(cursor_changed_token);
+        let _ = composition_controller.SetRootVisualTarget(None::<&IUnknown>);
+        let _ = device.Commit();
       }
-      return Err(
-        windows::core::Error::new(E_FAIL, "SetWindowSubclass failed").into(),
-      );
+      return Err(windows::core::Error::new(E_FAIL, "SetWindowSubclass failed").into());
     }
+    let input_state = Box::into_raw(input_state);
 
     Ok(Self {
       controller,

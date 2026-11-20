@@ -193,3 +193,17 @@ The existing Windows-targeted Rust test mpv_osc_script_options_are_valid now als
 This exercises the libmpv D3D11 backend at runtime, the texture/backbuffer contract, the composition swap-chain creation, and DXGI presentation. The Windows job runs it through the existing single targeted test step; no workflow or duplicate test step was added.
 
 **What it does not prove:** when WARP is selected, this is software rasterization rather than the user's physical GPU. The test does not create the full WebView2/DirectComposition visual tree, prove alpha transparency or z-order, or simulate physical mouse/touch input. Those remain acceptance checks on a real Windows desktop. The standard player remains the default, and composition stays opt-in.
+
+
+## Revisão de ciclo de vida — após o build 609
+
+A composição WebView2/DirectComposition é selecionada nos builds Windows com a feature `mpv` antes da criação da janela Tauri. A variável `CINEHUB_DISABLE_WEBVIEW2_COMPOSITION=1` continua disponível para diagnóstico e rollback; quando definida, `main.rs` remove a flag de composição e o Wry usa o controller HWND convencional.
+
+A inicialização do host agora é transacional nas duas últimas etapas de publicação:
+
+- A superfície D3D11 compartilhada é registrada antes de o estado do callback Win32 ser convertido em ponteiro bruto.
+- Se o registro da superfície falhar, o listener `CursorChanged` é removido, `RootVisualTarget` é desconectado e a alteração é enviada com `Commit`.
+- O estado de entrada permanece sob propriedade de um `Box` até `SetWindowSubclass` confirmar sucesso. Se a instalação falhar, o `Box` é liberado automaticamente, a superfície é desregistrada, o callback é removido e o visual é desconectado.
+- Após a instalação bem-sucedida, o ponteiro bruto passa a ser propriedade do host e é liberado por `CompositionHost::shutdown`, antes do fechamento do controller comum.
+
+O caminho padrão HWND continua preservado para rollback. O smoke test de CI exercita libmpv/D3D11/DXGI, mas não simula perda real do dispositivo gráfico nem substitui a validação de transparência, escala DPI e interação física em hardware Windows. A recuperação automática após remoção do dispositivo D3D11 ainda é um item separado; uma falha de renderização encerra a reprodução em vez de reutilizar um contexto gráfico inválido.
