@@ -476,8 +476,14 @@ mod win {
             && !cutouts.iter().any(|cutout| {
                 local_x >= cutout.x
                     && local_y >= cutout.y
-                    && local_x < cutout.x.saturating_add(cutout.width as i32)
-                    && local_y < cutout.y.saturating_add(cutout.height as i32)
+                    && local_x
+                        < cutout
+                            .x
+                            .saturating_add(cutout.width.min(i32::MAX as u32) as i32)
+                    && local_y
+                        < cutout
+                            .y
+                            .saturating_add(cutout.height.min(i32::MAX as u32) as i32)
             })
     }
 
