@@ -177,6 +177,7 @@ async function checkWindowsNativeOverlayClose() {
   await page.waitForFunction(() => window.__calls.some((call) =>
     call.cmd === 'player_set_geometry' && Array.isArray(call.args?.cutouts) && call.args.cutouts.length === 0,
   ));
+  await page.waitForTimeout(220);
   const hiddenControls = await page.evaluate(() => ({
     visibility: getComputedStyle(document.querySelector('#native-controls')).visibility,
     geometry: window.__calls.filter((call) => call.cmd === 'player_set_geometry').at(-1)?.args,
