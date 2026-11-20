@@ -151,6 +151,18 @@ pub fn player_close() {
 }
 
 #[tauri::command]
+pub fn player_set_fullscreen(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    use tauri::Manager;
+
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "a janela principal do CineHub não está disponível".to_string())?;
+    window
+        .set_fullscreen(enabled)
+        .map_err(|error| format!("não consegui alterar a tela cheia: {error}"))
+}
+
+#[tauri::command]
 pub fn player_control(action: String, value: Option<f64>) -> Result<(), String> {
     let control = parse_player_control(&action, value)?;
     let sender = PLAYER_CONTROL_SENDER
