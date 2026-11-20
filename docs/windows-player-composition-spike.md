@@ -207,3 +207,19 @@ A inicialização do host agora é transacional nas duas últimas etapas de publ
 - Após a instalação bem-sucedida, o ponteiro bruto passa a ser propriedade do host e é liberado por `CompositionHost::shutdown`, antes do fechamento do controller comum.
 
 O caminho padrão HWND continua preservado para rollback. O smoke test de CI exercita libmpv/D3D11/DXGI, mas não simula perda real do dispositivo gráfico nem substitui a validação de transparência, escala DPI e interação física em hardware Windows. A recuperação automática após remoção do dispositivo D3D11 ainda é um item separado; uma falha de renderização encerra a reprodução em vez de reutilizar um contexto gráfico inválido.
+
+
+## Recuperação de perda do dispositivo D3D11 — 2026-11-20
+
+O caminho Windows agora reconhece a remoção/reset do dispositivo gráfico e tenta uma recuperação limitada, em vez de tratar todos os erros DXGI como falha genérica:
+
+- `ID3D11Device::GetDeviceRemovedReason` é consultado antes de liberar o dispositivo antigo. Os HRESULTs `DXGI_ERROR_DEVICE_REMOVED`, `DXGI_ERROR_DEVICE_HUNG`, `DXGI_ERROR_DEVICE_RESET` e `DXGI_ERROR_DRIVER_INTERNAL_ERROR` são identificados explicitamente.
+- A aquisição do backbuffer preserva os HRESULTs de `ResizeBuffers` e `GetBuffer`. Uma janela minimizada continua sendo tratada como ausência temporária de frame, mas uma falha real deixa de ser silenciosamente confundida com minimização.
+- Ao detectar device loss, o worker libera primeiro o `mpv_render_context` antigo. Só então envia uma mensagem síncrona para a thread que possui o HWND.
+- No thread da janela, o Wry cria um novo dispositivo D3D11, swap chain DXGI e árvore DirectComposition, reconecta `RootVisualTarget` do WebView2 e restaura a geometria atual do vídeo.
+- O worker obtém o novo dispositivo e cria outro render context libmpv sem descarregar o vídeo/áudio em andamento.
+- Há no máximo uma tentativa automática de recuperação por reprodução. Uma segunda perda, ou uma falha durante a reconstrução, encerra a reprodução com diagnóstico explícito em vez de reutilizar recursos inválidos.
+
+O teste Windows existente `mpv_osc_script_options_are_valid` agora também verifica os HRESULTs classificados como device loss; a suíte Python existente verifica o contrato entre a mensagem Win32, o host Wry e o loop do player. O `.github/workflows/build.yml` continua sendo o único workflow e o teste de integração Windows continua executando uma única vez.
+
+**Limite da validação:** o CI compila a rotina de recuperação, testa a classificação dos HRESULTs e executa o smoke test nativo de renderização/`Present`. Ele não simula uma remoção real do adaptador durante reprodução nem valida visualmente a troca da árvore DirectComposition em uma GPU física. Esse cenário precisa de aceitação em Windows real; a tentativa única e o encerramento controlado permanecem como proteção contra loop/inconsistência caso o driver continue falhando.
