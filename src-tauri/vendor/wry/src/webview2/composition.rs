@@ -150,7 +150,7 @@ fn create_composition_d3d11_device() -> Result<ID3D11Device> {
   // and DirectComposition visual updates originate on the WebView thread.
   let multithread = device.cast::<ID3D11Multithread>()?;
   unsafe {
-    multithread.SetMultithreadProtected(true);
+    let _ = multithread.SetMultithreadProtected(true);
   }
   Ok(device)
 }
