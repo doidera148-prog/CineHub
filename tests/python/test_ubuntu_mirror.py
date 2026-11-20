@@ -10,7 +10,7 @@ SCRIPT = ROOT / ".github" / "scripts" / "select-ubuntu-mirror.sh"
 
 
 class UbuntuMirrorSelectionTests(unittest.TestCase):
-    def test_prefers_fastest_mirror_and_configures_automatic_fallback(self):
+    def test_selects_lowest_latency_global_mirror_and_configures_fallback(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             sources = root / "sources"
@@ -29,11 +29,17 @@ class UbuntuMirrorSelectionTests(unittest.TestCase):
             fake_curl.write_text(
                 "#!/usr/bin/env bash\n"
                 'url="${!#}"\n'
+                'if [[ "$url" == "https://mirrors.ubuntu.com/mirrors.txt" ]]; then\n'
+                '  printf "%s\\n" "https://mirror.example.net/ubuntu" "https://fast.example.org/ubuntu"\n'
+                '  exit 0\n'
+                "fi\n"
                 'case "$url" in\n'
-                '  https://ubuntu.c3sl.ufpr.br/*) echo 0.30 ;;\n'
-                '  https://mirror.ufscar.br/*) echo 0.10 ;;\n'
-                '  https://br.archive.ubuntu.com/*) echo 0.20 ;;\n'
+                '  https://fast.example.org/*) echo 0.03 ;;\n'
+                '  https://mirror.example.net/*) echo 0.08 ;;\n'
                 '  https://archive.ubuntu.com/*) echo 0.40 ;;\n'
+                '  https://us.archive.ubuntu.com/*) echo 0.50 ;;\n'
+                '  https://ca.archive.ubuntu.com/*) echo 0.60 ;;\n'
+                '  https://uk.archive.ubuntu.com/*) echo 0.70 ;;\n'
                 '  *) exit 1 ;;\n'
                 "esac\n",
                 encoding="utf-8",
@@ -60,18 +66,15 @@ class UbuntuMirrorSelectionTests(unittest.TestCase):
             self.assertIn(f"mirror+file:{sources}/ubuntu-mirrors.txt", updated)
             self.assertIn("http://security.ubuntu.com/ubuntu", updated)
             self.assertIn(
-                "https://mirror.ufscar.br/ubuntu\tpriority:1", mirror_list
+                "https://fast.example.org/ubuntu\tpriority:1", mirror_list
             )
             self.assertIn(
-                "https://ubuntu.c3sl.ufpr.br/ubuntu\tpriority:2", mirror_list
-            )
-            self.assertIn(
-                "https://br.archive.ubuntu.com/ubuntu\tpriority:2", mirror_list
+                "https://mirror.example.net/ubuntu\tpriority:2", mirror_list
             )
             self.assertIn(
                 "https://archive.ubuntu.com/ubuntu\tpriority:2", mirror_list
             )
-            self.assertIn("0.10s", result.stdout)
+            self.assertIn("0.03s", result.stdout)
             self.assertIn("failover", result.stdout)
 
     def test_keeps_existing_sources_when_no_mirror_responds(self):
