@@ -407,7 +407,9 @@ mod win {
         ) -> Bool;
         fn RemoveWindowSubclass(
             hwnd: Hwnd,
-            callback: Option<unsafe extern "system" fn(Hwnd, u32, usize, isize, usize, usize) -> isize>,
+            callback: Option<
+                unsafe extern "system" fn(Hwnd, u32, usize, isize, usize, usize) -> isize,
+            >,
             subclass_id: usize,
         ) -> Bool;
         fn DefSubclassProc(hwnd: Hwnd, msg: u32, wparam: usize, lparam: isize) -> isize;
