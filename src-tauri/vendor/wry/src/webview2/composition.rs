@@ -509,7 +509,8 @@ impl CompositionHost {
   fn recreate_device(hwnd: HWND, state: &mut CompositionInputState) -> windows::core::Result<()> {
     // The render thread has already dropped libmpv's context before requesting this
     // operation. All DirectComposition and HWND work stays on the host's UI thread.
-    let d3d_device = create_composition_d3d11_device()?;
+    let d3d_device = create_composition_d3d11_device()
+      .map_err(|error| windows::core::Error::new(E_FAIL, error.to_string()))?;
     let dxgi_device = d3d_device.cast::<IDXGIDevice>()?;
     let adapter = unsafe { dxgi_device.GetAdapter()? };
     let factory: IDXGIFactory2 = unsafe { adapter.GetParent()? };
