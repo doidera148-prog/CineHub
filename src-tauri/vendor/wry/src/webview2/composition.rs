@@ -22,17 +22,24 @@ use windows::{
         DCompositionCreateDevice2, IDCompositionDesktopDevice, IDCompositionTarget,
         IDCompositionVisual,
       },
-      Gdi::ScreenToClient,
+      Gdi::{ClientToScreen, ScreenToClient},
     },
     UI::{
-      Input::KeyboardAndMouse::{
-        GetCapture, ReleaseCapture, SetCapture, TrackMouseEvent, TRACKMOUSEEVENT, TME_LEAVE,
+      Input::{
+        KeyboardAndMouse::{
+          GetCapture, ReleaseCapture, SetCapture, TrackMouseEvent, TRACKMOUSEEVENT, TME_LEAVE,
+        },
+        Pointer::{
+          GetPointerDeviceRects, GetPointerInfo, GetPointerPenInfo, GetPointerTouchInfo,
+          POINTER_INFO, POINTER_PEN_INFO, POINTER_TOUCH_INFO,
+        },
       },
       Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
       WindowsAndMessaging::{
         GetClientRect, SetCursor, WM_CAPTURECHANGED, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
-        WM_LBUTTONUP, WM_MBUTTONDBLCLK, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL,
-        WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN,
+        PT_PEN, PT_TOUCH, WM_LBUTTONUP, WM_MBUTTONDBLCLK, WM_MBUTTONDOWN, WM_MBUTTONUP,
+        WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_POINTERDOWN, WM_POINTERENTER,
+        WM_POINTERLEAVE, WM_POINTERUP, WM_POINTERUPDATE, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN,
         WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_XBUTTONDBLCLK, WM_XBUTTONDOWN, WM_XBUTTONUP,
         SIZE_MINIMIZED,
       },
@@ -52,6 +59,7 @@ const WM_MOUSELEAVE: u32 = 0x02A3;
 struct CompositionInputState {
   controller: ICoreWebView2Controller,
   composition_controller: ICoreWebView2CompositionController,
+  environment: ICoreWebView2Environment3,
   mouse_tracking: bool,
   captured: bool,
 }
@@ -126,6 +134,7 @@ impl CompositionHost {
     let input_state = Box::into_raw(Box::new(CompositionInputState {
       controller: controller.clone(),
       composition_controller: composition_controller.clone(),
+      environment: environment.clone(),
       mouse_tracking: false,
       captured: false,
     }));
@@ -188,6 +197,14 @@ impl CompositionHost {
         }
         WM_CAPTURECHANGED => {
           state.captured = false;
+        }
+        WM_POINTERDOWN | WM_POINTERUPDATE | WM_POINTERUP | WM_POINTERENTER | WM_POINTERLEAVE => {
+          let pointer_id = (wparam.0 & 0xffff) as u32;
+          if Self::send_pointer_message(hwnd, msg, pointer_id, state) {
+            // Consuming recognized touch/pen pointer messages prevents Windows from
+            // synthesizing a second mouse stream for the same physical contact.
+            return windows::Win32::Foundation::LRESULT(0);
+          }
         }
         WM_MOUSEMOVE => {
           if !state.mouse_tracking {
@@ -299,6 +316,212 @@ impl CompositionHost {
         .composition_controller
         .SendMouseInput(event_kind, virtual_keys, mouse_data, point)
     };
+  }
+
+  /// Convert a screen-space Win32 rectangle into WebView-relative physical pixels.
+  unsafe fn screen_rect_to_client(hwnd: HWND, rect: RECT) -> Option<RECT> {
+    let mut top_left = POINT {
+      x: rect.left,
+      y: rect.top,
+    };
+    let mut bottom_right = POINT {
+      x: rect.right,
+      y: rect.bottom,
+    };
+    if unsafe { ScreenToClient(hwnd, &mut top_left) }.is_err()
+      || unsafe { ScreenToClient(hwnd, &mut bottom_right) }.is_err()
+    {
+      return None;
+    }
+    Some(RECT {
+      left: top_left.x,
+      top: top_left.y,
+      right: bottom_right.x,
+      bottom: bottom_right.y,
+    })
+  }
+
+  /// Map the host window's screen origin into the pointer device's HIMETRIC space.
+  /// The device rectangle is retained as the digitizer's calibration range; only
+  /// screen-relative pointer locations are translated into WebView-local coordinates.
+  fn himetric_client_origin(
+    pointer_device_rect: RECT,
+    display_rect: RECT,
+    client_origin_screen: POINT,
+  ) -> Option<POINT> {
+    let display_width = i64::from(display_rect.right) - i64::from(display_rect.left);
+    let display_height = i64::from(display_rect.bottom) - i64::from(display_rect.top);
+    let device_width = i64::from(pointer_device_rect.right) - i64::from(pointer_device_rect.left);
+    let device_height = i64::from(pointer_device_rect.bottom) - i64::from(pointer_device_rect.top);
+    if display_width <= 0 || display_height <= 0 || device_width <= 0 || device_height <= 0 {
+      return None;
+    }
+
+    let x = i64::from(pointer_device_rect.left)
+      + (i64::from(client_origin_screen.x) - i64::from(display_rect.left)) * device_width
+        / display_width;
+    let y = i64::from(pointer_device_rect.top)
+      + (i64::from(client_origin_screen.y) - i64::from(display_rect.top)) * device_height
+        / display_height;
+    Some(POINT {
+      x: i32::try_from(x).ok()?,
+      y: i32::try_from(y).ok()?,
+    })
+  }
+
+  unsafe fn send_pointer_message(
+    hwnd: HWND,
+    msg: u32,
+    pointer_id: u32,
+    state: &CompositionInputState,
+  ) -> bool {
+    let event_kind = match msg {
+      WM_POINTERDOWN => COREWEBVIEW2_POINTER_EVENT_KIND_DOWN,
+      WM_POINTERUPDATE => COREWEBVIEW2_POINTER_EVENT_KIND_UPDATE,
+      WM_POINTERUP => COREWEBVIEW2_POINTER_EVENT_KIND_UP,
+      WM_POINTERENTER => COREWEBVIEW2_POINTER_EVENT_KIND_ENTER,
+      WM_POINTERLEAVE => COREWEBVIEW2_POINTER_EVENT_KIND_LEAVE,
+      _ => return false,
+    };
+
+    let mut native_info = POINTER_INFO::default();
+    if unsafe { GetPointerInfo(pointer_id, &mut native_info) }.is_err()
+      || (native_info.pointerType != PT_TOUCH && native_info.pointerType != PT_PEN)
+    {
+      // WebView2 only accepts PT_TOUCH and PT_PEN. Leave mouse/touchpad and
+      // unavailable pointer data to the normal Win32 procedure.
+      return false;
+    }
+
+    let mut pointer_device_rect = RECT::default();
+    let mut display_rect = RECT::default();
+    if unsafe {
+      GetPointerDeviceRects(
+        native_info.sourceDevice,
+        &mut pointer_device_rect,
+        &mut display_rect,
+      )
+    }
+    .is_err()
+    {
+      return false;
+    }
+
+    let Some(display_rect_client) =
+      (unsafe { Self::screen_rect_to_client(hwnd, display_rect) })
+    else {
+      return false;
+    };
+    let mut client_origin_screen = POINT::default();
+    if unsafe { ClientToScreen(hwnd, &mut client_origin_screen) }.is_err() {
+      return false;
+    }
+    let Some(himetric_origin) =
+      Self::himetric_client_origin(pointer_device_rect, display_rect, client_origin_screen)
+    else {
+      return false;
+    };
+
+    let to_client_himetric = |point: POINT| -> Option<POINT> {
+      Some(POINT {
+        x: i32::try_from(i64::from(point.x) - i64::from(himetric_origin.x)).ok()?,
+        y: i32::try_from(i64::from(point.y) - i64::from(himetric_origin.y)).ok()?,
+      })
+    };
+    let Some(himetric_location) = to_client_himetric(native_info.ptHimetricLocation) else {
+      return false;
+    };
+    let Some(himetric_location_raw) = to_client_himetric(native_info.ptHimetricLocationRaw) else {
+      return false;
+    };
+    let Some(pixel_location) =
+      (unsafe { Self::screen_rect_to_client(hwnd, RECT {
+        left: native_info.ptPixelLocation.x,
+        top: native_info.ptPixelLocation.y,
+        right: native_info.ptPixelLocation.x,
+        bottom: native_info.ptPixelLocation.y,
+      }) })
+    else {
+      return false;
+    };
+    let Some(pixel_location_raw) =
+      (unsafe { Self::screen_rect_to_client(hwnd, RECT {
+        left: native_info.ptPixelLocationRaw.x,
+        top: native_info.ptPixelLocationRaw.y,
+        right: native_info.ptPixelLocationRaw.x,
+        bottom: native_info.ptPixelLocationRaw.y,
+      }) })
+    else {
+      return false;
+    };
+
+    let pointer_info = match unsafe { state.environment.CreateCoreWebView2PointerInfo() } {
+      Ok(pointer_info) => pointer_info,
+      Err(_) => return false,
+    };
+
+    let populate_result: windows::core::Result<()> = (|| unsafe {
+      pointer_info.SetPointerKind(native_info.pointerType.0 as u32)?;
+      pointer_info.SetPointerId(native_info.pointerId)?;
+      pointer_info.SetFrameId(native_info.frameId)?;
+      pointer_info.SetPointerFlags(native_info.pointerFlags.0)?;
+      pointer_info.SetPointerDeviceRect(pointer_device_rect)?;
+      pointer_info.SetDisplayRect(display_rect_client)?;
+      pointer_info.SetPixelLocation(POINT {
+        x: pixel_location.left,
+        y: pixel_location.top,
+      })?;
+      pointer_info.SetPixelLocationRaw(POINT {
+        x: pixel_location_raw.left,
+        y: pixel_location_raw.top,
+      })?;
+      pointer_info.SetHimetricLocation(himetric_location)?;
+      pointer_info.SetHimetricLocationRaw(himetric_location_raw)?;
+      pointer_info.SetTime(native_info.dwTime)?;
+      pointer_info.SetHistoryCount(native_info.historyCount)?;
+      pointer_info.SetInputData(native_info.InputData)?;
+      pointer_info.SetKeyStates(native_info.dwKeyStates)?;
+      pointer_info.SetPerformanceCount(native_info.PerformanceCount)?;
+      pointer_info.SetButtonChangeKind(native_info.ButtonChangeType.0)?;
+
+      if native_info.pointerType == PT_TOUCH {
+        let mut touch_info = POINTER_TOUCH_INFO::default();
+        GetPointerTouchInfo(pointer_id, &mut touch_info)?;
+        let Some(contact) = Self::screen_rect_to_client(hwnd, touch_info.rcContact) else {
+          return Err(windows::core::Error::new(E_FAIL, "Touch contact conversion failed"));
+        };
+        let Some(contact_raw) = Self::screen_rect_to_client(hwnd, touch_info.rcContactRaw) else {
+          return Err(windows::core::Error::new(E_FAIL, "Raw touch contact conversion failed"));
+        };
+        pointer_info.SetTouchFlags(touch_info.touchFlags)?;
+        pointer_info.SetTouchMask(touch_info.touchMask)?;
+        pointer_info.SetTouchContact(contact)?;
+        pointer_info.SetTouchContactRaw(contact_raw)?;
+        pointer_info.SetTouchOrientation(touch_info.orientation)?;
+        pointer_info.SetTouchPressure(touch_info.pressure)?;
+      } else {
+        let mut pen_info = POINTER_PEN_INFO::default();
+        GetPointerPenInfo(pointer_id, &mut pen_info)?;
+        pointer_info.SetPenFlags(pen_info.penFlags)?;
+        pointer_info.SetPenMask(pen_info.penMask)?;
+        pointer_info.SetPenPressure(pen_info.pressure)?;
+        pointer_info.SetPenRotation(pen_info.rotation)?;
+        pointer_info.SetPenTiltX(pen_info.tiltX)?;
+        pointer_info.SetPenTiltY(pen_info.tiltY)?;
+      }
+
+      Ok(())
+    })();
+    if populate_result.is_err() {
+      return false;
+    }
+
+    unsafe {
+      state
+        .composition_controller
+        .SendPointerInput(event_kind, &pointer_info)
+        .is_ok()
+    }
   }
 
   /// Detach callbacks and the HWND subclass before the common controller is closed.
