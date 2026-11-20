@@ -8,7 +8,16 @@
 //! fornece ao libmpv o mesmo dispositivo e os backbuffers apresentados pelo host.
 //! O caminho experimental permanece opt-in; o player padrão usa a janela nativa.
 
-use std::{ffi::c_void, marker::PhantomData, mem, ptr::NonNull};
+use std::{
+    ffi::c_void,
+    marker::PhantomData,
+    mem,
+    ptr::NonNull,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
 use libmpv2::Mpv;
 use windows::{
@@ -68,16 +77,30 @@ extern "C" {
         params: *mut MpvRenderParam,
     ) -> i32;
     fn mpv_render_context_report_swap(context: *mut MpvRenderContextOpaque);
+    fn mpv_render_context_set_update_callback(
+        context: *mut MpvRenderContextOpaque,
+        callback: Option<unsafe extern "C" fn(*mut c_void)>,
+        callback_ctx: *mut c_void,
+    );
     fn mpv_render_context_free(context: *mut MpvRenderContextOpaque);
 }
 
 /// D3D11 render context; must be dropped before its associated Mpv.
 ///
 /// libmpv takes its own COM reference to the device during creation. The caller
-/// must keep each target texture alive for the duration of render().
+/// must keep each target texture alive for the duration of render(). The update
+/// callback only sets this atomic flag; all mpv_render_* calls stay on the render
+/// thread, never inside libmpv's callback thread.
 pub(super) struct D3d11RenderContext<'a> {
     context: NonNull<MpvRenderContextOpaque>,
+    frame_pending: Arc<AtomicBool>,
     _mpv: PhantomData<&'a Mpv>,
+}
+
+unsafe extern "C" fn notify_render_update(callback_ctx: *mut c_void) {
+    if let Some(pending) = (callback_ctx as *const AtomicBool).as_ref() {
+        pending.store(true, Ordering::Release);
+    }
 }
 
 impl<'a> D3d11RenderContext<'a> {
@@ -122,8 +145,19 @@ impl<'a> D3d11RenderContext<'a> {
 
         let context = NonNull::new(context)
             .ok_or_else(|| "libmpv retornou um render context D3D11 nulo".to_string())?;
+        let frame_pending = Arc::new(AtomicBool::new(false));
+        // SAFETY: frame_pending is owned by this wrapper and remains alive until
+        // after the callback is detached and mpv_render_context_free returns.
+        unsafe {
+            mpv_render_context_set_update_callback(
+                context.as_ptr(),
+                Some(notify_render_update),
+                Arc::as_ptr(&frame_pending) as *mut c_void,
+            );
+        }
         Ok(Self {
             context,
+            frame_pending,
             _mpv: PhantomData,
         })
     }
@@ -166,15 +200,23 @@ impl<'a> D3d11RenderContext<'a> {
     }
 
     pub(super) fn frame_is_pending(&self) -> bool {
+        if !self.frame_pending.swap(false, Ordering::AcqRel) {
+            return false;
+        }
         self.update() & MPV_RENDER_UPDATE_FRAME != 0
     }
 }
 
 impl Drop for D3d11RenderContext<'_> {
     fn drop(&mut self) {
+        // Detach the callback first. Its context pointer refers to frame_pending,
+        // which remains alive until this Drop implementation has finished.
         // SAFETY: this wrapper uniquely owns the native context and drops
         // before Mpv due to the lifetime marker.
-        unsafe { mpv_render_context_free(self.context.as_ptr()) };
+        unsafe {
+            mpv_render_context_set_update_callback(self.context.as_ptr(), None, std::ptr::null_mut());
+            mpv_render_context_free(self.context.as_ptr());
+        }
     }
 }
 
@@ -223,6 +265,101 @@ pub(super) fn render_to_host(
         ));
     }
     Ok(result == 0)
+}
+
+/// Creates an actual render-target texture for the Windows CI smoke test.
+///
+/// Hardware is preferred; WARP is a deterministic software fallback for hosted
+/// runners without a usable D3D11 adapter. This helper is never used by playback.
+#[cfg(test)]
+pub(super) fn create_smoke_render_target(
+) -> Result<(ID3D11Device, ID3D11Texture2D, &'static str), String> {
+    use windows::Win32::{
+        Foundation::HMODULE,
+        Graphics::{
+            Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP},
+            Direct3D11::{
+                D3D11CreateDevice, D3D11_BIND_RENDER_TARGET, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS,
+                D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, ID3D11Multithread,
+            },
+            Dxgi::IDXGIAdapter,
+            Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC},
+        },
+    };
+
+    let flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT
+        | D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS;
+    let mut failures = Vec::new();
+
+    for (driver, label) in [
+        (D3D_DRIVER_TYPE_HARDWARE, "hardware"),
+        (D3D_DRIVER_TYPE_WARP, "WARP"),
+    ] {
+        let mut device = None;
+        if let Err(error) = unsafe {
+            D3D11CreateDevice(
+                None::<&IDXGIAdapter>,
+                driver,
+                HMODULE::default(),
+                flags,
+                None,
+                D3D11_SDK_VERSION,
+                Some(&mut device),
+                None,
+                None,
+            )
+        } {
+            failures.push(format!("{label}: D3D11CreateDevice: {error}"));
+            continue;
+        }
+
+        let Some(device) = device else {
+            failures.push(format!("{label}: D3D11CreateDevice retornou dispositivo nulo"));
+            continue;
+        };
+
+        let multithread = match device.cast::<ID3D11Multithread>() {
+            Ok(multithread) => multithread,
+            Err(error) => {
+                failures.push(format!("{label}: ID3D11Multithread: {error}"));
+                continue;
+            }
+        };
+        unsafe { multithread.SetMultithreadProtected(true) };
+
+        let desc = D3D11_TEXTURE2D_DESC {
+            Width: 64,
+            Height: 64,
+            MipLevels: 1,
+            ArraySize: 1,
+            Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Usage: D3D11_USAGE_DEFAULT,
+            BindFlags: D3D11_BIND_RENDER_TARGET.0,
+            CPUAccessFlags: 0,
+            MiscFlags: 0,
+        };
+        let mut texture = None;
+        if let Err(error) = unsafe { device.CreateTexture2D(&desc, None, Some(&mut texture)) } {
+            failures.push(format!("{label}: CreateTexture2D: {error}"));
+            continue;
+        }
+        let Some(texture) = texture else {
+            failures.push(format!("{label}: CreateTexture2D retornou textura nula"));
+            continue;
+        };
+
+        return Ok((device, texture, label));
+    }
+
+    Err(format!(
+        "não foi possível criar dispositivo/textura D3D11 para o smoke test ({})",
+        failures.join("; ")
+    ))
 }
 
 /// Checks the C ABI layout used by libmpv's render.h/render_d3d11.h headers.
