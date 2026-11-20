@@ -437,7 +437,7 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("super::mpv_d3d11::render_to_host(parent, renderer)", player)
         self.assertIn('init.set_option("vo", "libmpv")?', player)
         self.assertIn('command("loadfile", &[frame_path_string.as_str(), "replace"])', player)
-        self.assertIn('.render(&texture)', player)
+        self.assertIn('.render_to_smoke_swap_chain(&swap_chain)', player)
         self.assertIn("rendered_frame", player)
         self.assertEqual(
             job_block(self.workflow, "desktop").count(
