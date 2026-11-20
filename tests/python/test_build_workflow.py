@@ -274,6 +274,11 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
             ROOT / "src-tauri/vendor/wry/src/webview2/composition.rs"
         ).read_text(encoding="utf-8")
         self.assertIn("CINEHUB_WEBVIEW2_COMPOSITION_POC", wry)
+        self.assertIn(
+            "style: CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS,",
+            wry,
+            "O host WRY_WEBVIEW precisa habilitar WM_*DBLCLK para encaminhar duplo clique",
+        )
         self.assertIn("Some(host) => host.controller.clone()", wry)
         self.assertIn("None => Self::create_controller(", wry)
         self.assertIn("host.shutdown();", wry)
