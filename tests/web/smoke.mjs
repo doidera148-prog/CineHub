@@ -190,6 +190,7 @@ async function checkWindowsNativeOverlayClose() {
     const geometry = window.__calls.filter((call) => call.cmd === 'player_set_geometry').at(-1)?.args;
     return Array.isArray(geometry?.cutouts) && geometry.cutouts.length > 0;
   });
+  await page.waitForTimeout(220);
   if (await page.locator('#native-controls').isHidden()) failures.push('[windows-player-auto-hide] barra não reapareceu ao mover o mouse');
 
   await page.locator('#close-player').click();
