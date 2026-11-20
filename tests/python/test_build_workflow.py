@@ -277,7 +277,8 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("Some(host) => host.controller.clone()", wry)
         self.assertIn("None => Self::create_controller(", wry)
         self.assertIn("CreateCoreWebView2CompositionController", composition)
-        self.assertIn("DCompositionCreateDevice2", composition)
+        self.assertIn("CreateCoreWebView2CompositionControllerCompletedHandler", composition)
+        self.assertIn("DCompositionCreateDevice2::<_, IDCompositionDesktopDevice>", composition)
         self.assertIn("SetRootVisualTarget", composition)
         # Input forwarding is a separate, not-yet-implemented POC gate.
         self.assertNotIn("SendMouseInput", composition)
