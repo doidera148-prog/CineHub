@@ -1697,6 +1697,95 @@ function describeError(e) {
 // Motivo da última falha do player nativo (mostrado se o player web também não tocar).
 let nativeFailure = null;
 let nativePlayerActive = false;
+let nativePlayerCompositionActive = false;
+let nativeStateUnlisten = null;
+let nativeSeeking = false;
+let nativePlayerState = null;
+const nativeControls = $('#native-controls');
+const nativeSeek = $('#native-seek');
+
+function formatNativeTime(seconds) {
+  const safe = Math.max(0, Math.floor(Number(seconds) || 0));
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const remainder = safe % 60;
+  return hours
+    ? `${hours}:${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`
+    : `${minutes}:${String(remainder).padStart(2, '0')}`;
+}
+
+function updateNativePlayerState(state) {
+  if (!state || !nativePlayerCompositionActive) return;
+  const position = Math.max(0, Number(state.positionMs) / 1000 || 0);
+  const duration = Math.max(0, Number(state.durationMs) / 1000 || 0);
+  nativePlayerState = { ...state, positionSeconds: position, durationSeconds: duration };
+  nativeSeek.max = String(Math.max(1, duration));
+  if (!nativeSeeking) nativeSeek.value = String(Math.min(position, duration || position));
+  $('#native-current-time').textContent = formatNativeTime(position);
+  $('#native-duration').textContent = formatNativeTime(duration);
+  const paused = state.paused === true;
+  const playButton = $('#native-play-pause');
+  playButton.textContent = paused ? 'Reproduzir' : 'Pausar';
+  playButton.setAttribute('aria-label', paused ? 'Reproduzir' : 'Pausar');
+  playButton.title = paused ? 'Reproduzir' : 'Pausar';
+  const muted = state.muted === true;
+  const muteButton = $('#native-mute');
+  muteButton.textContent = muted ? 'Ativar som' : 'Silenciar';
+  muteButton.setAttribute('aria-label', muted ? 'Ativar som' : 'Silenciar');
+  muteButton.title = muted ? 'Ativar som' : 'Silenciar';
+  $('#native-volume').value = String(Math.max(0, Math.min(100, Number(state.volume) || 0)));
+  saveProgress(false, { t: position, duration });
+  updateSkipAt(position);
+}
+
+async function listenNativePlayerState() {
+  const listen = window.__TAURI__?.event?.listen;
+  if (typeof listen !== 'function') return;
+  try {
+    nativeStateUnlisten = await listen('player-state', (event) => {
+      updateNativePlayerState(event?.payload || event);
+    });
+  } catch (error) {
+    logEvent('WARN', `não consegui receber estado do libmpv: ${describeError(error)}`);
+  }
+}
+
+function stopNativePlayerStateListener() {
+  if (typeof nativeStateUnlisten === 'function') {
+    nativeStateUnlisten();
+    nativeStateUnlisten = null;
+  }
+  nativePlayerState = null;
+  nativeSeeking = false;
+}
+
+async function sendNativePlayerControl(action, value) {
+  if (!nativePlayerCompositionActive) return;
+  const args = { action };
+  if (value !== undefined) args.value = value;
+  try {
+    await call('player_control', args);
+  } catch (error) {
+    logEvent('WARN', `comando do player falhou (${action}): ${describeError(error)}`);
+    toast(`Não consegui controlar a reprodução: ${describeError(error)}`);
+  }
+}
+
+$('#native-rewind').onclick = () => sendNativePlayerControl('seek-relative', -10);
+$('#native-forward').onclick = () => sendNativePlayerControl('seek-relative', 10);
+$('#native-play-pause').onclick = () => sendNativePlayerControl('toggle-pause');
+$('#native-mute').onclick = () => sendNativePlayerControl('toggle-mute');
+nativeSeek.addEventListener('input', () => {
+  nativeSeeking = true;
+  $('#native-current-time').textContent = formatNativeTime(Number(nativeSeek.value));
+});
+nativeSeek.addEventListener('change', () => {
+  nativeSeeking = false;
+  sendNativePlayerControl('seek-absolute', Number(nativeSeek.value));
+});
+$('#native-volume').addEventListener('change', (event) => {
+  sendNativePlayerControl('set-volume', Number(event.currentTarget.value));
+});
 
 async function playNative(stream, label, id, meta, subs, segments = []) {
   const torrentToken = stream?.torrentToken || null;
@@ -1706,6 +1795,16 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
   const compositionMode = IS_WINDOWS
     ? await call('player_composition_enabled').catch(() => false)
     : false;
+  nativeControls.hidden = !compositionMode;
+  nativePlayerCompositionActive = compositionMode;
+  if (compositionMode) {
+    nativeSeek.value = '0';
+    $('#native-current-time').textContent = '0:00';
+    $('#native-duration').textContent = '0:00';
+    $('#native-play-pause').textContent = 'Pausar';
+    $('#native-mute').textContent = 'Silenciar';
+    await listenNativePlayerState();
+  }
   current = { id, label, meta, src: stream.url, mime: '' };
   document.title = `${label} · CineHub`;
   try {
@@ -1755,6 +1854,9 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
       document.body.classList.remove('native-composition-mode');
       closePlayer(false, false);
     }
+    nativeControls.hidden = true;
+    nativePlayerCompositionActive = false;
+    stopNativePlayerStateListener();
     current = null;
     document.title = 'CineHub';
     // O comando nativo só resolve quando o diálogo do player é fechado.
@@ -1844,7 +1946,7 @@ function nativePlayerGeometry() {
   const bounds = box.getBoundingClientRect();
   const scale = window.devicePixelRatio || 1;
   if (bounds.width < 16 || bounds.height < 16) return null;
-  const cutouts = ['#close-player', '#player-title', '#next-ep', '#skip-seg', '#pip']
+  const cutouts = ['#close-player', '#player-title', '#next-ep', '#skip-seg', '#pip', '#native-controls']
     .map((selector) => document.querySelector(selector))
     .filter((element) => element && !element.hidden && element.getClientRects().length)
     .map((element) => {
@@ -1901,7 +2003,7 @@ if (typeof ResizeObserver !== 'undefined') {
   const nativePlayerObserver = new ResizeObserver(() => {
     if (nativePlayerActive) void syncNativePlayerGeometry();
   });
-  for (const element of [document.querySelector('#player .player-box'), $('#close-player'), $('#player-title'), $('#next-ep'), $('#skip-seg'), $('#pip')]) {
+  for (const element of [document.querySelector('#player .player-box'), $('#close-player'), $('#player-title'), $('#next-ep'), $('#skip-seg'), $('#pip'), nativeControls]) {
     if (element) nativePlayerObserver.observe(element);
   }
 }
@@ -1989,8 +2091,8 @@ function hideSkip() {
   skipEnd = null;
   skipBtn.classList.add('hidden');
 }
-function updateSkip() {
-  const seg = activeSegment(skipSegs, vjsPlayer.currentTime());
+function updateSkipAt(position) {
+  const seg = activeSegment(skipSegs, position);
   const key = seg ? `${seg.type}:${seg.end}` : null;
   if (key === skipKey) return;
   skipKey = key;
@@ -2002,8 +2104,14 @@ function updateSkip() {
   skipBtn.textContent = `${SKIP_LABELS[seg.type] || 'Pular'} ▶`;
   skipBtn.classList.remove('hidden');
 }
+function updateSkip() {
+  updateSkipAt(vjsPlayer.currentTime());
+}
 skipBtn.onclick = () => {
-  if (skipEnd !== null) vjsPlayer.currentTime(skipEnd);
+  if (skipEnd !== null) {
+    if (nativePlayerCompositionActive) sendNativePlayerControl('seek-absolute', skipEnd);
+    else vjsPlayer.currentTime(skipEnd);
+  }
   hideSkip();
 };
 
@@ -2015,10 +2123,14 @@ document.addEventListener('keydown', (e) => {
     toast('0–9: pular para 0–90% do vídeo · ?: esta lista', 6000);
     return;
   }
-  const at = seekFraction(e.key, vjsPlayer.duration());
+  const duration = nativePlayerCompositionActive
+    ? (nativePlayerState?.durationSeconds || 0)
+    : vjsPlayer.duration();
+  const at = seekFraction(e.key, duration);
   if (at !== null) {
     e.preventDefault();
-    vjsPlayer.currentTime(at);
+    if (nativePlayerCompositionActive) sendNativePlayerControl('seek-absolute', at / 1000);
+    else vjsPlayer.currentTime(at);
   }
 });
 
