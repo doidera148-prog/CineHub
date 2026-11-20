@@ -22,7 +22,12 @@ use std::{
 use libmpv2::Mpv;
 use windows::{
     core::Interface,
-    Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11Texture2D},
+    Win32::{
+        Graphics::{
+            Direct3D11::{ID3D11Device, ID3D11Texture2D},
+            Dxgi::IDXGISwapChain1,
+        },
+    },
 };
 
 const MPV_RENDER_PARAM_INVALID: u32 = 0;
@@ -267,24 +272,30 @@ pub(super) fn render_to_host(
     Ok(result == 0)
 }
 
-/// Creates an actual render-target texture for the Windows CI smoke test.
+/// Creates the same kind of composition swap chain used by Wry for the Windows CI smoke test.
 ///
 /// Hardware is preferred; WARP is a deterministic software fallback for hosted
 /// runners without a usable D3D11 adapter. This helper is never used by playback.
 #[cfg(test)]
-pub(super) fn create_smoke_render_target(
-) -> Result<(ID3D11Device, ID3D11Texture2D, &'static str), String> {
+pub(super) fn create_smoke_swap_chain(
+) -> Result<(ID3D11Device, IDXGISwapChain1, &'static str), String> {
     use windows::Win32::{
         Foundation::HMODULE,
         Graphics::{
             Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP},
             Direct3D11::{
-                D3D11CreateDevice, D3D11_BIND_RENDER_TARGET, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                D3D11CreateDevice, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
                 D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS,
-                D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, ID3D11Multithread,
+                D3D11_SDK_VERSION, ID3D11Multithread,
             },
-            Dxgi::IDXGIAdapter,
-            Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC},
+            Dxgi::{
+                IDXGIAdapter, IDXGIDevice, IDXGIFactory2, IDXGIOutput, DXGI_SCALING_STRETCH,
+                DXGI_SWAP_CHAIN_FLAG, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
+                DXGI_USAGE_RENDER_TARGET_OUTPUT,
+            },
+            Dxgi::Common::{
+                DXGI_ALPHA_MODE_PREMULTIPLIED, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC,
+            },
         },
     };
 
@@ -328,38 +339,84 @@ pub(super) fn create_smoke_render_target(
         };
         unsafe { multithread.SetMultithreadProtected(true) };
 
-        let desc = D3D11_TEXTURE2D_DESC {
+        let dxgi_device = match device.cast::<IDXGIDevice>() {
+            Ok(dxgi_device) => dxgi_device,
+            Err(error) => {
+                failures.push(format!("{label}: IDXGIDevice: {error}"));
+                continue;
+            }
+        };
+        let adapter = match unsafe { dxgi_device.GetAdapter() } {
+            Ok(adapter) => adapter,
+            Err(error) => {
+                failures.push(format!("{label}: GetAdapter: {error}"));
+                continue;
+            }
+        };
+        let factory: IDXGIFactory2 = match unsafe { adapter.GetParent() } {
+            Ok(factory) => factory,
+            Err(error) => {
+                failures.push(format!("{label}: IDXGIFactory2: {error}"));
+                continue;
+            }
+        };
+
+        let desc = windows::Win32::Graphics::Dxgi::DXGI_SWAP_CHAIN_DESC1 {
             Width: 64,
             Height: 64,
-            MipLevels: 1,
-            ArraySize: 1,
             Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+            Stereo: Default::default(),
             SampleDesc: DXGI_SAMPLE_DESC {
                 Count: 1,
                 Quality: 0,
             },
-            Usage: D3D11_USAGE_DEFAULT,
-            BindFlags: D3D11_BIND_RENDER_TARGET.0,
-            CPUAccessFlags: 0,
-            MiscFlags: 0,
+            BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
+            BufferCount: 2,
+            Scaling: DXGI_SCALING_STRETCH,
+            SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
+            AlphaMode: DXGI_ALPHA_MODE_PREMULTIPLIED,
+            Flags: 0,
         };
-        let mut texture = None;
-        if let Err(error) = unsafe { device.CreateTexture2D(&desc, None, Some(&mut texture)) } {
-            failures.push(format!("{label}: CreateTexture2D: {error}"));
-            continue;
-        }
-        let Some(texture) = texture else {
-            failures.push(format!("{label}: CreateTexture2D retornou textura nula"));
-            continue;
+        let swap_chain = match unsafe {
+            factory.CreateSwapChainForComposition(
+                &device,
+                &desc,
+                None::<&IDXGIOutput>,
+            )
+        } {
+            Ok(swap_chain) => swap_chain,
+            Err(error) => {
+                failures.push(format!("{label}: CreateSwapChainForComposition: {error}"));
+                continue;
+            }
         };
 
-        return Ok((device, texture, label));
+        return Ok((device, swap_chain, label));
     }
 
     Err(format!(
-        "não foi possível criar dispositivo/textura D3D11 para o smoke test ({})",
+        "não foi possível criar dispositivo/swap chain D3D11 para o smoke test ({})",
         failures.join("; ")
     ))
+}
+
+#[cfg(test)]
+impl D3d11RenderContext<'_> {
+    /// Exercises libmpv rendering into a DXGI composition backbuffer and Present.
+    pub(super) fn render_to_smoke_swap_chain(
+        &self,
+        swap_chain: &IDXGISwapChain1,
+    ) -> Result<(), String> {
+        let texture = unsafe { swap_chain.GetBuffer::<ID3D11Texture2D>(0) }
+            .map_err(|error| format!("DXGI não conseguiu obter o backbuffer: {error}"))?;
+        self.render(&texture)?;
+        drop(texture);
+
+        unsafe { swap_chain.Present(0, windows::Win32::Graphics::Dxgi::DXGI_PRESENT(0)) }
+            .map_err(|error| format!("DXGI Present falhou no smoke test: {error}"))?;
+        self.report_swap();
+        Ok(())
+    }
 }
 
 /// Checks the C ABI layout used by libmpv's render.h/render_d3d11.h headers.
