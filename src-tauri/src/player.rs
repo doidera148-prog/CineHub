@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::skip::Segment;
 
+#[cfg(all(windows, feature = "mpv"))]
+#[path = "player/d3d11.rs"]
+mod mpv_d3d11;
+
 /// Área retangular da interface web que deve permanecer visível sobre o vídeo.
 /// Coordenadas relativas à caixa do player, em pixels físicos do Windows.
 #[derive(Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,6 +21,68 @@ pub struct PlayerCutout {
     pub y: i32,
     pub width: u32,
     pub height: u32,
+}
+
+// Payload fields are consumed by the libmpv loop, which is compiled only with feature `mpv`.
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug)]
+enum PlayerControl {
+    TogglePause,
+    SeekRelative(f64),
+    SeekAbsolute(f64),
+    ToggleMute,
+    SetVolume(f64),
+    SelectAudio(i64),
+    SelectSubtitle(Option<i64>),
+}
+
+static PLAYER_CONTROL_SENDER: std::sync::Mutex<Option<std::sync::mpsc::Sender<PlayerControl>>> =
+    std::sync::Mutex::new(None);
+
+fn parse_player_control(action: &str, value: Option<f64>) -> Result<PlayerControl, String> {
+    match action {
+        "toggle-pause" => Ok(PlayerControl::TogglePause),
+        "seek-relative" => {
+            let seconds = value.ok_or_else(|| "tempo de busca ausente".to_string())?;
+            if !seconds.is_finite() {
+                return Err("tempo de busca inválido".into());
+            }
+            Ok(PlayerControl::SeekRelative(seconds.clamp(-600.0, 600.0)))
+        }
+        "seek-absolute" => {
+            let seconds = value.ok_or_else(|| "posição de busca ausente".to_string())?;
+            if !seconds.is_finite() || seconds < 0.0 {
+                return Err("posição de busca inválida".into());
+            }
+            Ok(PlayerControl::SeekAbsolute(seconds))
+        }
+        "toggle-mute" => Ok(PlayerControl::ToggleMute),
+        "set-volume" => {
+            let volume = value.ok_or_else(|| "volume ausente".to_string())?;
+            if !volume.is_finite() {
+                return Err("volume inválido".into());
+            }
+            Ok(PlayerControl::SetVolume(volume.clamp(0.0, 100.0)))
+        }
+        "select-audio" => Ok(PlayerControl::SelectAudio(parse_track_id(
+            value,
+            "faixa de áudio",
+        )?)),
+        "select-subtitle" => Ok(PlayerControl::SelectSubtitle(
+            value
+                .map(|id| parse_track_id(Some(id), "faixa de legenda"))
+                .transpose()?,
+        )),
+        _ => Err("comando de player desconhecido".into()),
+    }
+}
+
+fn parse_track_id(value: Option<f64>, description: &str) -> Result<i64, String> {
+    let id = value.ok_or_else(|| format!("{description} ausente"))?;
+    if !id.is_finite() || id < 0.0 || id.fract() != 0.0 || id > i64::MAX as f64 {
+        return Err(format!("{description} inválida"));
+    }
+    Ok(id as i64)
 }
 
 #[cfg(any(all(windows, feature = "mpv"), test))]
@@ -64,6 +130,7 @@ fn clipped_cutouts(width: u32, height: u32, cutouts: &[PlayerCutout]) -> Vec<(i3
 
 #[tauri::command]
 pub fn player_set_geometry(
+    app: tauri::AppHandle,
     x: i32,
     y: i32,
     width: u32,
@@ -72,11 +139,27 @@ pub fn player_set_geometry(
 ) -> bool {
     #[cfg(all(windows, feature = "mpv"))]
     {
+        if std::env::var_os("CINEHUB_WEBVIEW2_COMPOSITION_POC").is_some() {
+            return embed_handle(&app)
+                .is_some_and(|parent| mpv_d3d11::set_video_rect(parent, x, y, width, height));
+        }
         win::set_shape(x, y, width, height, &cutouts)
     }
     #[cfg(not(all(windows, feature = "mpv")))]
     {
-        let _ = (x, y, width, height, cutouts);
+        let _ = (app, x, y, width, height, cutouts);
+        false
+    }
+}
+
+#[tauri::command]
+pub fn player_composition_enabled() -> bool {
+    #[cfg(all(windows, feature = "mpv"))]
+    {
+        std::env::var_os("CINEHUB_WEBVIEW2_COMPOSITION_POC").is_some()
+    }
+    #[cfg(not(all(windows, feature = "mpv")))]
+    {
         false
     }
 }
@@ -86,11 +169,69 @@ pub fn player_close() {
     request_close();
 }
 
+#[tauri::command]
+pub fn player_set_fullscreen(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use tauri::Manager;
+
+        let window = app
+            .get_webview_window("main")
+            .ok_or_else(|| "a janela principal do CineHub não está disponível".to_string())?;
+        window
+            .set_fullscreen(enabled)
+            .map_err(|error| format!("não consegui alterar a tela cheia: {error}"))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (app, enabled);
+        Err("tela cheia nativa disponível somente no player Windows".into())
+    }
+}
+
+#[tauri::command]
+pub fn player_control(action: String, value: Option<f64>) -> Result<(), String> {
+    let control = parse_player_control(&action, value)?;
+    let sender = PLAYER_CONTROL_SENDER
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+        .ok_or_else(|| "o player ainda não está pronto para receber comandos".to_string())?;
+    sender
+        .send(control)
+        .map_err(|_| "o player encerrou antes de receber o comando".to_string())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlayerResult {
     pub position_ms: i64,
     pub duration_ms: i64,
+}
+
+#[cfg(feature = "mpv")]
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlayerPlaybackState {
+    position_ms: i64,
+    duration_ms: i64,
+    paused: bool,
+    volume: f64,
+    muted: bool,
+    audio_tracks: Vec<PlayerTrack>,
+    subtitle_tracks: Vec<PlayerTrack>,
+}
+
+#[cfg(feature = "mpv")]
+#[derive(Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct PlayerTrack {
+    id: i64,
+    title: Option<String>,
+    language: Option<String>,
+    codec: Option<String>,
+    external: bool,
+    selected: bool,
 }
 
 /// Só aceita http/https: o mpv não pode abrir arquivos locais nem opções de linha de comando.
@@ -133,7 +274,13 @@ fn embed_handle(app: &tauri::AppHandle) -> Option<i64> {
 /// Pede para fechar o vídeo embutido (Windows): envia WM_CLOSE para a janela do mpv.
 pub fn request_close() {
     #[cfg(all(windows, feature = "mpv"))]
-    win::request_close();
+    {
+        if std::env::var_os("CINEHUB_WEBVIEW2_COMPOSITION_POC").is_some() {
+            imp::request_close();
+        } else {
+            win::request_close();
+        }
+    }
 }
 
 /// Esc global durante o vídeo (desktop). No Android não existe atalho global.
@@ -179,11 +326,26 @@ pub async fn player_play(
     let wid = embed_handle(&app);
     let segments = segments.unwrap_or_default();
     set_escape_shortcut(&app, true);
+    let (control_sender, control_receiver) = std::sync::mpsc::channel();
+    *PLAYER_CONTROL_SENDER
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = Some(control_sender);
     let player_app = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        imp::play(&url, start, wid, subtitle.as_deref(), &segments, player_app)
+        imp::play(
+            &url,
+            start,
+            wid,
+            subtitle.as_deref(),
+            &segments,
+            player_app,
+            control_receiver,
+        )
     })
     .await;
+    *PLAYER_CONTROL_SENDER
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = None;
     set_escape_shortcut(&app, false);
     result.map_err(|e| e.to_string())?
 }
@@ -214,13 +376,70 @@ async fn fetch_subtitle_file(
 
 #[cfg(feature = "mpv")]
 mod imp {
-    use super::PlayerResult;
+    use super::{PlayerControl, PlayerPlaybackState, PlayerResult, PlayerTrack};
     use crate::skip::{self, Segment};
     use libmpv2::events::Event;
     use libmpv2::{mpv_end_file_reason, Mpv};
 
     /// Tecla que pula o trecho em andamento (abertura, recapitulação ou créditos).
     const SKIP_KEY: &str = "F12";
+    static COMPOSITION_CLOSE_REQUESTED: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+
+    pub fn request_close() {
+        COMPOSITION_CLOSE_REQUESTED.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn track_text(mpv: &Mpv, property: &str) -> Option<String> {
+        mpv.get_property::<String>(property)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    }
+
+    fn collect_tracks(mpv: &Mpv) -> (Vec<PlayerTrack>, Vec<PlayerTrack>) {
+        let count = mpv
+            .get_property::<i64>("track-list/count")
+            .unwrap_or(0)
+            .clamp(0, 128);
+        let mut audio = Vec::new();
+        let mut subtitles = Vec::new();
+
+        for index in 0..count {
+            let prefix = format!("track-list/{index}");
+            let Ok(id) = mpv.get_property::<i64>(&format!("{prefix}/id")) else {
+                continue;
+            };
+            let Ok(kind) = mpv.get_property::<String>(&format!("{prefix}/type")) else {
+                continue;
+            };
+            if kind != "audio" && kind != "sub" {
+                continue;
+            }
+
+            let track = PlayerTrack {
+                id,
+                title: track_text(mpv, &format!("{prefix}/title")),
+                language: track_text(mpv, &format!("{prefix}/lang")),
+                codec: track_text(mpv, &format!("{prefix}/codec-desc"))
+                    .or_else(|| track_text(mpv, &format!("{prefix}/codec"))),
+                external: mpv
+                    .get_property::<bool>(&format!("{prefix}/external"))
+                    .unwrap_or(false),
+                selected: mpv
+                    .get_property::<bool>(&format!("{prefix}/selected"))
+                    .unwrap_or(false),
+            };
+
+            if kind == "audio" {
+                audio.push(track);
+            } else {
+                subtitles.push(track);
+            }
+        }
+
+        (audio, subtitles)
+    }
 
     pub fn play(
         url: &str,
@@ -228,15 +447,22 @@ mod imp {
         wid: Option<i64>,
         subtitle: Option<&str>,
         segments: &[Segment],
-        _app: tauri::AppHandle,
+        app: tauri::AppHandle,
+        controls: std::sync::mpsc::Receiver<PlayerControl>,
     ) -> Result<PlayerResult, String> {
+        COMPOSITION_CLOSE_REQUESTED.store(false, std::sync::atomic::Ordering::SeqCst);
+        #[cfg(windows)]
+        let composition_mode =
+            wid.is_some() && std::env::var_os("CINEHUB_WEBVIEW2_COMPOSITION_POC").is_some();
+        #[cfg(not(windows))]
+        let composition_mode = false;
+
         let mpv = Mpv::with_initializer(|init| {
-            init.set_option("vo", "gpu")?;
+            init.set_option("vo", if composition_mode { "libmpv" } else { "gpu" })?;
             init.set_option("hwdec", "auto-safe")?;
-            // O OSC do mpv é a interface de controles no Windows: a janela de vídeo
-            // nativa cobre a WebView, portanto os controles HTML do CineHub não ficam visíveis.
-            // Não deixar em "auto": o usuário precisa ter controles acessíveis durante o vídeo.
-            init.set_option("osc", "yes")?;
+            // No modo de composição, os controles HTML do CineHub recebem o mouse.
+            // O OSC nativo do mpv fica desativado para não exibir uma barra sem hit testing.
+            init.set_option("osc", if composition_mode { "no" } else { "yes" })?;
             // osc-visibility e osc-idle são opções do script OSC, não opções globais do mpv.
             // Passá-las diretamente a set_option causa MPV_ERROR_OPTION_NOT_FOUND (-5).
             init.set_option("script-opts", "osc-visibility=always,osc-idlescreen=yes")?;
@@ -247,24 +473,38 @@ mod imp {
             // os cliques do OSC para a janela subjacente em vez de tratá-los no mpv.
             init.set_option("input-cursor-passthrough", "no")?;
             init.set_option("input-vo-keyboard", "yes")?;
-            init.set_option("osd-level", "3")?;
+            // Desativa texto/progresso do OSD, mas mantém as legendas do vídeo visíveis.
+            init.set_option("osd-level", "0")?;
             init.set_option("border", "no")?;
             // Sem yt-dlp: a URL é sempre um vídeo direto vindo de um addon ou do torrent local.
             init.set_option("ytdl", "no")?;
             // Títulos com várias faixas: prefere áudio e legenda em português.
             init.set_option("alang", "pt,por")?;
             init.set_option("slang", "pt,por")?;
-            match wid {
-                // Dentro da janela do CineHub: o mpv cria uma janela filha que cobre a área do app.
-                Some(handle) => init.set_option("wid", handle)?,
-                None => {
-                    init.set_option("force-window", "yes")?;
-                    init.set_option("title", "CineHub")?;
+            if !composition_mode {
+                match wid {
+                    // No caminho padrão, o mpv cria uma janela filha dentro do app.
+                    Some(handle) => init.set_option("wid", handle)?,
+                    None => {
+                        init.set_option("force-window", "yes")?;
+                        init.set_option("title", "CineHub")?;
+                    }
                 }
             }
             Ok(())
         })
         .map_err(|e| format!("não consegui iniciar o mpv: {e}"))?;
+
+        // Create the render context before loadfile so vo=libmpv never creates a
+        // separate native window. Wry supplies the device used by its composition swap chain.
+        #[cfg(windows)]
+        let render_context = if composition_mode {
+            let parent = wid.expect("composition_mode requer o HWND da janela principal");
+            let device = super::mpv_d3d11::host_device(parent)?;
+            Some(super::mpv_d3d11::D3d11RenderContext::new(&mpv, &device)?)
+        } else {
+            None
+        };
 
         // Controles de teclado explícitos, além do OSC clicável exibido pelo mpv.
         let _ = mpv.command("keybind", &["SPACE", "cycle pause"]);
@@ -301,11 +541,12 @@ mod imp {
         // Fim do trecho cuja tecla está ligada (None: nenhum trecho agora)
         let mut bound_end: Option<f64> = None;
         let mut failed = false;
+        let mut last_state_emit = std::time::Instant::now();
         // Dentro da janela do app: esconde os controles web e traz o vídeo para frente (Windows).
         #[cfg(all(windows, feature = "mpv"))]
-        let mut embedded = false;
+        let mut embedded = composition_mode;
         loop {
-            match mpv.wait_event(0.25) {
+            match mpv.wait_event(if composition_mode { 0.016 } else { 0.25 }) {
                 Some(Ok(Event::EndFile(reason))) => {
                     failed = reason == mpv_end_file_reason::Error;
                     break;
@@ -313,11 +554,63 @@ mod imp {
                 Some(Ok(Event::Shutdown)) => break,
                 _ => {}
             }
+
+            if COMPOSITION_CLOSE_REQUESTED.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                let _ = mpv.command("quit", &[]);
+            }
+
+            while let Ok(control) = controls.try_recv() {
+                let result = match control {
+                    PlayerControl::TogglePause => mpv.command("cycle", &["pause"]),
+                    PlayerControl::SeekRelative(seconds) => {
+                        let seconds = format!("{seconds:.3}");
+                        mpv.command("seek", &[&seconds, "relative"])
+                    }
+                    PlayerControl::SeekAbsolute(seconds) => {
+                        let seconds = format!("{seconds:.3}");
+                        mpv.command("seek", &[&seconds, "absolute+exact"])
+                    }
+                    PlayerControl::ToggleMute => mpv.command("cycle", &["mute"]),
+                    PlayerControl::SetVolume(volume) => {
+                        let volume = format!("{volume:.1}");
+                        mpv.command("set", &["volume", &volume])
+                    }
+                    PlayerControl::SelectAudio(id) => {
+                        let id = id.to_string();
+                        mpv.command("set", &["aid", &id])
+                    }
+                    PlayerControl::SelectSubtitle(track_id) => {
+                        let id = track_id.map_or_else(|| "no".to_string(), |id| id.to_string());
+                        mpv.command("set", &["sid", &id])
+                    }
+                };
+                if let Err(error) = result {
+                    eprintln!("aviso: comando do player não foi aplicado: {error}");
+                }
+            }
+
+            #[cfg(windows)]
+            if let (Some(parent), Some(renderer)) = (wid, render_context.as_ref()) {
+                if renderer.frame_is_pending() {
+                    match super::mpv_d3d11::render_to_host(parent, renderer) {
+                        Ok(true) => renderer.report_swap(),
+                        Ok(false) => {}
+                        Err(error) => {
+                            eprintln!("erro no renderizador D3D11 do CineHub: {error}");
+                            failed = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
             #[cfg(all(windows, feature = "mpv"))]
-            if let (Some(parent), false) = (wid, embedded) {
-                if let Ok(video) = mpv.get_property::<i64>("window-id") {
-                    if super::win::take_over(&_app, parent, video) {
-                        embedded = true;
+            if !composition_mode {
+                if let (Some(parent), false) = (wid, embedded) {
+                    if let Ok(video) = mpv.get_property::<i64>("window-id") {
+                        if super::win::take_over(&app, parent, video) {
+                            embedded = true;
+                        }
                     }
                 }
             }
@@ -327,6 +620,23 @@ mod imp {
             }
             if let Ok(d) = mpv.get_property::<f64>("duration") {
                 duration = d;
+            }
+            if composition_mode
+                && last_state_emit.elapsed() >= std::time::Duration::from_millis(200)
+            {
+                use tauri::Emitter;
+                let (audio_tracks, subtitle_tracks) = collect_tracks(&mpv);
+                let state = PlayerPlaybackState {
+                    position_ms: (position.max(0.0) * 1000.0) as i64,
+                    duration_ms: (duration.max(0.0) * 1000.0) as i64,
+                    paused: mpv.get_property::<bool>("pause").unwrap_or(false),
+                    volume: mpv.get_property::<f64>("volume").unwrap_or(100.0),
+                    muted: mpv.get_property::<bool>("mute").unwrap_or(false),
+                    audio_tracks,
+                    subtitle_tracks,
+                };
+                let _ = app.emit("player-state", state);
+                last_state_emit = std::time::Instant::now();
             }
             // Pular: ao entrar num trecho, avisa na tela e liga SKIP_KEY a um pulo para o fim dele.
             // Ao sair, a tecla volta a não fazer nada.
@@ -351,7 +661,9 @@ mod imp {
         }
 
         #[cfg(all(windows, feature = "mpv"))]
-        super::win::restore(&_app);
+        if !composition_mode {
+            super::win::restore(&app);
+        }
 
         if failed {
             return Err("o mpv não conseguiu tocar este vídeo".into());
@@ -804,6 +1116,7 @@ mod imp {
         _subtitle: Option<&str>,
         _segments: &[crate::skip::Segment],
         _app: tauri::AppHandle,
+        _controls: std::sync::mpsc::Receiver<super::PlayerControl>,
     ) -> Result<PlayerResult, String> {
         Err("player nativo não incluído nesta versão".into())
     }
@@ -812,6 +1125,40 @@ mod imp {
 #[cfg(test)]
 mod tests {
     use super::is_playable_url;
+
+    #[test]
+    fn player_control_actions_validate_and_clamp_values() {
+        assert!(matches!(
+            super::parse_player_control("toggle-pause", None),
+            Ok(super::PlayerControl::TogglePause)
+        ));
+        match super::parse_player_control("seek-relative", Some(900.0)) {
+            Ok(super::PlayerControl::SeekRelative(seconds)) => assert_eq!(seconds, 600.0),
+            _ => panic!("busca relativa deve ser limitada a 600 segundos"),
+        }
+        assert!(super::parse_player_control("seek-absolute", Some(-1.0)).is_err());
+        match super::parse_player_control("set-volume", Some(150.0)) {
+            Ok(super::PlayerControl::SetVolume(volume)) => assert_eq!(volume, 100.0),
+            _ => panic!("volume deve ser limitado a 100%"),
+        }
+        assert!(super::parse_player_control("set-volume", Some(f64::NAN)).is_err());
+        assert!(matches!(
+            super::parse_player_control("select-audio", Some(2.0)),
+            Ok(super::PlayerControl::SelectAudio(2))
+        ));
+        assert!(matches!(
+            super::parse_player_control("select-subtitle", None),
+            Ok(super::PlayerControl::SelectSubtitle(None))
+        ));
+        assert!(matches!(
+            super::parse_player_control("select-subtitle", Some(3.0)),
+            Ok(super::PlayerControl::SelectSubtitle(Some(3)))
+        ));
+        assert!(super::parse_player_control("select-audio", Some(1.5)).is_err());
+        assert!(super::parse_player_control("select-subtitle", Some(-1.0)).is_err());
+        assert!(super::parse_player_control("select-audio", None).is_err());
+        assert!(super::parse_player_control("unknown", None).is_err());
+    }
 
     #[cfg(feature = "mpv")]
     #[test]
@@ -825,6 +1172,7 @@ mod tests {
             init.set_option("input-cursor", "yes")?;
             init.set_option("input-cursor-passthrough", "no")?;
             init.set_option("script-opts", "osc-visibility=always,osc-idlescreen=yes")?;
+            init.set_option("osd-level", "0")?;
             Ok(())
         });
         assert!(
@@ -834,6 +1182,65 @@ mod tests {
         );
         #[cfg(all(windows, feature = "mpv"))]
         {
+            assert!(
+                super::mpv_d3d11::abi_layout_is_valid(),
+                "a ABI do render API D3D11 precisa corresponder aos headers nativos do libmpv"
+            );
+
+            // Runtime smoke test: initialize libmpv's D3D11 render backend, decode
+            // a local test frame, render it into a DXGI composition backbuffer, and
+            // Present it. The helper tries hardware first and WARP only as CI fallback.
+            let d3d_mpv = Mpv::with_initializer(|init| {
+                init.set_option("vo", "libmpv")?;
+                init.set_option("ao", "null")?;
+                init.set_option("hwdec", "no")?;
+                init.set_option("osc", "no")?;
+                Ok(())
+            })
+            .expect("libmpv precisa inicializar o render backend libmpv");
+
+            let (device, swap_chain, driver) = super::mpv_d3d11::create_smoke_swap_chain().expect(
+                "Windows precisa criar um dispositivo D3D11 e uma swap chain de composição",
+            );
+            let renderer = super::mpv_d3d11::D3d11RenderContext::new(&d3d_mpv, &device)
+                .expect("libmpv precisa criar o render context D3D11");
+
+            let frame_path = std::env::temp_dir()
+                .join(format!("cinehub-d3d11-smoke-{}.ppm", std::process::id()));
+            let mut ppm = b"P6\n64 64\n255\n".to_vec();
+            for y in 0..64 {
+                for x in 0..64 {
+                    ppm.extend_from_slice(&[
+                        if x < 32 { 255 } else { 0 },
+                        if y < 32 { 255 } else { 0 },
+                        if (x / 8 + y / 8) % 2 == 0 { 255 } else { 32 },
+                    ]);
+                }
+            }
+            std::fs::write(&frame_path, ppm).expect("quadro PPM temporário precisa ser gravado");
+            let frame_path_string = frame_path.to_string_lossy().into_owned();
+            d3d_mpv
+                .command("loadfile", &[frame_path_string.as_str(), "replace"])
+                .expect("libmpv precisa abrir o quadro PPM de teste");
+
+            let mut rendered_frame = false;
+            for _ in 0..100 {
+                let _ = d3d_mpv.wait_event(0.05);
+                if renderer.frame_is_pending() {
+                    renderer.render_to_smoke_swap_chain(&swap_chain).expect(
+                        "libmpv precisa renderizar e apresentar o quadro na swap chain DXGI",
+                    );
+                    rendered_frame = true;
+                    break;
+                }
+            }
+            let _ = std::fs::remove_file(&frame_path);
+            assert!(
+                rendered_frame,
+                "libmpv não sinalizou nem renderizou o quadro de teste pelo backend D3D11"
+            );
+            eprintln!("D3D11 runtime smoke test aprovado usando driver {driver}");
+
             for message in [
                 0x0200, // WM_MOUSEMOVE
                 0x0201, // WM_LBUTTONDOWN

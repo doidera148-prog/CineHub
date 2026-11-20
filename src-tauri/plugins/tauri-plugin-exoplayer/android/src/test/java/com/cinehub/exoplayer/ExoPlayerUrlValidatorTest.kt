@@ -1,10 +1,22 @@
 package com.cinehub.exoplayer
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ExoPlayerUrlValidatorTest {
+    @Test
+    fun normalizesTrackLanguagesForPersistenceAcrossMediaFiles() {
+        assertEquals("pt", TrackLanguagePreference.normalize("pt-BR"))
+        assertEquals("pt", TrackLanguagePreference.normalize("por"))
+        assertEquals("pt", TrackLanguagePreference.normalize("Português (Brasil)"))
+        assertEquals("en", TrackLanguagePreference.normalize("eng"))
+        assertEquals("en", TrackLanguagePreference.normalize("English"))
+        assertEquals(null, TrackLanguagePreference.normalize("und"))
+        assertEquals(null, TrackLanguagePreference.normalize(null))
+    }
+
     @Test
     fun acceptsHttpStreamsIncludingLanAndLocalTorrentEndpoints() {
         assertTrue(ExoPlayerUrlValidator.isPlayableUrl("https://cdn.example/video.mkv"))

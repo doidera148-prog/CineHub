@@ -177,7 +177,7 @@ function askConfirm(msg, okLabel) {
 }
 
 // Funções puras (URLs seguras, ordenação de fontes, próximo episódio) vêm de lib.js, testadas com node.
-const { isWebUrl, cssUrl, str, num, mergeBackupData, createBackupData, writeStorageBatch, progressPercent, sortStreams, nextEpisode, torrentLanguage, isSeriesLike, typeLabel, qualityLabel, filterStreams, sortStreamsBy } = window.CineHubLib;
+const { isWebUrl, cssUrl, str, num, mergeBackupData, createBackupData, writeStorageBatch, progressPercent, sortStreams, nextEpisode, torrentLanguage, isSeriesLike, typeLabel, qualityLabel, filterStreams, sortStreamsBy, activeSegment } = window.CineHubLib;
 
 const STREAM_LANG = { pt: 'Português', en: 'Inglês', other: 'Outros' };
 const STREAM_SORTS = [
@@ -730,6 +730,18 @@ const SUB_LANGS = { pt: /^(por|pt|portugu[eê]s)/i, en: /^(eng|en|english)/i, of
 function subPref() {
   const v = store.get('subLang', 'pt');
   return Object.prototype.hasOwnProperty.call(SUB_LANGS, v) ? v : 'pt';
+}
+
+function nativeTrackLanguage(track) {
+  return window.CineHubLib.normalizeTrackLanguage(track?.language)
+    || window.CineHubLib.normalizeTrackLanguage(track?.title);
+}
+
+function nativeTrackForLanguage(tracks, language) {
+  const preferred = window.CineHubLib.normalizeTrackLanguage(language);
+  return (Array.isArray(tracks) ? tracks : []).find((track) =>
+    preferred && nativeTrackLanguage(track) === preferred,
+  ) || null;
 }
 
 const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
@@ -1697,12 +1709,311 @@ function describeError(e) {
 // Motivo da última falha do player nativo (mostrado se o player web também não tocar).
 let nativeFailure = null;
 let nativePlayerActive = false;
+let nativePlayerCompositionActive = false;
+let nativeStateUnlisten = null;
+let nativeSeeking = false;
+let nativePlayerState = null;
+let nativeTrackRestorePending = { audio: true, subtitle: true };
+let nativeFullscreen = false;
+let nativeControlsHideTimer = null;
+let nativeKeyboardInteraction = false;
+const NATIVE_CONTROLS_IDLE_MS = 2800;
+const nativeControls = $('#native-controls');
+const nativeSeek = $('#native-seek');
+
+function showNativeControls(fromKeyboard = false) {
+  if (!nativePlayerCompositionActive) return;
+  nativeKeyboardInteraction = fromKeyboard;
+  if (nativeControlsHideTimer !== null) clearTimeout(nativeControlsHideTimer);
+  nativeControlsHideTimer = null;
+  if (document.body.classList.contains('native-controls-idle')) {
+    document.body.classList.remove('native-controls-idle');
+    void syncNativePlayerGeometry();
+  }
+  nativeControlsHideTimer = setTimeout(() => {
+    nativeControlsHideTimer = null;
+    if (!nativePlayerCompositionActive) return;
+    if (nativeKeyboardInteraction && player.contains(document.activeElement)) return;
+    document.body.classList.add('native-controls-idle');
+    void syncNativePlayerGeometry();
+  }, NATIVE_CONTROLS_IDLE_MS);
+}
+
+player.addEventListener('pointermove', () => showNativeControls(false));
+player.addEventListener('pointerdown', () => showNativeControls(false));
+player.addEventListener('keydown', () => showNativeControls(true));
+
+function formatNativeTime(seconds) {
+  const safe = Math.max(0, Math.floor(Number(seconds) || 0));
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const remainder = safe % 60;
+  return hours
+    ? `${hours}:${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`
+    : `${minutes}:${String(remainder).padStart(2, '0')}`;
+}
+
+function nativeTrackLabel(track, index) {
+  const parts = [track.title, track.language?.toUpperCase(), track.codec]
+    .filter((value) => typeof value === 'string' && value.trim());
+  if (track.external) parts.push('externa');
+  return parts.length ? parts.join(' · ') : `Faixa ${index + 1}`;
+}
+
+function updateNativeTrackSelectors(state) {
+  const sync = (selectId, controlId, source, kind) => {
+    const select = $(`#${selectId}`);
+    const control = $(`#${controlId}`);
+    const tracks = Array.isArray(source) ? source : [];
+    const visible = tracks.length > 0;
+    const wasHidden = control.hidden;
+    control.hidden = !visible;
+    let layoutChanged = wasHidden !== control.hidden;
+
+    const signature = JSON.stringify(tracks.map((track) => [
+      track.id, track.title, track.language, track.codec, track.external,
+    ]));
+    if (select.dataset.trackSignature !== signature) {
+      const options = [];
+      if (kind === 'subtitle') options.push(new Option('Desativada', ''));
+      tracks.forEach((track, index) => {
+        options.push(new Option(nativeTrackLabel(track, index), String(track.id)));
+      });
+      select.replaceChildren(...options);
+      select.dataset.trackSignature = signature;
+      layoutChanged = true;
+    }
+
+    const active = tracks.find((track) => track.selected === true);
+    const selectedValue = active
+      ? String(active.id)
+      : (kind === 'subtitle' ? '' : String(tracks[0]?.id ?? ''));
+    if (select.value !== selectedValue) select.value = selectedValue;
+    return layoutChanged;
+  };
+
+  const audioChanged = sync(
+    'native-audio-track',
+    'native-audio-track-control',
+    state.audioTracks,
+    'audio',
+  );
+  const subtitlesChanged = sync(
+    'native-subtitle-track',
+    'native-subtitle-track-control',
+    state.subtitleTracks,
+    'subtitle',
+  );
+  return audioChanged || subtitlesChanged;
+}
+
+function restoreNativeTrackPreferences(state) {
+  const audioTracks = Array.isArray(state.audioTracks) ? state.audioTracks : [];
+  if (nativeTrackRestorePending.audio && audioTracks.length) {
+    const preferred = store.get('playerAudioLanguage', '');
+    if (!preferred) nativeTrackRestorePending.audio = false;
+    else {
+      const match = nativeTrackForLanguage(audioTracks, preferred);
+      if (match) {
+        nativeTrackRestorePending.audio = false;
+        const active = audioTracks.find((track) => track.selected === true);
+        if (match.id !== active?.id) void sendNativePlayerControl('select-audio', match.id);
+      }
+    }
+  }
+
+  const subtitleTracks = Array.isArray(state.subtitleTracks) ? state.subtitleTracks : [];
+  if (nativeTrackRestorePending.subtitle && subtitleTracks.length) {
+    const disabled = store.get('playerSubtitlesDisabled', false) === true || subPref() === 'off';
+    if (disabled) {
+      nativeTrackRestorePending.subtitle = false;
+      if (subtitleTracks.some((track) => track.selected === true)) {
+        void sendNativePlayerControl('select-subtitle');
+      }
+    } else {
+      const preferred = store.get('playerSubtitleLanguage', '') || subPref();
+      if (!preferred) nativeTrackRestorePending.subtitle = false;
+      else {
+        const match = nativeTrackForLanguage(subtitleTracks, preferred);
+        if (match) {
+          nativeTrackRestorePending.subtitle = false;
+          const active = subtitleTracks.find((track) => track.selected === true);
+          if (match.id !== active?.id) void sendNativePlayerControl('select-subtitle', match.id);
+        }
+      }
+    }
+  }
+}
+
+function updateNativePlayerState(state) {
+  if (!state || !nativePlayerCompositionActive) return;
+  nativePlayerState = { ...state };
+  if (updateNativeTrackSelectors(state)) void syncNativePlayerGeometry();
+  restoreNativeTrackPreferences(state);
+  const position = Math.max(0, Number(state.positionMs) / 1000 || 0);
+  const duration = Math.max(0, Number(state.durationMs) / 1000 || 0);
+  nativePlayerState = { ...nativePlayerState, ...state, positionSeconds: position, durationSeconds: duration };
+  nativeSeek.max = String(Math.max(1, duration));
+  if (!nativeSeeking) nativeSeek.value = String(Math.min(position, duration || position));
+  $('#native-current-time').textContent = formatNativeTime(position);
+  $('#native-duration').textContent = formatNativeTime(duration);
+  const paused = state.paused === true;
+  const playButton = $('#native-play-pause');
+  playButton.textContent = paused ? 'Reproduzir' : 'Pausar';
+  playButton.setAttribute('aria-label', paused ? 'Reproduzir' : 'Pausar');
+  playButton.title = paused ? 'Reproduzir' : 'Pausar';
+  const muted = state.muted === true;
+  const muteButton = $('#native-mute');
+  muteButton.textContent = muted ? 'Ativar som' : 'Silenciar';
+  muteButton.setAttribute('aria-label', muted ? 'Ativar som' : 'Silenciar');
+  muteButton.title = muted ? 'Ativar som' : 'Silenciar';
+  $('#native-volume').value = String(Math.max(0, Math.min(100, Number(state.volume) || 0)));
+  saveProgress(false, { t: position, duration });
+  updateSkipAt(position);
+}
+
+async function listenNativePlayerState() {
+  const listen = window.__TAURI__?.event?.listen;
+  if (typeof listen !== 'function') return;
+  try {
+    nativeStateUnlisten = await listen('player-state', (event) => {
+      updateNativePlayerState(event?.payload || event);
+    });
+  } catch (error) {
+    logEvent('WARN', `não consegui receber estado do libmpv: ${describeError(error)}`);
+  }
+}
+
+function stopNativePlayerStateListener() {
+  if (typeof nativeStateUnlisten === 'function') {
+    nativeStateUnlisten();
+    nativeStateUnlisten = null;
+  }
+  nativePlayerState = null;
+  nativeTrackRestorePending = { audio: false, subtitle: false };
+  nativeSeeking = false;
+  for (const [controlId, selectId] of [
+    ['native-audio-track-control', 'native-audio-track'],
+    ['native-subtitle-track-control', 'native-subtitle-track'],
+  ]) {
+    $(`#${controlId}`).hidden = true;
+    const select = $(`#${selectId}`);
+    select.replaceChildren();
+    delete select.dataset.trackSignature;
+  }
+}
+
+async function sendNativePlayerControl(action, value) {
+  if (!nativePlayerCompositionActive) return false;
+  const args = { action };
+  if (value !== undefined) args.value = value;
+  try {
+    await call('player_control', args);
+    return true;
+  } catch (error) {
+    logEvent('WARN', `comando do player falhou (${action}): ${describeError(error)}`);
+    toast(`Não consegui controlar a reprodução: ${describeError(error)}`);
+    return false;
+  }
+}
+
+$('#native-rewind').onclick = () => sendNativePlayerControl('seek-relative', -10);
+$('#native-forward').onclick = () => sendNativePlayerControl('seek-relative', 10);
+$('#native-play-pause').onclick = () => sendNativePlayerControl('toggle-pause');
+$('#native-mute').onclick = () => sendNativePlayerControl('toggle-mute');
+$('#native-audio-track').addEventListener('change', (event) => {
+  const id = Number(event.currentTarget.value);
+  if (!Number.isSafeInteger(id) || id < 0) return;
+  const track = nativePlayerState?.audioTracks?.find((item) => item.id === id);
+  void sendNativePlayerControl('select-audio', id).then((success) => {
+    if (success) store.set('playerAudioLanguage', nativeTrackLanguage(track));
+  });
+});
+$('#native-subtitle-track').addEventListener('change', (event) => {
+  const value = event.currentTarget.value;
+  if (value === '') {
+    void sendNativePlayerControl('select-subtitle').then((success) => {
+      if (success) {
+        store.set('playerSubtitlesDisabled', true);
+        store.set('playerSubtitleLanguage', '');
+      }
+    });
+    return;
+  }
+  const id = Number(value);
+  if (!Number.isSafeInteger(id) || id < 0) return;
+  const track = nativePlayerState?.subtitleTracks?.find((item) => item.id === id);
+  void sendNativePlayerControl('select-subtitle', id).then((success) => {
+    if (success) {
+      store.set('playerSubtitlesDisabled', false);
+      store.set('playerSubtitleLanguage', nativeTrackLanguage(track));
+    }
+  });
+});
+
+async function setNativeFullscreen(enabled, quiet = false) {
+  if (!nativePlayerCompositionActive || nativeFullscreen === enabled) return false;
+  try {
+    await call('player_set_fullscreen', { enabled });
+    nativeFullscreen = enabled;
+    document.body.classList.toggle('native-player-fullscreen', enabled);
+    const button = $('#native-fullscreen');
+    button.textContent = enabled ? 'Sair da tela cheia' : 'Tela cheia';
+    button.setAttribute('aria-label', enabled ? 'Sair da tela cheia' : 'Tela cheia');
+    button.title = enabled ? 'Sair da tela cheia' : 'Tela cheia';
+    button.setAttribute('aria-pressed', String(enabled));
+    showNativeControls(false);
+    await syncNativePlayerGeometry();
+    return true;
+  } catch (error) {
+    logEvent('WARN', `alterar tela cheia falhou: ${describeError(error)}`);
+    if (!quiet) toast(`Não consegui alterar a tela cheia: ${describeError(error)}`);
+    return false;
+  }
+}
+
+$('#native-fullscreen').onclick = () => {
+  void setNativeFullscreen(!nativeFullscreen);
+};
+
+nativeSeek.addEventListener('input', () => {
+  nativeSeeking = true;
+  $('#native-current-time').textContent = formatNativeTime(Number(nativeSeek.value));
+});
+nativeSeek.addEventListener('change', () => {
+  nativeSeeking = false;
+  sendNativePlayerControl('seek-absolute', Number(nativeSeek.value));
+});
+$('#native-volume').addEventListener('change', (event) => {
+  sendNativePlayerControl('set-volume', Number(event.currentTarget.value));
+});
 
 async function playNative(stream, label, id, meta, subs, segments = []) {
   const torrentToken = stream?.torrentToken || null;
   let completed = false;
   const saved = store.get('progress', {})[id];
   const startMs = saved && saved.t > 5 && !saved.watched ? saved.t * 1000 : 0;
+  const compositionMode = IS_WINDOWS
+    ? await call('player_composition_enabled').catch(() => false)
+    : false;
+  nativeControls.hidden = !compositionMode;
+  nativePlayerCompositionActive = compositionMode;
+  nativeTrackRestorePending = { audio: true, subtitle: true };
+  nativeFullscreen = false;
+  document.body.classList.remove('native-player-fullscreen', 'native-controls-idle');
+  $('#native-fullscreen').textContent = 'Tela cheia';
+  $('#native-fullscreen').setAttribute('aria-label', 'Tela cheia');
+  $('#native-fullscreen').title = 'Tela cheia';
+  $('#native-fullscreen').setAttribute('aria-pressed', 'false');
+  if (compositionMode) {
+    showNativeControls(false);
+    nativeSeek.value = '0';
+    $('#native-current-time').textContent = '0:00';
+    $('#native-duration').textContent = '0:00';
+    $('#native-play-pause').textContent = 'Pausar';
+    $('#native-mute').textContent = 'Silenciar';
+    await listenNativePlayerState();
+  }
   current = { id, label, meta, src: stream.url, mime: '' };
   document.title = `${label} · CineHub`;
   try {
@@ -1712,14 +2023,17 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
     if (IS_ANDROID) {
       args.subtitles = await subtitlePayload(stream, subs);
       args.subtitlesDisabled = subPref() === 'off';
+      args.audioLanguage = store.get('playerAudioLanguage', '');
+      args.subtitleLanguage = subPref() === 'off' ? '' : subPref();
     } else args.subtitleUrl = pickSubtitles(stream, subs)[0]?.url ?? null;
     // Botão de pular no player nativo: tecla F12 (mpv, desktop) ou botão na tela (Android)
     args.segments = IS_ANDROID ? JSON.stringify(segments) : segments;
     let playback;
     if (IS_WINDOWS) {
-      // Mostra a interface HTML do CineHub enquanto o mpv desenha apenas a superfície
-      // do vídeo. A região nativa será recortada para deixar título e botão Fechar clicáveis.
+      // Mostra os controles do CineHub acima do vídeo nativo. Na composição,
+      // a página ao fundo fica transparente para revelar o visual DirectComposition.
       nativePlayerActive = true;
+      document.body.classList.toggle('native-composition-mode', compositionMode);
       showPlayer();
       keepScreenOn(true);
       playback = invoke(command, args);
@@ -1746,10 +2060,20 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
     logEvent('WARN', `player nativo indisponível: ${nativeFailure}`);
     return false;
   } finally {
+    if (nativePlayerCompositionActive && nativeFullscreen) {
+      await setNativeFullscreen(false, true);
+    }
+    if (nativeControlsHideTimer !== null) clearTimeout(nativeControlsHideTimer);
+    nativeControlsHideTimer = null;
     if (IS_WINDOWS && nativePlayerActive) {
       nativePlayerActive = false;
+      document.body.classList.remove('native-composition-mode');
       closePlayer(false, false);
     }
+    document.body.classList.remove('native-player-fullscreen', 'native-controls-idle');
+    nativeControls.hidden = true;
+    nativePlayerCompositionActive = false;
+    stopNativePlayerStateListener();
     current = null;
     document.title = 'CineHub';
     // O comando nativo só resolve quando o diálogo do player é fechado.
@@ -1787,6 +2111,7 @@ async function play(stream, label, id, meta, subs) {
     }
   }
   const segments = await skipSegmentsFor(id, meta);
+  skipSegs = segments;
   // No Windows, libmpv é o player principal para todos os formatos de mídia:
   // vídeo, áudio, contêineres e protocolos suportados pelo próprio mpv.
   // Não restringir por extensão: URLs sem extensão e streams também são válidos.
@@ -1839,9 +2164,14 @@ function nativePlayerGeometry() {
   const bounds = box.getBoundingClientRect();
   const scale = window.devicePixelRatio || 1;
   if (bounds.width < 16 || bounds.height < 16) return null;
-  const cutouts = ['#close-player', '#player-title', '#next-ep', '#skip-seg', '#pip']
+  const cutouts = ['#close-player', '#player-title', '#next-ep', '#skip-seg', '#pip', '#native-controls']
     .map((selector) => document.querySelector(selector))
-    .filter((element) => element && !element.hidden && element.getClientRects().length)
+    .filter((element) =>
+      element
+      && !element.hidden
+      && element.getClientRects().length
+      && !document.body.classList.contains('native-controls-idle')
+    )
     .map((element) => {
       const rect = element.getBoundingClientRect();
       return {
@@ -1896,7 +2226,7 @@ if (typeof ResizeObserver !== 'undefined') {
   const nativePlayerObserver = new ResizeObserver(() => {
     if (nativePlayerActive) void syncNativePlayerGeometry();
   });
-  for (const element of [document.querySelector('#player .player-box'), $('#close-player'), $('#player-title'), $('#next-ep'), $('#skip-seg'), $('#pip')]) {
+  for (const element of [document.querySelector('#player .player-box'), $('#close-player'), $('#player-title'), $('#next-ep'), $('#skip-seg'), $('#pip'), nativeControls]) {
     if (element) nativePlayerObserver.observe(element);
   }
 }
@@ -1984,8 +2314,8 @@ function hideSkip() {
   skipEnd = null;
   skipBtn.classList.add('hidden');
 }
-function updateSkip() {
-  const seg = activeSegment(skipSegs, vjsPlayer.currentTime());
+function updateSkipAt(position) {
+  const seg = activeSegment(skipSegs, position);
   const key = seg ? `${seg.type}:${seg.end}` : null;
   if (key === skipKey) return;
   skipKey = key;
@@ -1997,8 +2327,14 @@ function updateSkip() {
   skipBtn.textContent = `${SKIP_LABELS[seg.type] || 'Pular'} ▶`;
   skipBtn.classList.remove('hidden');
 }
+function updateSkip() {
+  updateSkipAt(vjsPlayer.currentTime());
+}
 skipBtn.onclick = () => {
-  if (skipEnd !== null) vjsPlayer.currentTime(skipEnd);
+  if (skipEnd !== null) {
+    if (nativePlayerCompositionActive) sendNativePlayerControl('seek-absolute', skipEnd);
+    else vjsPlayer.currentTime(skipEnd);
+  }
   hideSkip();
 };
 
@@ -2006,14 +2342,23 @@ skipBtn.onclick = () => {
 document.addEventListener('keydown', (e) => {
   if (player.classList.contains('hidden') || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-  if (e.key === '?') {
-    toast('0–9: pular para 0–90% do vídeo · ?: esta lista', 6000);
+  if (nativePlayerCompositionActive && e.key.toLowerCase() === 'f') {
+    e.preventDefault();
+    void setNativeFullscreen(!nativeFullscreen);
     return;
   }
-  const at = seekFraction(e.key, vjsPlayer.duration());
+  if (e.key === '?') {
+    toast('0–9: pular para 0–90% do vídeo · ?: esta lista · F: tela cheia', 6000);
+    return;
+  }
+  const duration = nativePlayerCompositionActive
+    ? (nativePlayerState?.durationSeconds || 0)
+    : vjsPlayer.duration();
+  const at = seekFraction(e.key, duration);
   if (at !== null) {
     e.preventDefault();
-    vjsPlayer.currentTime(at);
+    if (nativePlayerCompositionActive) sendNativePlayerControl('seek-absolute', at / 1000);
+    else vjsPlayer.currentTime(at);
   }
 });
 

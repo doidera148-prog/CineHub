@@ -279,6 +279,29 @@
     return list;
   }
 
+  // Normaliza códigos ISO/BCP-47 e nomes comuns para comparar faixas entre arquivos.
+  function normalizeTrackLanguage(value) {
+    const raw = str(value).trim().toLowerCase().replace(/_/g, '-');
+    if (!raw || raw === 'und' || raw === 'unknown') return '';
+    const token = raw.split(/[-\s(]/, 1)[0];
+    const aliases = {
+      por: 'pt', pt: 'pt', portuguese: 'pt', 'português': 'pt',
+      eng: 'en', en: 'en', english: 'en',
+      spa: 'es', es: 'es', spanish: 'es',
+      fre: 'fr', fra: 'fr', fr: 'fr', french: 'fr',
+      ger: 'de', deu: 'de', de: 'de', german: 'de',
+      ita: 'it', it: 'it', jpn: 'ja', ja: 'ja',
+      zho: 'zh', chi: 'zh', zh: 'zh', kor: 'ko', ko: 'ko',
+      rus: 'ru', ru: 'ru',
+    };
+    return aliases[token] || (/^[a-z]{2,3}$/.test(token) ? token : '');
+  }
+
+  function trackMatchesLanguage(language, preferred) {
+    const target = normalizeTrackLanguage(preferred);
+    return Boolean(target) && normalizeTrackLanguage(language) === target;
+  }
+
   // Todas as faixas são mantidas; o idioma preferido só define a seleção inicial.
   function selectSubtitles(stream, subtitles, preferred = 'pt') {
     const all = [...(Array.isArray(stream?.subtitles) ? stream.subtitles : []), ...(Array.isArray(subtitles) ? subtitles : [])];
@@ -305,6 +328,8 @@
     str,
     isLocalTorrentStream,
     selectSubtitles,
+    normalizeTrackLanguage,
+    trackMatchesLanguage,
     shouldUseMediaProxy,
     isTorrentSource,
     qualityLabel,

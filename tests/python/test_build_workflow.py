@@ -213,6 +213,10 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
             "adb shell monkey",
             "check_app_alive",
             "diagnose_app_exit",
+            "reason=12 (DEPENDENCY DIED)",
+            "com.google.android.gms/.fonts.provider.FontsProvider",
+            "transient_recovery_attempted=0",
+            "Aguardando estabilização",
         ):
             with self.subTest(check=check):
                 self.assertIn(check, emulator_step)
@@ -261,6 +265,247 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
             with self.subTest(step=marker):
                 self.assertIn(marker, android)
         self.assertGreaterEqual(android.count("set -euo pipefail"), 4)
+
+    def test_windows_composition_host_is_opt_in_and_keeps_standard_fallback(self):
+        wry = (ROOT / "src-tauri/vendor/wry/src/webview2/mod.rs").read_text(
+            encoding="utf-8"
+        )
+        composition = (
+            ROOT / "src-tauri/vendor/wry/src/webview2/composition.rs"
+        ).read_text(encoding="utf-8")
+        self.assertIn("CINEHUB_WEBVIEW2_COMPOSITION_POC", wry)
+        self.assertIn(
+            "style: CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS,",
+            wry,
+            "O host WRY_WEBVIEW precisa habilitar WM_*DBLCLK para encaminhar duplo clique",
+        )
+        self.assertIn("Some(host) => host.controller.clone()", wry)
+        self.assertIn("None => Self::create_controller(", wry)
+        self.assertIn("host.shutdown();", wry)
+        self.assertIn("CreateCoreWebView2CompositionController", composition)
+        self.assertIn("CreateCoreWebView2CompositionControllerCompletedHandler", composition)
+        self.assertIn(
+            "let result: webview2_com::Result<ICoreWebView2CompositionController>",
+            composition,
+        )
+        self.assertIn("DCompositionCreateDevice2::<_, IDCompositionDesktopDevice>", composition)
+        self.assertIn(
+            "let composition_controller = webview2_com::wait_with_pump(rx)??;",
+            composition,
+        )
+        self.assertIn("SetRootVisualTarget", composition)
+        self.assertIn("SetWindowSubclass", composition)
+        self.assertIn("Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass}", composition)
+        self.assertIn("KeyboardAndMouse::{", composition)
+        self.assertIn("Pointer::{", composition)
+        self.assertIn('"Win32_UI_Input_Pointer"', (ROOT / "src-tauri/vendor/wry/Cargo.toml").read_text(encoding="utf-8"))
+        self.assertIn("GetPointerDeviceRects, GetPointerInfo, GetPointerPenInfo, GetPointerTouchInfo", composition)
+        self.assertIn("POINTER_INFO, POINTER_PEN_INFO, POINTER_TOUCH_INFO", composition)
+        self.assertIn("WM_POINTERDOWN | WM_POINTERUPDATE | WM_POINTERUP | WM_POINTERENTER | WM_POINTERLEAVE", composition)
+        self.assertIn("SendPointerInput(event_kind, &pointer_info)", composition)
+        self.assertIn("SetPointerKind(native_info.pointerType.0 as u32)", composition)
+        self.assertIn("SetTouchContact(contact)", composition)
+        self.assertIn("SetTouchContactRaw(contact_raw)", composition)
+        self.assertIn("SetPenPressure(pen_info.pressure)", composition)
+        self.assertIn("himetric_client_origin", composition)
+        self.assertIn("to_client_himetric_rect", composition)
+        self.assertIn("SetPointerDeviceRect(pointer_device_rect_client)", composition)
+        self.assertIn("screen_rect_to_client", composition)
+        self.assertIn("native_info.pointerType != PT_TOUCH && native_info.pointerType != PT_PEN", composition)
+        self.assertIn("GetCapture, ReleaseCapture, SetCapture, TrackMouseEvent", composition)
+        self.assertIn("Gdi::{ClientToScreen, ScreenToClient}", composition)
+        self.assertIn("SetCursor(Some(cursor))", composition)
+        self.assertIn("WM_SETCURSOR if (lparam.0 as u16) == HTCLIENT as u16", composition)
+        self.assertIn("state.composition_controller.Cursor(&mut cursor)", composition)
+        self.assertIn("return windows::Win32::Foundation::LRESULT(1);", composition)
+        self.assertIn("SetWindowSubclass(", composition)
+        self.assertIn(".as_bool()", composition)
+        self.assertIn("const WM_MOUSELEAVE: u32 = 0x02A3;", composition)
+        self.assertNotIn("WM_MOUSELEAVE,", composition.split("WindowsAndMessaging::{", 1)[1].split("}", 1)[0])
+        self.assertIn("Error::new(E_FAIL, \"SetWindowSubclass failed\")", composition)
+        self.assertNotIn("Error::from_win32()", composition)
+        self.assertIn("composition_controller: ICoreWebView2CompositionController", composition)
+        self.assertIn("controller: ICoreWebView2Controller", composition)
+        self.assertIn(".composition_controller\n        .SendMouseInput(", composition)
+        self.assertNotIn("state\n        .controller\n        .SendMouseInput(", composition)
+        self.assertIn("SendMouseInput", composition)
+        for message in (
+            "WM_MOUSEMOVE",
+            "WM_MOUSELEAVE",
+            "WM_LBUTTONDOWN",
+            "WM_LBUTTONUP",
+            "WM_RBUTTONDOWN",
+            "WM_RBUTTONUP",
+            "WM_MBUTTONDOWN",
+            "WM_MBUTTONUP",
+            "WM_XBUTTONDOWN",
+            "WM_XBUTTONUP",
+            "WM_MOUSEWHEEL",
+            "WM_MOUSEHWHEEL",
+        ):
+            with self.subTest(message=message):
+                self.assertIn(message, composition)
+        self.assertIn("CursorChangedEventHandler", composition)
+        self.assertIn("add_CursorChanged", composition)
+        self.assertIn("MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC)", composition)
+        self.assertIn("controller.SetBounds(bounds)", composition)
+        self.assertIn("TrackMouseEvent", composition)
+        self.assertIn("SetCapture(hwnd)", composition)
+        self.assertIn("ReleaseCapture()", composition)
+        self.assertIn("remove_CursorChanged", composition)
+        self.assertIn("RemoveWindowSubclass", composition)
+
+        d3d11 = (ROOT / "src-tauri/src/player/d3d11.rs").read_text(encoding="utf-8")
+        self.assertEqual(d3d11.count("pub(super) fn abi_layout_is_valid"), 1)
+        self.assertIn("MPV_RENDER_API_TYPE_D3D11 == b\"d3d11\\0\"", d3d11)
+        self.assertIn("ID3D11Device, ID3D11Texture2D", d3d11)
+        self.assertIn("MPV_RENDER_PARAM_D3D11_INIT_PARAMS: u32 = 21", d3d11)
+        self.assertIn("MPV_RENDER_PARAM_D3D11_FBO: u32 = 22", d3d11)
+        self.assertIn("mpv_render_context_create", d3d11)
+        self.assertIn("mpv_render_context_update", d3d11)
+        self.assertIn("mpv_render_context_render", d3d11)
+        self.assertIn("mpv_render_context_report_swap", d3d11)
+        self.assertIn("mpv_render_context_set_update_callback", d3d11)
+        self.assertIn("notify_render_update", d3d11)
+        self.assertIn("frame_pending.swap(false", d3d11)
+        self.assertIn("mpv_render_context_free", d3d11)
+        self.assertIn("texture.as_raw()", d3d11)
+        self.assertIn("abi_layout_is_valid", d3d11)
+        for feature in (
+            "Win32_Graphics_Direct3D",
+            "Win32_Graphics_Direct3D11",
+            "Win32_Graphics_Dxgi",
+            "Win32_Graphics_Dxgi_Common",
+        ):
+            with self.subTest(windows_feature=feature):
+                self.assertIn(f'"{feature}"', (ROOT / "src-tauri/Cargo.toml").read_text(encoding="utf-8"))
+
+        for required in (
+            "create_smoke_swap_chain",
+            "D3D_DRIVER_TYPE_HARDWARE",
+            "D3D_DRIVER_TYPE_WARP",
+            "CreateSwapChainForComposition(",
+            "DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL",
+            "DXGI_ALPHA_MODE_PREMULTIPLIED",
+            "DXGI_FORMAT_B8G8R8A8_UNORM",
+            "render_to_smoke_swap_chain",
+            "swap_chain.Present(0",
+            "present_result.0 < 0",
+            "DXGI Present falhou no smoke test (HRESULT 0x{:08X})",
+        ):
+            with self.subTest(d3d11_runtime=required):
+                self.assertIn(required, d3d11)
+        smoke_imports = d3d11.split(
+            "pub(super) fn create_smoke_swap_chain", 1
+        )[1].split("let flags", 1)[0]
+        for imported in (
+            "DXGI_ALPHA_MODE_PREMULTIPLIED",
+            "DXGI_FORMAT_B8G8R8A8_UNORM",
+            "DXGI_SAMPLE_DESC",
+        ):
+            with self.subTest(smoke_import=imported):
+                self.assertEqual(
+                    smoke_imports.count(imported),
+                    1,
+                    f"Import DXGI duplicado no smoke test: {imported}",
+                )
+
+        self.assertIn(
+            "let _ = unsafe { multithread.SetMultithreadProtected(true) };", d3d11
+        )
+        self.assertIn(
+            "let _ = multithread.SetMultithreadProtected(true);", composition
+        )
+
+        for required in (
+            "D3D11CreateDevice",
+            "D3D11_CREATE_DEVICE_BGRA_SUPPORT",
+            "D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS",
+            "ID3D11Multithread",
+            "SetMultithreadProtected(true)",
+            "CreateSwapChainForComposition",
+            "DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL",
+            "DXGI_SCALING_STRETCH",
+            "DXGI_ALPHA_MODE_PREMULTIPLIED",
+            "DXGI_FORMAT_B8G8R8A8_UNORM",
+            "Flags: 0,",
+            "cinehub_wry_composition_get_device",
+            "cinehub_wry_composition_get_backbuffer",
+            "cinehub_wry_composition_present",
+            "cinehub_wry_composition_set_video_rect",
+            "root_visual.AddVisual(&video_visual_base, false",
+            "root_visual.AddVisual(&webview_visual_base, true",
+            "SetRootVisualTarget(&webview_visual_base",
+            "WM_CINEHUB_SET_VIDEO_RECT",
+            "ResizeBuffers(",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, composition)
+
+        self.assertIn("SetDefaultBackgroundColor(COREWEBVIEW2_COLOR", composition)
+        self.assertIn("A: 0", composition)
+
+        wry_mod = (ROOT / "src-tauri/vendor/wry/src/webview2/mod.rs").read_text(encoding="utf-8")
+        self.assertIn("CompositionHost::new(parent, hwnd, &env)", wry_mod)
+        self.assertIn('"Win32_Graphics_Dxgi"', (ROOT / "src-tauri/vendor/wry/Cargo.toml").read_text(encoding="utf-8"))
+        self.assertIn('"Win32_Graphics_Direct3D"', (ROOT / "src-tauri/vendor/wry/Cargo.toml").read_text(encoding="utf-8"))
+        for required in (
+            "cinehub_wry_composition_get_device",
+            "cinehub_wry_composition_get_backbuffer",
+            "cinehub_wry_composition_present",
+            "ID3D11Device::from_raw",
+            "ID3D11Texture2D::from_raw",
+            "context.render(&texture)",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, d3d11)
+
+        main_rs = (ROOT / "src-tauri/src/main.rs").read_text(encoding="utf-8")
+        composition_enable = main_rs.index(
+            'std::env::set_var("CINEHUB_WEBVIEW2_COMPOSITION_POC", "1")'
+        )
+        app_start = main_rs.index("cinehub_lib::run();")
+        self.assertLess(
+            composition_enable,
+            app_start,
+            "O modo WebView2 Composition precisa ser ativado antes de Tauri criar o WebView",
+        )
+        self.assertIn(
+            '#[cfg(all(windows, feature = "mpv"))]', main_rs
+        )
+        self.assertIn(
+            'std::env::var_os("CINEHUB_DISABLE_WEBVIEW2_COMPOSITION")', main_rs
+        )
+        self.assertIn(
+            'std::env::remove_var("CINEHUB_WEBVIEW2_COMPOSITION_POC")', main_rs
+        )
+
+        player = (ROOT / "src-tauri/src/player.rs").read_text(encoding="utf-8")
+        self.assertIn("pub fn player_composition_enabled() -> bool", player)
+        self.assertIn("player::player_composition_enabled", (ROOT / "src-tauri/src/lib.rs").read_text(encoding="utf-8"))
+        self.assertIn('init.set_option("vo", if composition_mode { "libmpv" } else { "gpu" })?', player)
+        self.assertIn("super::mpv_d3d11::D3d11RenderContext::new(&mpv, &device)", player)
+        self.assertIn("super::mpv_d3d11::render_to_host(parent, renderer)", player)
+        self.assertIn('init.set_option("vo", "libmpv")?', player)
+        self.assertIn('command("loadfile", &[frame_path_string.as_str(), "replace"])', player)
+        self.assertIn('.render_to_smoke_swap_chain(&swap_chain)', player)
+        self.assertIn("rendered_frame", player)
+        self.assertEqual(
+            job_block(self.workflow, "desktop").count(
+                "cargo test --features mpv --lib mpv_osc_script_options_are_valid"
+            ),
+            1,
+            "O teste de integração D3D11 deve executar uma única vez no build Windows",
+        )
+        self.assertIn("COMPOSITION_CLOSE_REQUESTED", player)
+        self.assertIn("mpv_d3d11::set_video_rect(parent, x, y, width, height)", player)
+
+        app_js = (ROOT / "web/app.js").read_text(encoding="utf-8")
+        self.assertIn("call('player_composition_enabled')", app_js)
+        self.assertIn("native-composition-mode", app_js)
+        css = (ROOT / "web/style.css").read_text(encoding="utf-8")
+        self.assertIn("body.native-composition-mode { background: transparent !important; }", css)
+        self.assertIn("body.native-composition-mode #player .video-js", css)
 
     def test_only_optional_ffmpeg_download_can_fail_without_stopping_android_job(self):
         android = job_block(self.workflow, "android")
@@ -368,6 +613,21 @@ inspect_node(root)
                 block.count("\\n      - "),
                 f"Há etapa sem name/uses no job {name}",
             )
+
+
+    def test_vendored_wry_webview2_source_is_complete_and_keeps_windows_version_use(self):
+        wry_root = ROOT / "src-tauri/vendor/wry"
+        webview2 = (wry_root / "src/webview2/mod.rs").read_text(encoding="utf-8")
+        manifest = (wry_root / "Cargo.toml").read_text(encoding="utf-8")
+        self.assertGreater(
+            len(webview2.splitlines()),
+            1900,
+            "O módulo WebView2 do Wry parece truncado",
+        )
+        self.assertIn("fn is_windows_7()", webview2)
+        self.assertIn("windows_version::OsVersion::current()", webview2)
+        self.assertIn('windows-version = "0.1"', manifest)
+        self.assertTrue(webview2.rstrip().endswith("}"))
 
 
 if __name__ == "__main__":

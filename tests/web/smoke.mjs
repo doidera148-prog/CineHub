@@ -18,7 +18,7 @@ const server = createServer(async (req, res) => {
 });
 await new Promise((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
 const base = `http://127.0.0.1:${server.address().port}`;
-const fixtures = `window.__calls=[];window.__TAURI__={core:{invoke:async(cmd,args)=>{window.__calls.push({cmd,args});const metas=(n,p)=>Array.from({length:n},(_,i)=>({id:'tt'+p+i,type:'movie',name:p+' filme '+i,releaseInfo:'2026'}));switch(cmd){case'home':return{rows:[{title:'Populares',addon:'Teste',transportUrl:'https://test.invalid/manifest.json',type:args.kind,catalogId:'top',metas:metas(20,'home')}]};case'search':return{rows:[]};case'catalog_page':return{metas:[]};case'list_addons':return[];case'meta':return{meta:{id:args.id,type:'movie',name:window.__maliciousMetaName || 'Título de teste',description:'Descrição'}};case'streams':if(args.id==='tt2')throw Error('offline');return{streams:[window.__streamForTest || {name:'Fonte MP4 de teste',title:'1080p',url:'https://stream.test/sample.mp4',mimeType:'video/mp4'}],subtitles:[{lang:'pt',url:'https://subs.test/sample.vtt'}],errors:[]};case'media_proxy_url':return window.__preserveMediaUrl?args.url:'${base}/sample.mp4';case'subtitle':return'WEBVTT\\n\\n00:00:00.000 --> 00:00:01.000\\nLegenda de teste';case'skip_segments':return{segments:[]};case'plugin:exoplayer|play':if(window.__rejectNativePlayer)throw Error('falha nativa simulada');return{positionMs:0,durationMs:0};case'player_play':if(window.__rejectNativePlayer)throw Error('falha mpv simulada');if(window.__holdNativePlayer)return new Promise(resolve=>{window.__finishNativePlayer=resolve});return{positionMs:0,durationMs:0};case'player_set_geometry':return window.__rejectNativeGeometry?false:true;case'player_close':return{};case'torrent_stats':return{active:true,state:'Live',downloadSpeedBytes:1250000,uploadSpeedBytes:64000,peers:8,peersSeen:14,downloadedBytes:500000000,totalBytes:1000000000,error:null};default:return{};}}}};`;
+const fixtures = `window.__calls=[];window.__eventListeners={};window.__emitTauriEvent=(name,payload)=>window.__eventListeners[name]?.({payload});window.__TAURI__={event:{listen:async(name,callback)=>{window.__eventListeners[name]=callback;return()=>delete window.__eventListeners[name];}},core:{invoke:async(cmd,args)=>{window.__calls.push({cmd,args});const metas=(n,p)=>Array.from({length:n},(_,i)=>({id:'tt'+p+i,type:'movie',name:p+' filme '+i,releaseInfo:'2026'}));switch(cmd){case'home':return{rows:[{title:'Populares',addon:'Teste',transportUrl:'https://test.invalid/manifest.json',type:args.kind,catalogId:'top',metas:metas(20,'home')}]};case'search':return{rows:[]};case'catalog_page':return{metas:[]};case'list_addons':return[];case'meta':return{meta:{id:args.id,type:'movie',name:window.__maliciousMetaName || 'Título de teste',description:'Descrição'}};case'streams':if(args.id==='tt2')throw Error('offline');return{streams:[window.__streamForTest || {name:'Fonte MP4 de teste',title:'1080p',url:'https://stream.test/sample.mp4',mimeType:'video/mp4'}],subtitles:[{lang:'pt',url:'https://subs.test/sample.vtt'}],errors:[]};case'media_proxy_url':return window.__preserveMediaUrl?args.url:'${base}/sample.mp4';case'subtitle':return'WEBVTT\\n\\n00:00:00.000 --> 00:00:01.000\\nLegenda de teste';case'skip_segments':return{segments:[]};case'plugin:exoplayer|play':if(window.__rejectNativePlayer)throw Error('falha nativa simulada');return{positionMs:0,durationMs:0};case'player_play':if(window.__rejectNativePlayer)throw Error('falha mpv simulada');if(window.__holdNativePlayer)return new Promise(resolve=>{window.__finishNativePlayer=resolve});return{positionMs:0,durationMs:0};case'player_composition_enabled':return window.__compositionEnabled!==false;case'player_control':return{};case'player_set_fullscreen':return{};case'player_set_geometry':return window.__rejectNativeGeometry?false:true;case'player_close':return{};case'torrent_stats':return{active:true,state:'Live',downloadSpeedBytes:1250000,uploadSpeedBytes:64000,peers:8,peersSeen:14,downloadedBytes:500000000,totalBytes:1000000000,error:null};default:return{};}}}};`;
 const routes = ['#/', '#/movies', '#/series', '#/animes', '#/search?q=filme', '#/library', '#/addons', '#/detail/movie/tt1'];
 const failures = [];
 const browser = await chromium.launch();
@@ -104,6 +104,9 @@ async function checkWindowsPlayer() {
       ${fixtures}`);
     await page.goto(`${base}/#/detail/movie/tt1`);
     await page.locator('.stream').waitFor({ state: 'visible' });
+    await page.evaluate(() => localStorage.setItem('progress', JSON.stringify({
+      tt1: { t: 123, duration: 600, updated: Date.now(), watched: false, label: 'Teste', seriesId: 'tt1', type: 'movie', name: 'Título de teste' },
+    })));
     await page.locator('.stream').click();
     await page.waitForFunction(() => window.__calls.some((call) => call.cmd === 'player_play'));
     const result = await page.evaluate(() => ({
@@ -113,6 +116,7 @@ async function checkWindowsPlayer() {
       htmlSource: document.querySelector('video')?.currentSrc || document.querySelector('video')?.src || '',
     }));
     if (result.native?.args?.url !== url) failures.push(`[windows-player] ${label}: URL não foi entregue ao libmpv`);
+    if (result.native?.args?.startMs !== 123000) failures.push(`[windows-player] ${label}: progresso salvo não foi enviado ao libmpv para retomar`);
     if (!result.geometry || result.geometry.width < 16 || result.geometry.height < 16) failures.push(`[windows-player] ${label}: geometria física do vídeo não foi enviada ao mpv`);
     if (!Array.isArray(result.geometry?.cutouts) || result.geometry.cutouts.length < 2) failures.push(`[windows-player] ${label}: controles HTML não foram recortados da superfície nativa`);
     if (!result.proxy) failures.push(`[windows-player] ${label}: fonte externa não passou pelo proxy de mídia`);
@@ -129,9 +133,129 @@ async function checkWindowsNativeOverlayClose() {
   await page.addInitScript(`window.__holdNativePlayer = true; ${fixtures}`);
   await page.goto(`${base}/#/detail/movie/tt1`);
   await page.locator('.stream').waitFor({ state: 'visible' });
+  await page.evaluate(() => {
+    localStorage.setItem('playerAudioLanguage', JSON.stringify('en'));
+    localStorage.setItem('playerSubtitleLanguage', JSON.stringify('en'));
+    localStorage.setItem('playerSubtitlesDisabled', JSON.stringify(false));
+  });
   await page.locator('.stream').click();
   await page.waitForFunction(() => window.__calls.some((call) => call.cmd === 'player_set_geometry'));
   if (await page.locator('#player').isHidden()) failures.push('[windows-player-overlay] camada HTML não ficou visível durante a reprodução nativa');
+  await page.locator('#native-controls').waitFor({ state: 'visible' });
+  if (await page.locator('#native-play-pause').isHidden()) failures.push('[windows-player-overlay] botões HTML de reprodução não apareceram');
+  await page.locator('#native-play-pause').click();
+  await page.waitForFunction(() => window.__calls.some((call) => call.cmd === 'player_control' && call.args?.action === 'toggle-pause'));
+  await page.evaluate(() => window.__emitTauriEvent('player-state', {
+    positionMs: 42000, durationMs: 100000, paused: true, volume: 65, muted: false,
+    audioTracks: [
+      { id: 1, title: 'English', language: 'en', codec: 'AAC', selected: false },
+      { id: 2, title: 'Português', language: 'pt', codec: 'AAC', selected: true },
+    ],
+    subtitleTracks: [
+      { id: 3, title: 'Português', language: 'pt', codec: 'SubRip', selected: true },
+      { id: 4, title: 'English', language: 'en', codec: 'SubRip', selected: false },
+    ],
+  }));
+  await page.waitForFunction(() =>
+    document.querySelector('#native-current-time')?.textContent === '0:42'
+    && document.querySelector('#native-duration')?.textContent === '1:40'
+    && document.querySelector('#native-play-pause')?.textContent === 'Reproduzir'
+    && document.querySelector('#native-audio-track')?.options.length === 2
+    && document.querySelector('#native-audio-track')?.value === '2'
+    && document.querySelector('#native-subtitle-track')?.options.length === 3
+    && document.querySelector('#native-subtitle-track')?.value === '3',
+  );
+  if (await page.locator('#native-audio-track-control').isHidden()) failures.push('[windows-player-tracks] seletor de áudio não apareceu');
+  if (await page.locator('#native-subtitle-track-control').isHidden()) failures.push('[windows-player-tracks] seletor de legenda não apareceu');
+  if (await page.locator('#native-subtitle-track option').first().textContent() !== 'Desativada') {
+    failures.push('[windows-player-tracks] opção de desligar legenda não apareceu');
+  }
+  await page.waitForFunction(() => window.__calls.some((call) =>
+    call.cmd === 'player_control' && call.args?.action === 'select-audio' && call.args?.value === 1,
+  ) && window.__calls.some((call) =>
+    call.cmd === 'player_control' && call.args?.action === 'select-subtitle' && call.args?.value === 4,
+  ));
+  await page.evaluate(() => window.__emitTauriEvent('player-state', {
+    positionMs: 43000, durationMs: 100000, paused: true, volume: 65, muted: false,
+    audioTracks: [
+      { id: 1, title: 'English', language: 'en', codec: 'AAC', selected: true },
+      { id: 2, title: 'Português', language: 'pt', codec: 'AAC', selected: false },
+    ],
+    subtitleTracks: [
+      { id: 3, title: 'Português', language: 'pt', codec: 'SubRip', selected: false },
+      { id: 4, title: 'English', language: 'en', codec: 'SubRip', selected: true },
+    ],
+  }));
+  await page.waitForFunction(() =>
+    document.querySelector('#native-audio-track')?.value === '1'
+    && document.querySelector('#native-subtitle-track')?.value === '4',
+  );
+  await page.locator('#native-audio-track').selectOption('2');
+  await page.waitForFunction(() => window.__calls.some((call) =>
+    call.cmd === 'player_control' && call.args?.action === 'select-audio' && call.args?.value === 2,
+  ));
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('playerAudioLanguage') || 'null') === 'pt');
+  await page.locator('#native-subtitle-track').selectOption('');
+  await page.waitForFunction(() => window.__calls.some((call) =>
+    call.cmd === 'player_control' && call.args?.action === 'select-subtitle'
+      && !Object.hasOwn(call.args || {}, 'value'),
+  ));
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('playerSubtitlesDisabled') || 'false') === true);
+  await page.locator('#native-subtitle-track').selectOption('3');
+  await page.waitForFunction(() => window.__calls.some((call) =>
+    call.cmd === 'player_control' && call.args?.action === 'select-subtitle' && call.args?.value === 3,
+  ));
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('playerSubtitleLanguage') || 'null') === 'pt'
+    && JSON.parse(localStorage.getItem('playerSubtitlesDisabled') || 'true') === false);
+  await page.locator('#native-mute').click();
+  await page.waitForFunction(() => window.__calls.some((call) => call.cmd === 'player_control' && call.args?.action === 'toggle-mute'));
+  await page.locator('#native-seek').evaluate((input) => {
+    input.value = '50';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await page.waitForFunction(() => window.__calls.some((call) => call.cmd === 'player_control' && call.args?.action === 'seek-absolute' && call.args?.value === 50));
+  await page.locator('#native-volume').evaluate((input) => {
+    input.value = '35';
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await page.waitForFunction(() => window.__calls.some((call) => call.cmd === 'player_control' && call.args?.action === 'set-volume' && call.args?.value === 35));
+  await page.locator('#native-fullscreen').click();
+  await page.waitForFunction(() => window.__calls.some((call) =>
+    call.cmd === 'player_set_fullscreen' && call.args?.enabled === true,
+  ));
+  if (!(await page.evaluate(() => document.body.classList.contains('native-player-fullscreen')))) {
+    failures.push('[windows-player-fullscreen] classe de tela cheia não foi ativada');
+  }
+  await page.locator('#native-fullscreen').click();
+  await page.waitForFunction(() => window.__calls.some((call) =>
+    call.cmd === 'player_set_fullscreen' && call.args?.enabled === false,
+  ));
+  if (await page.evaluate(() => document.body.classList.contains('native-player-fullscreen'))) {
+    failures.push('[windows-player-fullscreen] classe de tela cheia não foi removida');
+  }
+
+  await page.mouse.move(640, 360);
+  await page.waitForFunction(() => document.body.classList.contains('native-controls-idle'), null, { timeout: 5000 });
+  await page.waitForFunction(() => window.__calls.some((call) =>
+    call.cmd === 'player_set_geometry' && Array.isArray(call.args?.cutouts) && call.args.cutouts.length === 0,
+  ));
+  await page.waitForTimeout(220);
+  const hiddenControls = await page.evaluate(() => ({
+    visibility: getComputedStyle(document.querySelector('#native-controls')).visibility,
+    geometry: window.__calls.filter((call) => call.cmd === 'player_set_geometry').at(-1)?.args,
+  }));
+  if (hiddenControls.visibility !== 'hidden') failures.push('[windows-player-auto-hide] barra não desapareceu após inatividade');
+  if (hiddenControls.geometry?.cutouts?.length) failures.push('[windows-player-auto-hide] superfície nativa ainda reserva recortes para controles ocultos');
+  await page.mouse.move(660, 360);
+  await page.waitForFunction(() => !document.body.classList.contains('native-controls-idle'));
+  await page.waitForFunction(() => {
+    const geometry = window.__calls.filter((call) => call.cmd === 'player_set_geometry').at(-1)?.args;
+    return Array.isArray(geometry?.cutouts) && geometry.cutouts.length > 0;
+  });
+  await page.waitForTimeout(220);
+  if (await page.locator('#native-controls').isHidden()) failures.push('[windows-player-auto-hide] barra não reapareceu ao mover o mouse');
+
   await page.locator('#close-player').click();
   await page.waitForFunction(() => window.__calls.some((call) => call.cmd === 'player_close'));
   await page.evaluate(() => window.__finishNativePlayer?.({ positionMs: 1000, durationMs: 5000 }));
@@ -190,14 +314,19 @@ async function checkAndroidPlayer() {
   await page.addInitScript(fixtures);
   await page.goto(`${base}/#/detail/movie/tt1`);
   await page.locator('.stream').waitFor({ state: 'visible' });
+  await page.evaluate(() => localStorage.setItem('progress', JSON.stringify({
+    tt1: { t: 123, duration: 600, updated: Date.now(), watched: false, label: 'Teste', seriesId: 'tt1', type: 'movie', name: 'Título de teste' },
+  })));
   await page.locator('.stream').click();
   await page.waitForFunction(() => window.__calls.some((call) => call.cmd === 'plugin:exoplayer|play'));
   const args = await page.evaluate(() => window.__calls.find((call) => call.cmd === 'plugin:exoplayer|play')?.args);
+  if (args?.startMs !== 123000) failures.push('[android-player] progresso salvo não foi enviado ao ExoPlayer para retomar');
   const subtitles = JSON.parse(args?.subtitles || '[]');
   if (!Array.isArray(subtitles) || subtitles.length !== 1) failures.push('[android-player] legenda externa não foi enviada ao ExoPlayer');
   if (subtitles[0]?.language !== 'pt' || subtitles[0]?.isDefault !== true) failures.push('[android-player] idioma/preferência da legenda não foi preservado');
   if (!subtitles[0]?.data?.length) failures.push('[android-player] conteúdo VTT não foi codificado para o ExoPlayer');
   if (args?.subtitlesDisabled !== false) failures.push('[android-player] preferência padrão de legendas foi enviada incorretamente');
+  if (args?.subtitleLanguage !== 'pt') failures.push('[android-player] idioma de legenda preferido não foi enviado ao ExoPlayer');
   if (errors.length) failures.push(...errors.map((e) => `[android-player] ${e}`));
   await page.close();
 }
@@ -216,6 +345,14 @@ async function checkAndroidPlayerFallback() {
   await page.locator('.stream').waitFor({ state: 'visible' });
   await page.locator('.stream').click();
   await page.locator('#player:not(.hidden)').waitFor({ state: 'visible' });
+  // A camada do player fica visível imediatamente antes de o Video.js terminar
+  // de refletir a fonte no elemento <video>. Aguarda a URL efetiva para evitar
+  // uma leitura prematura que falhe intermitentemente no runner de CI.
+  await page.waitForFunction(() => {
+    const video = document.querySelector('video');
+    const source = video?.currentSrc || video?.src;
+    return source?.includes('/sample.mp4');
+  }, { timeout: 5000 }).catch(() => {});
   const result = await page.evaluate(() => ({
     nativeAttempted: window.__calls.some((call) => call.cmd === 'plugin:exoplayer|play'),
     source: document.querySelector('video')?.currentSrc || document.querySelector('video')?.src,

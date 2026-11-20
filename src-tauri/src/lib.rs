@@ -208,7 +208,10 @@ pub fn run() {
             diag::save_diagnostics,
             player::player_play,
             player::player_set_geometry,
+            player::player_composition_enabled,
             player::player_close,
+            player::player_set_fullscreen,
+            player::player_control,
             skip::skip_segments,
         ])
         .run(tauri::generate_context!())
