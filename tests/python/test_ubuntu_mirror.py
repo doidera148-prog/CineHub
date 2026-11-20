@@ -10,7 +10,7 @@ SCRIPT = ROOT / ".github" / "scripts" / "select-ubuntu-mirror.sh"
 
 
 class UbuntuMirrorSelectionTests(unittest.TestCase):
-    def test_selects_fastest_reachable_brazilian_mirror_and_preserves_security(self):
+    def test_prefers_fastest_mirror_and_configures_automatic_fallback(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             sources = root / "sources"
@@ -54,10 +54,25 @@ class UbuntuMirrorSelectionTests(unittest.TestCase):
                 text=True,
                 env=env,
             )
+
             updated = source_file.read_text(encoding="utf-8")
-            self.assertIn("https://mirror.ufscar.br/ubuntu", updated)
+            mirror_list = (sources / "ubuntu-mirrors.txt").read_text(encoding="utf-8")
+            self.assertIn(f"mirror+file:{sources}/ubuntu-mirrors.txt", updated)
             self.assertIn("http://security.ubuntu.com/ubuntu", updated)
+            self.assertIn(
+                "https://mirror.ufscar.br/ubuntu\tpriority:1", mirror_list
+            )
+            self.assertIn(
+                "https://ubuntu.c3sl.ufpr.br/ubuntu\tpriority:2", mirror_list
+            )
+            self.assertIn(
+                "https://br.archive.ubuntu.com/ubuntu\tpriority:2", mirror_list
+            )
+            self.assertIn(
+                "https://archive.ubuntu.com/ubuntu\tpriority:2", mirror_list
+            )
             self.assertIn("0.10s", result.stdout)
+            self.assertIn("failover", result.stdout)
 
     def test_keeps_existing_sources_when_no_mirror_responds(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -76,6 +91,7 @@ class UbuntuMirrorSelectionTests(unittest.TestCase):
             env.update({"PATH": f"{fake_bin}:{env['PATH']}", "APT_SOURCES_DIR": str(sources)})
             subprocess.run(["bash", str(SCRIPT)], check=True, capture_output=True, env=env)
             self.assertEqual(source_file.read_text(encoding="utf-8"), original)
+            self.assertFalse((sources / "ubuntu-mirrors.txt").exists())
 
 
 if __name__ == "__main__":
