@@ -68,6 +68,7 @@ fn clipped_cutouts(width: u32, height: u32, cutouts: &[PlayerCutout]) -> Vec<(i3
 
 #[tauri::command]
 pub fn player_set_geometry(
+    app: tauri::AppHandle,
     x: i32,
     y: i32,
     width: u32,
@@ -76,11 +77,16 @@ pub fn player_set_geometry(
 ) -> bool {
     #[cfg(all(windows, feature = "mpv"))]
     {
+        if std::env::var_os("CINEHUB_WEBVIEW2_COMPOSITION_POC").is_some() {
+            return embed_handle(&app).is_some_and(|parent| {
+                mpv_d3d11::set_video_rect(parent, x, y, width, height)
+            });
+        }
         win::set_shape(x, y, width, height, &cutouts)
     }
     #[cfg(not(all(windows, feature = "mpv")))]
     {
-        let _ = (x, y, width, height, cutouts);
+        let _ = (app, x, y, width, height, cutouts);
         false
     }
 }
@@ -137,7 +143,13 @@ fn embed_handle(app: &tauri::AppHandle) -> Option<i64> {
 /// Pede para fechar o vídeo embutido (Windows): envia WM_CLOSE para a janela do mpv.
 pub fn request_close() {
     #[cfg(all(windows, feature = "mpv"))]
-    win::request_close();
+    {
+        if std::env::var_os("CINEHUB_WEBVIEW2_COMPOSITION_POC").is_some() {
+            imp::request_close();
+        } else {
+            win::request_close();
+        }
+    }
 }
 
 /// Esc global durante o vídeo (desktop). No Android não existe atalho global.
@@ -225,6 +237,12 @@ mod imp {
 
     /// Tecla que pula o trecho em andamento (abertura, recapitulação ou créditos).
     const SKIP_KEY: &str = "F12";
+    static COMPOSITION_CLOSE_REQUESTED: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+
+    pub fn request_close() {
+        COMPOSITION_CLOSE_REQUESTED.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
 
     pub fn play(
         url: &str,
@@ -234,8 +252,15 @@ mod imp {
         segments: &[Segment],
         _app: tauri::AppHandle,
     ) -> Result<PlayerResult, String> {
+        COMPOSITION_CLOSE_REQUESTED.store(false, std::sync::atomic::Ordering::SeqCst);
+        #[cfg(windows)]
+        let composition_mode =
+            wid.is_some() && std::env::var_os("CINEHUB_WEBVIEW2_COMPOSITION_POC").is_some();
+        #[cfg(not(windows))]
+        let composition_mode = false;
+
         let mpv = Mpv::with_initializer(|init| {
-            init.set_option("vo", "gpu")?;
+            init.set_option("vo", if composition_mode { "libmpv" } else { "gpu" })?;
             init.set_option("hwdec", "auto-safe")?;
             // O OSC do mpv é a interface de controles no Windows: a janela de vídeo
             // nativa cobre a WebView, portanto os controles HTML do CineHub não ficam visíveis.
@@ -258,17 +283,30 @@ mod imp {
             // Títulos com várias faixas: prefere áudio e legenda em português.
             init.set_option("alang", "pt,por")?;
             init.set_option("slang", "pt,por")?;
-            match wid {
-                // Dentro da janela do CineHub: o mpv cria uma janela filha que cobre a área do app.
-                Some(handle) => init.set_option("wid", handle)?,
-                None => {
-                    init.set_option("force-window", "yes")?;
-                    init.set_option("title", "CineHub")?;
+            if !composition_mode {
+                match wid {
+                    // No caminho padrão, o mpv cria uma janela filha dentro do app.
+                    Some(handle) => init.set_option("wid", handle)?,
+                    None => {
+                        init.set_option("force-window", "yes")?;
+                        init.set_option("title", "CineHub")?;
+                    }
                 }
             }
             Ok(())
         })
         .map_err(|e| format!("não consegui iniciar o mpv: {e}"))?;
+
+        // Create the render context before loadfile so vo=libmpv never creates a
+        // separate native window. Wry supplies the device used by its composition swap chain.
+        #[cfg(windows)]
+        let render_context = if composition_mode {
+            let parent = wid.expect("composition_mode requer o HWND da janela principal");
+            let device = super::mpv_d3d11::host_device(parent)?;
+            Some(super::mpv_d3d11::D3d11RenderContext::new(&mpv, &device)?)
+        } else {
+            None
+        };
 
         // Controles de teclado explícitos, além do OSC clicável exibido pelo mpv.
         let _ = mpv.command("keybind", &["SPACE", "cycle pause"]);
@@ -307,9 +345,9 @@ mod imp {
         let mut failed = false;
         // Dentro da janela do app: esconde os controles web e traz o vídeo para frente (Windows).
         #[cfg(all(windows, feature = "mpv"))]
-        let mut embedded = false;
+        let mut embedded = composition_mode;
         loop {
-            match mpv.wait_event(0.25) {
+            match mpv.wait_event(if composition_mode { 0.016 } else { 0.25 }) {
                 Some(Ok(Event::EndFile(reason))) => {
                     failed = reason == mpv_end_file_reason::Error;
                     break;
@@ -317,13 +355,35 @@ mod imp {
                 Some(Ok(Event::Shutdown)) => break,
                 _ => {}
             }
+
+            if COMPOSITION_CLOSE_REQUESTED.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                let _ = mpv.command("quit", &[]);
+            }
+
+            #[cfg(windows)]
+            if let (Some(parent), Some(renderer)) = (wid, render_context.as_ref()) {
+                if renderer.frame_is_pending() {
+                    match super::mpv_d3d11::render_to_host(parent, renderer) {
+                        Ok(true) => renderer.report_swap(),
+                        Ok(false) => {}
+                        Err(error) => {
+                            eprintln!("erro no renderizador D3D11 do CineHub: {error}");
+                            failed = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
             #[cfg(all(windows, feature = "mpv"))]
-            if let (Some(parent), false) = (wid, embedded) {
+            if !composition_mode {
+                if let (Some(parent), false) = (wid, embedded) {
                 if let Ok(video) = mpv.get_property::<i64>("window-id") {
                     if super::win::take_over(&_app, parent, video) {
                         embedded = true;
                     }
                 }
+            }
             }
             // Guarda a última posição conhecida: depois do fim do arquivo as propriedades não existem mais.
             if let Ok(t) = mpv.get_property::<f64>("time-pos") {
@@ -355,7 +415,9 @@ mod imp {
         }
 
         #[cfg(all(windows, feature = "mpv"))]
-        super::win::restore(&_app);
+        if !composition_mode {
+            super::win::restore(&_app);
+        }
 
         if failed {
             return Err("o mpv não conseguiu tocar este vídeo".into());

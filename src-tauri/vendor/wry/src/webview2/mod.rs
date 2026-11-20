@@ -155,8 +155,8 @@ impl InnerWebView {
     // Explicit opt-in for the isolated composition-hosting POC. Production remains on
     // the proven standard controller until pointer forwarding and lifecycle checks pass.
     let composition_host =
-      if std::env::var_os("CINEHUB_WEBVIEW2_COMPOSITION_POC").is_some() {
-        Some(CompositionHost::new(hwnd, &env)?)
+      if !is_child && std::env::var_os("CINEHUB_WEBVIEW2_COMPOSITION_POC").is_some() {
+        Some(CompositionHost::new(parent, hwnd, &env)?)
       } else {
         None
       };

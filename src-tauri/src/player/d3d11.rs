@@ -10,6 +10,8 @@
 
 use std::{ffi::c_void, marker::PhantomData, mem, ptr::NonNull};
 
+use windows::core::Interface;
+
 use libmpv2::Mpv;
 use windows::{
     core::Interface,
@@ -179,6 +181,72 @@ impl Drop for D3d11RenderContext<'_> {
 }
 
 /// Checks the C ABI layout used by libmpv's render.h/render_d3d11.h headers.
+unsafe extern "C" {
+    fn cinehub_wry_composition_get_device(parent: isize) -> *mut c_void;
+    fn cinehub_wry_composition_get_backbuffer(parent: isize) -> *mut c_void;
+    fn cinehub_wry_composition_present(parent: isize) -> i32;
+    fn cinehub_wry_composition_set_video_rect(
+        parent: isize,
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+    ) -> i32;
+}
+
+/// Gets an additional COM reference to the D3D11 device owned by the Wry host.
+pub(super) fn host_device(parent: i64) -> Result<ID3D11Device, String> {
+    let raw = unsafe { cinehub_wry_composition_get_device(parent as isize) };
+    let raw = NonNull::new(raw)
+        .ok_or_else(|| "o host WebView2 não registrou um dispositivo D3D11".to_string())?;
+    // SAFETY: Wry returns an additional COM reference owned by this caller.
+    Ok(unsafe { ID3D11Device::from_raw(raw.as_ptr()) })
+}
+
+/// Renders to the shared swap-chain backbuffer and presents it.
+pub(super) fn render_to_host(
+    parent: i64,
+    context: &D3d11RenderContext<'_>,
+) -> Result<bool, String> {
+    let raw = unsafe { cinehub_wry_composition_get_backbuffer(parent as isize) };
+    let Some(raw) = NonNull::new(raw) else {
+        // The window is minimized or its player geometry is temporarily empty.
+        return Ok(false);
+    };
+    // SAFETY: Wry transfers one COM reference to the current backbuffer.
+    let texture = unsafe { ID3D11Texture2D::from_raw(raw.as_ptr()) };
+    context.render(&texture)?;
+    // Release the backbuffer reference before Present or a later ResizeBuffers.
+    drop(texture);
+    let result = unsafe { cinehub_wry_composition_present(parent as isize) };
+    if result < 0 {
+        return Err(format!(
+            "DXGI não conseguiu apresentar o frame do CineHub (HRESULT 0x{:08X})",
+            result as u32
+        ));
+    }
+    Ok(result == 0)
+}
+
+/// Moves/resizes the video visual on the thread that owns the WebView HWND.
+pub(super) fn set_video_rect(
+    parent: i64,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> bool {
+    unsafe {
+        cinehub_wry_composition_set_video_rect(
+            parent as isize,
+            x,
+            y,
+            width,
+            height,
+        ) == 0
+    }
+}
+
 pub(super) fn abi_layout_is_valid() -> bool {
     mem::size_of::<MpvRenderParam>() == mem::size_of::<usize>() * 2
         && mem::offset_of!(MpvRenderParam, data) == mem::size_of::<usize>()

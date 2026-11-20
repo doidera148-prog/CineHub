@@ -360,6 +360,52 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("abi_layout_is_valid", d3d11)
         self.assertIn('"Win32_Graphics_Direct3D11"', (ROOT / "src-tauri/Cargo.toml").read_text(encoding="utf-8"))
 
+        for required in (
+            "D3D11CreateDevice",
+            "D3D11_CREATE_DEVICE_BGRA_SUPPORT",
+            "D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS",
+            "ID3D11Multithread",
+            "SetMultithreadProtected(true)",
+            "CreateSwapChainForComposition",
+            "DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL",
+            "DXGI_SCALING_STRETCH",
+            "DXGI_ALPHA_MODE_PREMULTIPLIED",
+            "DXGI_FORMAT_B8G8R8A8_UNORM",
+            "cinehub_wry_composition_get_device",
+            "cinehub_wry_composition_get_backbuffer",
+            "cinehub_wry_composition_present",
+            "cinehub_wry_composition_set_video_rect",
+            "root_visual.AddVisual(&video_visual_base, false",
+            "root_visual.AddVisual(&webview_visual_base, true",
+            "SetRootVisualTarget(&webview_visual_base",
+            "WM_CINEHUB_SET_VIDEO_RECT",
+            "ResizeBuffers(",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, composition)
+
+        wry_mod = (ROOT / "src-tauri/vendor/wry/src/webview2/mod.rs").read_text(encoding="utf-8")
+        self.assertIn("CompositionHost::new(parent, hwnd, &env)", wry_mod)
+        self.assertIn('"Win32_Graphics_Dxgi"', (ROOT / "src-tauri/vendor/wry/Cargo.toml").read_text(encoding="utf-8"))
+        self.assertIn('"Win32_Graphics_Direct3D"', (ROOT / "src-tauri/vendor/wry/Cargo.toml").read_text(encoding="utf-8"))
+        for required in (
+            "cinehub_wry_composition_get_device",
+            "cinehub_wry_composition_get_backbuffer",
+            "cinehub_wry_composition_present",
+            "ID3D11Device::from_raw",
+            "ID3D11Texture2D::from_raw",
+            "context.render(&texture)",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, d3d11)
+
+        player = (ROOT / "src-tauri/src/player.rs").read_text(encoding="utf-8")
+        self.assertIn('init.set_option("vo", if composition_mode { "libmpv" } else { "gpu" })?', player)
+        self.assertIn("super::mpv_d3d11::D3d11RenderContext::new(&mpv, &device)", player)
+        self.assertIn("super::mpv_d3d11::render_to_host(parent, renderer)", player)
+        self.assertIn("COMPOSITION_CLOSE_REQUESTED", player)
+        self.assertIn("mpv_d3d11::set_video_rect(parent, x, y, width, height)", player)
+
     def test_only_optional_ffmpeg_download_can_fail_without_stopping_android_job(self):
         android = job_block(self.workflow, "android")
         self.assertIn("name: Extensão FFmpeg do Media3 (opcional", android)

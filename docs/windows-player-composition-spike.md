@@ -16,8 +16,8 @@ Replace the embedded libmpv child HWND (wid) with libmpv's render API so video p
 
 1. Hosting proof of concept (Windows-only): prove that the app can create a WebView2 composition controller on the main UI thread, attach its visual to a DirectComposition target, resize it, and continue to receive pointer input. Keep the existing Tauri WebView active as a fallback until the composition host is functional.
 2. libmpv render proof of concept: initialize a D3D11 device and libmpv D3D11 render context; render into an application-owned BGRA texture; handle update callbacks, resize, device loss, and teardown. Keep libmpv playback and command/event handling on their existing worker path.
-3. Composition: place the WebView2 visual and the mpv video visual in one DirectComposition tree with the WebView above the video. Verify alpha, clipping, resize, DPI, fullscreen and input hit testing.
-4. Integration: switch Windows playback from wid/child-HWND embedding to the render API only after the proof of concept passes. Remove obsolete HWND mouse-forwarding code only in the same validated change.
+3. Composition: place the WebView2 visual and the mpv video visual in one DirectComposition tree with the WebView above the video. The opt-in branch now has this tree and a shared-device swap chain; verify alpha/transparency, clipping, resize, DPI, fullscreen and input hit testing.
+4. Integration: the opt-in Windows path now selects vo=libmpv and renders to the shared swap-chain backbuffer. Keep it experimental; switch the default Windows player from wid/child-HWND embedding and remove obsolete HWND forwarding only after real-device validation.
 5. Regression validation: extend existing Windows player tests and the existing .github/workflows/build.yml Windows job. Do not create a separate workflow. Preserve the four Android ABIs and ExoPlayer path.
 
 ## Acceptance criteria
@@ -98,7 +98,7 @@ The first fork patch should be deliberately limited to:
 5. Keep existing navigation, IPC, permission, custom-protocol, download, drag/drop and event registration using the same common WebView interface.
 6. Add a focused host diagnostic/test target before wiring this mode into CineHub's normal window creation.
 
-Do not begin the libmpv D3D11 renderer patch until this hosting-only change builds and its pointer/resize/recreate checks pass.
+The later “In-repository vendor strategy” and “Native libmpv D3D11 render bridge” sections below supersede this initial sequencing note: the shared-device composition surface and opt-in renderer have since been implemented, but still require real-Windows validation.
 
 ### Fork creation status
 
@@ -157,6 +157,25 @@ The Windows player now has an isolated Rust bridge for libmpv's native Direct3D 
 - Keeps the native ABI structs/constants local because the pinned libmpv2-sys 4.0.1 pregenerated bindings include the generic render API but not the newer D3D11 parameter declarations.
 - Ties the render context lifetime to Mpv so it is dropped before the mpv core.
 
-The bridge is not wired into playback yet. It deliberately does not create a D3D11 device, a DXGI swap chain, or a DirectComposition visual, and it does not change the existing wid/native-window path. The next integration seam is to let the opt-in Wry composition host own a shared D3D11 device and composition swap chain, then provide that device/texture to this bridge. The default player remains unchanged.
+The bridge is now connected to the opt-in Wry composition host. Wry creates one hardware D3D11 device with BGRA support and multithread protection, then creates a premultiplied BGRA flip-sequential composition swap chain on that same device. The DirectComposition target has separate sibling visuals: the video swap-chain visual is behind the WebView2 visual, and the WebView2 composition controller owns the upper visual. Wry exposes narrow C-ABI functions to hand libmpv an additional COM reference to the device/backbuffer, present the frame, and position/resize the video visual on the WebView-owning thread.
+
+When CINEHUB_WEBVIEW2_COMPOSITION_POC is set before app startup, Windows libmpv uses vo=libmpv (without wid), creates its D3D11 render context before loadfile, polls for frames, renders into the swap-chain backbuffer, and presents it. ResizeBuffers is deferred until the player releases its backbuffer reference. The normal HWND/wid player remains the default when the variable is absent. Closing and player geometry commands are routed to the composition host in this opt-in mode.
+
+This is still a rendering integration prototype, not a verified player fix: CI validates compilation and regression guards, but does not prove actual GPU presentation, transparency of the WebView content over the video, DPI/fullscreen behavior, physical mouse/touch input, frame pacing, or repeated create/close safety on a real Windows desktop. The WebView must expose a transparent player region for the surface behind it to be visible. Do not enable this mode for normal CineHub use or remove the existing player path until the full acceptance criteria below pass.
 
 The existing Windows CI build compiles this module with the mpv feature. The existing Rust OSC test now also checks the native ABI structure layout/constants, and the existing Python regression test checks the bridge entry points and feature gate. No additional workflow or duplicate test run was added.
+
+
+## Shared D3D11 composition surface — 2026-11-20
+
+The opt-in Windows path now has an end-to-end code connection between Wry and libmpv:
+
+- Wry creates a hardware D3D11 device with BGRA support and multithread protection.
+- The DXGI composition swap chain is created from that same D3D11 device, with BGRA8, premultiplied alpha, two buffers, stretch scaling and flip-sequential presentation.
+- DirectComposition now has a root with independent sibling visuals: the video swap-chain visual is inserted below the WebView2 visual. The video visual is hidden until player geometry is supplied.
+- Wry exposes narrow C-ABI calls for an additional COM reference to the shared device/backbuffer, frame presentation, and video visual geometry updates. DComp visual changes are marshalled synchronously to the thread that owns the WebView HWND.
+- The Windows opt-in player selects `vo=libmpv`, omits `wid`, creates its D3D11 render context before loading the video, polls for render updates and presents each rendered frame through the host swap chain. It releases each backbuffer reference before Present and defers ResizeBuffers until a new backbuffer is acquired.
+- The composition close and geometry commands are routed to the host. The normal HWND/wid path remains selected when the environment variable is absent.
+- The existing Python regression method was expanded. The Windows build/test command remains the existing single targeted player test in `.github/workflows/build.yml`; no new workflow or duplicate test step was added.
+
+**Not yet established:** a successful Windows CI build can verify Rust/API integration and the ABI guards, but cannot verify the GPU output, transparent WebView player region, physical pointer behavior, real resize/DPI/fullscreen, audio/video frame pacing or repeated open/close on a Windows desktop. This is an opt-in implementation slice, not a validated fix and not a change to the default player.
