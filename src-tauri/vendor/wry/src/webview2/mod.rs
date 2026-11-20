@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
+mod composition;
 mod drag_drop;
 mod util;
 
@@ -31,6 +32,7 @@ use windows::{
   core::{BOOL, HSTRING, Interface, PCWSTR, PWSTR, s, w},
 };
 
+use self::composition::CompositionHost;
 use self::drag_drop::DragDropController;
 use super::Theme;
 use crate::{
@@ -71,6 +73,8 @@ pub(crate) struct InnerWebView {
   // the webview gets dropped, otherwise we'll have a memory leak
   #[allow(dead_code)]
   drag_drop_controller: Option<DragDropController>,
+  #[allow(dead_code)]
+  composition_host: Option<CompositionHost>,
 }
 
 impl Drop for InnerWebView {
@@ -142,13 +146,24 @@ impl InnerWebView {
     } else {
       Self::create_environment(&attributes, pl_attrs.clone())?
     };
-    let controller = Self::create_controller(
-      hwnd,
-      &env,
-      attributes.incognito,
-      background_color,
-      pl_attrs.profile_name.as_deref(),
-    )?;
+    // Explicit opt-in for the isolated composition-hosting POC. Production remains on
+    // the proven standard controller until pointer forwarding and lifecycle checks pass.
+    let composition_host =
+      if std::env::var_os("CINEHUB_WEBVIEW2_COMPOSITION_POC").is_some() {
+        Some(CompositionHost::new(hwnd, &env)?)
+      } else {
+        None
+      };
+    let controller = match composition_host.as_ref() {
+      Some(host) => host.controller.clone(),
+      None => Self::create_controller(
+        hwnd,
+        &env,
+        attributes.incognito,
+        background_color,
+        pl_attrs.profile_name.as_deref(),
+      )?,
+    };
     let webview = Self::init_webview(
       parent,
       hwnd,
@@ -179,6 +194,7 @@ impl InnerWebView {
       webview,
       env,
       drag_drop_controller,
+      composition_host,
     };
 
     if is_child {
@@ -397,8 +413,7 @@ impl InnerWebView {
           error_code?;
           controller.ok_or_else(|| windows::core::Error::from(E_POINTER).into())
         })();
-        tx.send(result)
-          .map_err(|_| windows::core::Error::from(E_UNEXPECTED))
+        tx.send(result)          .map_err(|_| windows::core::Error::from(E_UNEXPECTED))
       },
     ));
 
@@ -797,8 +812,7 @@ impl InnerWebView {
             let features = args
               .WindowFeatures()
               .map(|f| {
-                let mut position = None;
-                let mut size = None;
+                let mut position = None;                let mut size = None;
 
                 let mut has_position: BOOL = false.into();
                 let _ = f.HasPosition(&mut has_position);
@@ -1197,8 +1211,7 @@ impl InnerWebView {
 
       let request = request.uri(&path).body(body_sent)?;
 
-      Ok(request)
-    }
+      Ok(request)    }
   }
 
   #[inline]
@@ -1598,436 +1611,3 @@ impl InnerWebView {
         x: rect.left,
         y: rect.top,
       }];
-      unsafe { MapWindowPoints(Some(self.hwnd), Some(*self.parent.borrow()), position_point) };
-
-      bounds.position = PhysicalPosition::new(position_point[0].x, position_point[0].y).into();
-    } else {
-      unsafe { self.controller.Bounds(&mut rect) }?;
-    }
-
-    bounds.size = PhysicalSize::new(rect.right - rect.left, rect.bottom - rect.top).into();
-
-    Ok(bounds)
-  }
-
-  pub fn set_bounds_inner(
-    &self,
-    size: PhysicalSize<i32>,
-    position: PhysicalPosition<i32>,
-  ) -> Result<()> {
-    unsafe {
-      self.controller.SetBounds(RECT {
-        top: 0,
-        left: 0,
-        right: size.width,
-        bottom: size.height,
-      })?;
-
-      SetWindowPos(
-        self.hwnd,
-        None,
-        position.x,
-        position.y,
-        size.width,
-        size.height,
-        SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE | SWP_NOZORDER,
-      )?;
-    }
-
-    Ok(())
-  }
-
-  pub fn set_bounds(&self, bounds: Rect) -> Result<()> {
-    let dpi = unsafe { util::hwnd_dpi(self.hwnd) };
-    let scale_factor = util::dpi_to_scale_factor(dpi);
-    let size = bounds.size.to_physical::<i32>(scale_factor);
-    let position = bounds.position.to_physical(scale_factor);
-    self.set_bounds_inner(size, position)?;
-    Ok(())
-  }
-
-  fn resize_to_parent(&self) -> crate::Result<()> {
-    let parent_bounds = Self::parent_bounds(*self.parent.borrow())?;
-    self.set_bounds_inner(parent_bounds, (0, 0).into())
-  }
-
-  pub fn set_visible(&self, visible: bool) -> Result<()> {
-    unsafe {
-      let _ = ShowWindow(
-        self.hwnd,
-        match visible {
-          true => SW_SHOW,
-          false => SW_HIDE,
-        },
-      );
-
-      self.controller.SetIsVisible(visible)?;
-    }
-
-    Ok(())
-  }
-
-  pub fn focus(&self) -> Result<()> {
-    unsafe {
-      self
-        .controller
-        .MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC)
-        .map_err(Into::into)
-    }
-  }
-
-  pub fn focus_parent(&self) -> Result<()> {
-    unsafe {
-      let parent = *self.parent.borrow();
-      if parent != HWND::default() {
-        SetFocus(Some(parent))?;
-      }
-    }
-
-    Ok(())
-  }
-
-  unsafe fn cookie_from_win32(cookie: ICoreWebView2Cookie) -> Result<cookie::Cookie<'static>> {
-    unsafe {
-      let mut name = PWSTR::null();
-      cookie.Name(&mut name)?;
-      let name = take_pwstr(name);
-
-      let mut value = PWSTR::null();
-      cookie.Value(&mut value)?;
-      let value = take_pwstr(value);
-
-      let mut cookie_builder = cookie::CookieBuilder::new(name, value);
-
-      let mut domain = PWSTR::null();
-      cookie.Domain(&mut domain)?;
-      cookie_builder = cookie_builder.domain(take_pwstr(domain));
-
-      let mut path = PWSTR::null();
-      cookie.Path(&mut path)?;
-      cookie_builder = cookie_builder.path(take_pwstr(path));
-
-      let mut http_only: BOOL = false.into();
-      cookie.IsHttpOnly(&mut http_only)?;
-      cookie_builder = cookie_builder.http_only(http_only.as_bool());
-
-      let mut secure: BOOL = false.into();
-      cookie.IsSecure(&mut secure)?;
-      cookie_builder = cookie_builder.secure(secure.as_bool());
-
-      let mut same_site = COREWEBVIEW2_COOKIE_SAME_SITE_KIND_LAX;
-      cookie.SameSite(&mut same_site)?;
-      let same_site = match same_site {
-        COREWEBVIEW2_COOKIE_SAME_SITE_KIND_LAX => cookie::SameSite::Lax,
-        COREWEBVIEW2_COOKIE_SAME_SITE_KIND_STRICT => cookie::SameSite::Strict,
-        COREWEBVIEW2_COOKIE_SAME_SITE_KIND_NONE => cookie::SameSite::None,
-        _ => cookie::SameSite::None,
-      };
-      cookie_builder = cookie_builder.same_site(same_site);
-
-      let mut is_session: BOOL = false.into();
-      cookie.IsSession(&mut is_session)?;
-
-      let mut expires = 0.0;
-      cookie.Expires(&mut expires)?;
-
-      let expires = match expires {
-        _ if expires == -1.0 || is_session.as_bool() => Some(cookie::Expiration::Session),
-        datetime => cookie::time::OffsetDateTime::from_unix_timestamp(datetime as _)
-          .ok()
-          .map(cookie::Expiration::DateTime),
-      };
-      if let Some(expires) = expires {
-        cookie_builder = cookie_builder.expires(expires);
-      }
-
-      Ok(cookie_builder.build())
-    }
-  }
-
-  unsafe fn cookie_into_win32(
-    cookie_manager: &ICoreWebView2CookieManager,
-    cookie: &cookie::Cookie<'_>,
-  ) -> windows::core::Result<ICoreWebView2Cookie> {
-    unsafe {
-      let name = HSTRING::from(cookie.name());
-      let value = HSTRING::from(cookie.value());
-      let domain = cookie.domain().map(HSTRING::from).unwrap_or_default();
-      let path = cookie.path().map(HSTRING::from).unwrap_or_default();
-
-      let win32_cookie = cookie_manager.CreateCookie(&name, &value, &domain, &path)?;
-
-      let expires = if let Some(max_age) = cookie.max_age() {
-        let expires_ = cookie::time::OffsetDateTime::now_utc()
-          .saturating_add(max_age)
-          .unix_timestamp();
-        Some(expires_)
-      } else {
-        cookie.expires_datetime().map(|dt| dt.unix_timestamp())
-      };
-      if let Some(expires) = expires {
-        win32_cookie.SetExpires(expires as f64)?;
-      }
-
-      if let Some(http_only) = cookie.http_only() {
-        win32_cookie.SetIsHttpOnly(http_only)?;
-      }
-
-      if let Some(same_site) = cookie.same_site() {
-        let same_site = match same_site {
-          cookie::SameSite::Lax => COREWEBVIEW2_COOKIE_SAME_SITE_KIND_LAX,
-          cookie::SameSite::Strict => COREWEBVIEW2_COOKIE_SAME_SITE_KIND_STRICT,
-          cookie::SameSite::None => COREWEBVIEW2_COOKIE_SAME_SITE_KIND_NONE,
-        };
-        win32_cookie.SetSameSite(same_site)?;
-      }
-
-      if let Some(secure) = cookie.secure() {
-        win32_cookie.SetIsSecure(secure)?;
-      }
-
-      Ok(win32_cookie)
-    }
-  }
-
-  pub fn cookies_for_url(&self, url: &str) -> Result<Vec<cookie::Cookie<'static>>> {
-    let uri = HSTRING::from(url);
-    self.cookies_inner(PCWSTR::from_raw(uri.as_ptr()))
-  }
-
-  pub fn cookies(&self) -> Result<Vec<cookie::Cookie<'static>>> {
-    self.cookies_inner(PCWSTR::null())
-  }
-
-  fn cookies_inner(&self, uri: PCWSTR) -> Result<Vec<cookie::Cookie<'static>>> {
-    let (tx, rx) = mpsc::channel();
-
-    let webview = self.webview.cast::<ICoreWebView2_2>()?;
-    unsafe {
-      webview.CookieManager()?.GetCookies(
-        uri,
-        // we don't use GetCookiesCompletedHandler::wait_for_async
-        // as it uses an mspc::channel under the hood, so we can avoid using two channels
-        // by manually creating the callback handler and use webview2_com::with_with_bump
-        &GetCookiesCompletedHandler::create(Box::new(move |error_code, cookies| {
-          let result = (move || {
-            error_code?;
-
-            let cookies = if let Some(cookies) = cookies {
-              let mut count = 0;
-              cookies.Count(&mut count)?;
-
-              let mut out = Vec::with_capacity(count as _);
-
-              for idx in 0..count {
-                let cookie = cookies.GetValueAtIndex(idx)?;
-
-                if let Ok(cookie) = Self::cookie_from_win32(cookie) {
-                  out.push(cookie)
-                }
-              }
-
-              out
-            } else {
-              Vec::new()
-            };
-            Ok(cookies)
-          })();
-
-          tx.send(result)
-            .map_err(|_| windows::core::Error::from(E_UNEXPECTED))
-        })),
-      )?;
-    }
-
-    webview2_com::wait_with_pump(rx)?
-  }
-
-  pub fn set_cookie(&self, cookie: &cookie::Cookie<'_>) -> Result<()> {
-    let webview = self.webview.cast::<ICoreWebView2_2>()?;
-    unsafe {
-      let cookie_manager = webview.CookieManager()?;
-      let cookie = Self::cookie_into_win32(&cookie_manager, cookie)?;
-      cookie_manager.AddOrUpdateCookie(&cookie)?;
-    }
-    Ok(())
-  }
-
-  pub fn delete_cookie(&self, cookie: &cookie::Cookie<'_>) -> Result<()> {
-    let webview = self.webview.cast::<ICoreWebView2_2>()?;
-    unsafe {
-      let cookie_manager = webview.CookieManager()?;
-      let cookie = Self::cookie_into_win32(&cookie_manager, cookie)?;
-      cookie_manager.DeleteCookie(&cookie)?;
-    }
-    Ok(())
-  }
-
-  pub fn reparent(&self, parent: isize) -> Result<()> {
-    let parent = HWND(parent as _);
-
-    unsafe {
-      SetParent(self.hwnd, Some(parent))?;
-
-      if !self.is_child {
-        Self::dettach_parent_subclass(*self.parent.borrow());
-        Self::attach_parent_subclass(parent, &self.controller);
-
-        *self.parent.borrow_mut() = parent;
-
-        let parent_bounds = Self::parent_bounds(parent)?;
-
-        self.set_bounds_inner(parent_bounds, (0, 0).into())?;
-      }
-    }
-
-    Ok(())
-  }
-
-  pub fn print(&self) -> Result<()> {
-    self.eval(
-      "window.print()",
-      None::<Box<dyn FnOnce(String) + Send + 'static>>,
-    )
-  }
-
-  pub fn clear_all_browsing_data(&self) -> Result<()> {
-    unsafe {
-      self
-        .webview
-        .cast::<ICoreWebView2_13>()?
-        .Profile()?
-        .cast::<ICoreWebView2Profile2>()?
-        .ClearBrowsingDataAll(&ClearBrowsingDataCompletedHandler::create(Box::new(
-          move |_| Ok(()),
-        )))
-        .map_err(Into::into)
-    }
-  }
-
-  pub fn set_theme(&self, theme: Theme) -> Result<()> {
-    unsafe { set_theme(&self.webview, theme) }
-  }
-
-  pub fn set_background_color(&self, background_color: RGBA) -> Result<()> {
-    unsafe { set_background_color(&self.controller, background_color) }
-  }
-
-  pub fn set_memory_usage_level(&self, level: MemoryUsageLevel) -> Result<()> {
-    let webview = self.webview.cast::<ICoreWebView2_19>()?;
-    // https://learn.microsoft.com/en-us/dotnet/api/microsoft.web.webview2.core.corewebview2memoryusagetargetlevel
-    let level = match level {
-      MemoryUsageLevel::Normal => 0,
-      MemoryUsageLevel::Low => 1,
-    };
-    let level = COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL(level);
-    unsafe { webview.SetMemoryUsageTargetLevel(level).map_err(Into::into) }
-  }
-
-  #[cfg(any(debug_assertions, feature = "devtools"))]
-  pub fn open_devtools(&self) {
-    let _ = unsafe { self.webview.OpenDevToolsWindow() };
-  }
-
-  #[cfg(any(debug_assertions, feature = "devtools"))]
-  pub fn close_devtools(&self) {}
-
-  #[cfg(any(debug_assertions, feature = "devtools"))]
-  pub fn is_devtools_open(&self) -> bool {
-    false
-  }
-}
-
-/// The scrollbar style to use in the webview.
-#[derive(Clone, Copy, Default)]
-pub enum ScrollBarStyle {
-  #[default]
-  /// The browser default scrollbar style.
-  Default,
-
-  /// Fluent UI style overlay scrollbars.
-  FluentOverlay,
-}
-
-#[inline]
-fn load_url_with_headers(
-  webview: &ICoreWebView2,
-  env: &ICoreWebView2Environment,
-  url: &str,
-  headers: http::HeaderMap,
-) -> Result<()> {
-  let url = HSTRING::from(url);
-
-  let headers_map = {
-    let mut headers_map = String::new();
-    for (name, value) in headers.iter() {
-      let header_key = name.to_string();
-      if let Ok(value) = value.to_str() {
-        let _ = writeln!(headers_map, "{header_key}: {value}");
-      }
-    }
-    HSTRING::from(headers_map)
-  };
-
-  unsafe {
-    let env = env.cast::<ICoreWebView2Environment9>()?;
-    let method = HSTRING::from("GET");
-    if let Ok(request) = env.CreateWebResourceRequest(&url, &method, None, &headers_map) {
-      let webview: ICoreWebView2_10 = webview.cast()?;
-      webview.NavigateWithWebResourceRequest(&request)?;
-    }
-  };
-
-  Ok(())
-}
-
-#[inline]
-unsafe fn set_background_color(
-  controller: &ICoreWebView2Controller,
-  background_color: RGBA,
-) -> Result<()> {
-  unsafe {
-    let (r, g, b, mut a) = background_color;
-    if is_windows_7() || a != 0 {
-      a = 255;
-    }
-
-    let controller2: ICoreWebView2Controller2 = controller.cast()?;
-    controller2
-      .SetDefaultBackgroundColor(COREWEBVIEW2_COLOR {
-        R: r,
-        G: g,
-        B: b,
-        A: a,
-      })
-      .map_err(Into::into)
-  }
-}
-
-#[inline]
-unsafe fn set_theme(webview: &ICoreWebView2, theme: Theme) -> Result<()> {
-  unsafe {
-    let webview = webview.cast::<ICoreWebView2_13>()?;
-    let profile = webview.Profile()?;
-    profile
-      .SetPreferredColorScheme(match theme {
-        Theme::Dark => COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK,
-        Theme::Light => COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT,
-        Theme::Auto => COREWEBVIEW2_PREFERRED_COLOR_SCHEME_AUTO,
-      })
-      .map_err(Into::into)
-  }
-}
-
-pub fn platform_webview_version() -> Result<String> {
-  let mut versioninfo = PWSTR::null();
-  unsafe { GetAvailableCoreWebView2BrowserVersionString(PCWSTR::null(), &mut versioninfo) }?;
-  Ok(take_pwstr(versioninfo))
-}
-
-#[inline]
-fn is_windows_7() -> bool {
-  let v = windows_version::OsVersion::current();
-  // windows 7 is 6.1
-  v.major == 6 && v.minor == 1
-}
