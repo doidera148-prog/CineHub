@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::skip::Segment;
 
+#[cfg(all(windows, feature = "mpv"))]
+#[path = "player/d3d11.rs"]
+mod mpv_d3d11;
+
 /// Área retangular da interface web que deve permanecer visível sobre o vídeo.
 /// Coordenadas relativas à caixa do player, em pixels físicos do Windows.
 #[derive(Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -834,6 +838,10 @@ mod tests {
         );
         #[cfg(all(windows, feature = "mpv"))]
         {
+            assert!(
+                super::mpv_d3d11::abi_layout_is_valid(),
+                "a ABI do render API D3D11 precisa corresponder aos headers nativos do libmpv"
+            );
             for message in [
                 0x0200, // WM_MOUSEMOVE
                 0x0201, // WM_LBUTTONDOWN
