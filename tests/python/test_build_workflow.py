@@ -213,6 +213,10 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
             "adb shell monkey",
             "check_app_alive",
             "diagnose_app_exit",
+            "reason=12 (DEPENDENCY DIED)",
+            "com.google.android.gms/.fonts.provider.FontsProvider",
+            "transient_recovery_attempted=0",
+            "Aguardando estabilização",
         ):
             with self.subTest(check=check):
                 self.assertIn(check, emulator_step)
