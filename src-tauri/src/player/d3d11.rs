@@ -12,8 +12,8 @@ use std::{ffi::c_void, marker::PhantomData, mem, ptr::NonNull};
 
 use libmpv2::Mpv;
 use windows::{
-    Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11Texture2D},
     core::Interface,
+    Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11Texture2D},
 };
 
 const MPV_RENDER_PARAM_INVALID: u32 = 0;
