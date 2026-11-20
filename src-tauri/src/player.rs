@@ -461,7 +461,7 @@ mod win {
         Option<(i32, i32, u32, u32, Vec<super::PlayerCutout>)>,
     > = std::sync::Mutex::new(None);
 
-    fn point_is_in_video(
+    pub(super) fn point_is_in_video(
         parent_x: i32,
         parent_y: i32,
         x: i32,
@@ -490,7 +490,7 @@ mod win {
             })
     }
 
-    fn forwards_input_message(msg: u32) -> bool {
+    pub(super) fn forwards_input_message(msg: u32) -> bool {
         matches!(
             msg,
             WM_SETFOCUS
