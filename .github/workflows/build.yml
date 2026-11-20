@@ -75,7 +75,7 @@ jobs:
           find web tests -type f \( -name '*.js' -o -name '*.mjs' \) -not -path 'web/vendor/*' -print0 | xargs -0 -r npx --yes eslint@10.15.0 --no-config-lookup --rule 'no-unused-vars:error'
       - name: Validar sintaxe Python
         run: python3 -m compileall -q src-tauri/google-tv tests/python
-      - name: Testes de regressão dos scripts Python
+      - name: Verificar build.yml e executar testes de regressão Python
         run: python3 -m unittest discover -s tests/python -v
       - name: Validar metadados e dependências Rust
         run: cargo metadata --manifest-path src-tauri/Cargo.toml --locked --format-version 1 --no-deps > /dev/null
