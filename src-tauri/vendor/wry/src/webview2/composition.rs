@@ -350,7 +350,7 @@ impl CompositionHost {
       Scaling: DXGI_SCALING_STRETCH,
       SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
       AlphaMode: DXGI_ALPHA_MODE_PREMULTIPLIED,
-      Flags: DXGI_SWAP_CHAIN_FLAG(0),
+      Flags: 0,
     };
     let swap_chain = unsafe {
       factory.CreateSwapChainForComposition(
