@@ -32,9 +32,8 @@ enum PlayerControl {
     SetVolume(f64),
 }
 
-static PLAYER_CONTROL_SENDER: std::sync::Mutex<
-    Option<std::sync::mpsc::Sender<PlayerControl>>,
-> = std::sync::Mutex::new(None);
+static PLAYER_CONTROL_SENDER: std::sync::Mutex<Option<std::sync::mpsc::Sender<PlayerControl>>> =
+    std::sync::Mutex::new(None);
 
 fn parse_player_control(action: &str, value: Option<f64>) -> Result<PlayerControl, String> {
     match action {
@@ -506,7 +505,9 @@ mod imp {
             if let Ok(d) = mpv.get_property::<f64>("duration") {
                 duration = d;
             }
-            if composition_mode && last_state_emit.elapsed() >= std::time::Duration::from_millis(200) {
+            if composition_mode
+                && last_state_emit.elapsed() >= std::time::Duration::from_millis(200)
+            {
                 use tauri::Emitter;
                 let state = PlayerPlaybackState {
                     position_ms: (position.max(0.0) * 1000.0) as i64,
@@ -1012,18 +1013,15 @@ mod tests {
             super::parse_player_control("toggle-pause", None),
             Ok(super::PlayerControl::TogglePause)
         ));
-        assert!(matches!(
-            super::parse_player_control("seek-relative", Some(900.0)),
-            Ok(super::PlayerControl::SeekRelative(600.0))
-        ));
-        assert!(matches!(
-            super::parse_player_control("seek-absolute", Some(-1.0)),
-            Err(_)
-        ));
-        assert!(matches!(
-            super::parse_player_control("set-volume", Some(150.0)),
-            Ok(super::PlayerControl::SetVolume(100.0))
-        ));
+        match super::parse_player_control("seek-relative", Some(900.0)) {
+            Ok(super::PlayerControl::SeekRelative(seconds)) => assert_eq!(seconds, 600.0),
+            _ => panic!("busca relativa deve ser limitada a 600 segundos"),
+        }
+        assert!(super::parse_player_control("seek-absolute", Some(-1.0)).is_err());
+        match super::parse_player_control("set-volume", Some(150.0)) {
+            Ok(super::PlayerControl::SetVolume(volume)) => assert_eq!(volume, 100.0),
+            _ => panic!("volume deve ser limitado a 100%"),
+        }
         assert!(super::parse_player_control("set-volume", Some(f64::NAN)).is_err());
         assert!(super::parse_player_control("unknown", None).is_err());
     }
