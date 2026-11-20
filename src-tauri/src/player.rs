@@ -731,7 +731,7 @@ mod win {
     /// Remove o recorte ao encerrar a reprodução.
     pub fn restore() {
         let video = VIDEO.swap(0, std::sync::atomic::Ordering::SeqCst);
-        let parent = PARENT.swap(0, std::sync::atomic::Ordering::SeqCst);
+        let _parent = PARENT.swap(0, std::sync::atomic::Ordering::SeqCst);
         // SAFETY: a subclass é removida da janela hospedeira antes de liberar o HWND do mpv.
         unsafe {
             let subclass_windows = std::mem::take(
