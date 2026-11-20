@@ -291,7 +291,7 @@ impl CompositionHost {
     let virtual_keys = COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS((wparam & 0x007f) as i32);
     let _ = unsafe {
       state
-        .controller
+        .composition_controller
         .SendMouseInput(event_kind, virtual_keys, mouse_data, point)
     };
   }
