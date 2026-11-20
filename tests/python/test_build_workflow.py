@@ -452,6 +452,26 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
             with self.subTest(required=required):
                 self.assertIn(required, d3d11)
 
+        main_rs = (ROOT / "src-tauri/src/main.rs").read_text(encoding="utf-8")
+        composition_enable = main_rs.index(
+            'std::env::set_var("CINEHUB_WEBVIEW2_COMPOSITION_POC", "1")'
+        )
+        app_start = main_rs.index("cinehub_lib::run();")
+        self.assertLess(
+            composition_enable,
+            app_start,
+            "O modo WebView2 Composition precisa ser ativado antes de Tauri criar o WebView",
+        )
+        self.assertIn(
+            '#[cfg(all(windows, feature = "mpv"))]', main_rs
+        )
+        self.assertIn(
+            'std::env::var_os("CINEHUB_DISABLE_WEBVIEW2_COMPOSITION")', main_rs
+        )
+        self.assertIn(
+            'std::env::remove_var("CINEHUB_WEBVIEW2_COMPOSITION_POC")', main_rs
+        )
+
         player = (ROOT / "src-tauri/src/player.rs").read_text(encoding="utf-8")
         self.assertIn("pub fn player_composition_enabled() -> bool", player)
         self.assertIn("player::player_composition_enabled", (ROOT / "src-tauri/src/lib.rs").read_text(encoding="utf-8"))
