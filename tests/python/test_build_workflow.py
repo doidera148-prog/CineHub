@@ -266,6 +266,22 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
                 self.assertIn(marker, android)
         self.assertGreaterEqual(android.count("set -euo pipefail"), 4)
 
+    def test_windows_composition_host_is_opt_in_and_keeps_standard_fallback(self):
+        wry = (ROOT / "src-tauri/vendor/wry/src/webview2/mod.rs").read_text(
+            encoding="utf-8"
+        )
+        composition = (
+            ROOT / "src-tauri/vendor/wry/src/webview2/composition.rs"
+        ).read_text(encoding="utf-8")
+        self.assertIn("CINEHUB_WEBVIEW2_COMPOSITION_POC", wry)
+        self.assertIn("Some(host) => host.controller.clone()", wry)
+        self.assertIn("None => Self::create_controller(", wry)
+        self.assertIn("CreateCoreWebView2CompositionController", composition)
+        self.assertIn("DCompositionCreateDevice2", composition)
+        self.assertIn("SetRootVisualTarget", composition)
+        # Input forwarding is a separate, not-yet-implemented POC gate.
+        self.assertNotIn("SendMouseInput", composition)
+
     def test_only_optional_ffmpeg_download_can_fail_without_stopping_android_job(self):
         android = job_block(self.workflow, "android")
         self.assertIn("name: Extensão FFmpeg do Media3 (opcional", android)
