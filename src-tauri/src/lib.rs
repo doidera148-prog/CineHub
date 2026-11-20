@@ -210,6 +210,7 @@ pub fn run() {
             player::player_set_geometry,
             player::player_composition_enabled,
             player::player_close,
+            player::player_control,
             skip::skip_segments,
         ])
         .run(tauri::generate_context!())
