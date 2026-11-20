@@ -382,9 +382,17 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
             "DXGI_FORMAT_B8G8R8A8_UNORM",
             "render_to_smoke_swap_chain",
             "swap_chain.Present(0",
+            "present_result.0 < 0",
+            "DXGI Present falhou no smoke test (HRESULT 0x{:08X})",
         ):
             with self.subTest(d3d11_runtime=required):
                 self.assertIn(required, d3d11)
+        self.assertIn(
+            "let _ = unsafe { multithread.SetMultithreadProtected(true) };", d3d11
+        )
+        self.assertIn(
+            "let _ = multithread.SetMultithreadProtected(true);", composition
+        )
 
         for required in (
             "D3D11CreateDevice",
