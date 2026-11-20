@@ -103,3 +103,12 @@ Do not begin the libmpv D3D11 renderer patch until this hosting-only change buil
 ### Fork creation status
 
 The exact upstream source seam has been identified, but no Wry fork or production source patch is claimed by this commit. The available GitHub integration for this task can create and update files/branches in accessible repositories, but does not expose the GitHub **Fork repository** operation. Creating a new repository fork therefore requires the repository owner to create the fork in GitHub first; after that, the fork can be updated with the pinned patch and referenced from CineHub. No unverified repository URL or dependency override should be added.
+
+
+## In-repository vendor strategy (no user-created fork required)
+
+To avoid requiring the repository owner to create a separate GitHub fork, the exact Wry `0.57.2` source is vendored under `src-tauri/vendor/wry` and selected with the existing Cargo `[patch.crates-io]` mechanism. This keeps the upstream source baseline, licenses and package metadata inside CineHub, while all changes remain reviewable in the CineHub branch. The upstream baseline is tag `wry-v0.57.2`, commit `bbba6b6312af92fbb969789a63768f4b4bb6d268`.
+
+The vendor baseline is now connected to Cargo and the lockfile points to the local package. This is intentionally still behavior-preserving: the composition controller has not yet been implemented, and the existing standard WebView2 host remains unchanged. The next code patch can therefore be made directly in `src-tauri/vendor/wry/src/webview2/mod.rs` without a separate repository or manual fork step.
+
+The normal `.github/workflows/build.yml` is the validation path. The first gate is that the existing Linux, Windows and macOS Rust builds/tests continue to compile against the vendored Wry package before any composition behavior is added.
