@@ -171,16 +171,16 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
 
     def test_build_jobs_use_expected_runners_and_checkout_source(self):
         expected_runners = {
-            "test": "ubuntu-22.04",
-            "lint": "ubuntu-22.04",
-            "web-smoke": "ubuntu-22.04",
-            "desktop": "matrix.platform",
-            "android": "ubuntu-24.04",
+            "test": "runs-on: ubuntu-22.04",
+            "lint": "runs-on: ubuntu-22.04",
+            "web-smoke": "runs-on: ubuntu-22.04",
+            "desktop": "runs-on: ${{ matrix.platform }}",
+            "android": "runs-on: ubuntu-24.04",
         }
-        for name, runner in expected_runners.items():
+        for name, runner_line in expected_runners.items():
             with self.subTest(job=name):
                 block = job_block(self.workflow, name)
-                self.assertIn(f"runs-on: ${{{{ {runner} }}}}", block)
+                self.assertIn(runner_line, block)
                 self.assertIn("actions/checkout@", block)
 
     def test_android_signing_uses_repository_secrets_and_verifies_each_apk(self):
