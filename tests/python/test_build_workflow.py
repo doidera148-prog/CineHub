@@ -169,6 +169,105 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
                     r"(?m)^    permissions:\n      contents: write",
                 )
 
+    def test_build_jobs_use_expected_runners_and_checkout_source(self):
+        expected_runners = {
+            "test": "ubuntu-22.04",
+            "lint": "ubuntu-22.04",
+            "web-smoke": "ubuntu-22.04",
+            "desktop": "matrix.platform",
+            "android": "ubuntu-24.04",
+        }
+        for name, runner in expected_runners.items():
+            with self.subTest(job=name):
+                block = job_block(self.workflow, name)
+                self.assertIn(f"runs-on: ${{{{ {runner} }}}}", block)
+                self.assertIn("actions/checkout@", block)
+
+    def test_android_signing_uses_repository_secrets_and_verifies_each_apk(self):
+        android = job_block(self.workflow, "android")
+        for secret in (
+            "ANDROID_KEYSTORE_BASE64",
+            "ANDROID_KEYSTORE_PASSWORD",
+            "ANDROID_KEY_ALIAS",
+            "ANDROID_KEY_PASSWORD",
+        ):
+            with self.subTest(secret=secret):
+                self.assertIn(f"secrets.{secret}", android)
+        self.assertIn('find src-tauri/gen/android/app/build/outputs/apk -name "*-unsigned.apk"', android)
+        self.assertIn('while read -r apk; do', android)
+        self.assertIn('"$BT/apksigner" sign', android)
+        self.assertIn('"$BT/apksigner" verify --verbose "$out"', android)
+        self.assertIn("path: signed/*.apk", android)
+
+    def test_google_tv_emulator_has_timeout_and_checks_boot_and_process(self):
+        android = job_block(self.workflow, "android")
+        emulator = android.split("      - name: Instalar e iniciar CineHub em emulador Google TV", 1)
+        self.assertEqual(len(emulator), 2, "Etapa do emulador Google TV ausente ou duplicada")
+        emulator_step = emulator[1].split("      - uses: actions/upload-artifact@", 1)[0]
+        self.assertRegex(emulator_step, r"(?m)^        timeout-minutes: 20$")
+        for check in (
+            "sys.boot_completed",
+            "adb devices",
+            "adb install -r",
+            "adb shell monkey",
+            "check_app_alive",
+            "diagnose_app_exit",
+        ):
+            with self.subTest(check=check):
+                self.assertIn(check, emulator_step)
+
+    def test_windows_player_build_is_conditional_and_runs_targeted_test(self):
+        desktop = job_block(self.workflow, "desktop")
+        for required in (
+            "if: matrix.platform == 'windows-latest'",
+            "if: matrix.platform == 'windows-latest' && steps.mpv-cache.outputs.cache-hit != 'true'",
+            "if: matrix.platform != 'windows-latest'",
+            "if: matrix.platform == 'windows-latest'\n        working-directory: src-tauri",
+            "--features mpv",
+            "mpv_osc_script_options_are_valid",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, desktop)
+
+    def test_release_never_runs_for_pull_requests_and_waits_for_all_jobs(self):
+        release = job_block(self.workflow, "release")
+        self.assertIn("github.event_name != 'pull_request'", release)
+        self.assertIn("always()", release)
+        self.assertIn("needs: [test, lint, web-smoke, desktop, android]", release)
+        for job in ("test", "lint", "web-smoke", "desktop", "android"):
+            self.assertIn(f"needs.{job}.result == 'success'", release)
+
+    def test_release_downloads_artifacts_before_publishing_and_limits_cleanup(self):
+        release = job_block(self.workflow, "release")
+        download = release.find("actions/download-artifact@")
+        publish = release.find("softprops/action-gh-release@")
+        cleanup = release.find("gh release delete")
+        self.assertGreaterEqual(download, 0)
+        self.assertGreater(publish, download)
+        self.assertGreater(cleanup, publish)
+        self.assertIn("tail -n +11", release)
+        self.assertIn("fail_on_unmatched_files: false", release)
+
+    def test_android_and_emulator_critical_scripts_fail_fast(self):
+        android = job_block(self.workflow, "android")
+        for marker in (
+            "      - name: Verificar geração dos APKs",
+            "      - name: Assinar APK",
+            "      - name: Verificar APK Google TV ARM64",
+            "      - name: Habilitar aceleração KVM no Ubuntu",
+            "      - name: Instalar e iniciar CineHub em emulador Google TV",
+        ):
+            with self.subTest(step=marker):
+                self.assertIn(marker, android)
+        self.assertGreaterEqual(android.count("set -euo pipefail"), 4)
+
+    def test_only_optional_ffmpeg_download_can_fail_without_stopping_android_job(self):
+        android = job_block(self.workflow, "android")
+        self.assertIn("name: Extensão FFmpeg do Media3 (opcional", android)
+        self.assertIn("continue-on-error: true", android)
+        self.assertIn("gh release download ffmpeg-ext-1.4.1", android)
+        self.assertIn("|| echo \"Extensão FFmpeg ainda não publicada", android)
+
 
 if __name__ == "__main__":
     unittest.main()
