@@ -373,12 +373,15 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
                 self.assertIn(f'"{feature}"', (ROOT / "src-tauri/Cargo.toml").read_text(encoding="utf-8"))
 
         for required in (
-            "create_smoke_render_target",
+            "create_smoke_swap_chain",
             "D3D_DRIVER_TYPE_HARDWARE",
             "D3D_DRIVER_TYPE_WARP",
-            "D3D11_TEXTURE2D_DESC",
-            "D3D11_BIND_RENDER_TARGET.0",
-            "device.CreateTexture2D(&desc, None, Some(&mut texture))",
+            "CreateSwapChainForComposition(",
+            "DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL",
+            "DXGI_ALPHA_MODE_PREMULTIPLIED",
+            "DXGI_FORMAT_B8G8R8A8_UNORM",
+            "render_to_smoke_swap_chain",
+            "swap_chain.Present(0",
         ):
             with self.subTest(d3d11_runtime=required):
                 self.assertIn(required, d3d11)
