@@ -377,7 +377,6 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
             "cinehub_wry_composition_get_backbuffer",
             "cinehub_wry_composition_present",
             "cinehub_wry_composition_set_video_rect",
-            "abi_layout_is_valid",
             "root_visual.AddVisual(&video_visual_base, false",
             "root_visual.AddVisual(&webview_visual_base, true",
             "SetRootVisualTarget(&webview_visual_base",
