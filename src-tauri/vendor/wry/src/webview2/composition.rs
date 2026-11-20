@@ -175,15 +175,16 @@ fn register_composition_surface(
 }
 
 fn find_composition_surface(parent: isize) -> Option<Arc<Mutex<RenderSurface>>> {
-  let raw = *composition_surfaces()
+  let registry = composition_surfaces()
     .lock()
-    .unwrap_or_else(|poisoned| poisoned.into_inner())
-    .get(&parent)?;
+    .unwrap_or_else(|poisoned| poisoned.into_inner());
+  let raw = *registry.get(&parent)?;
   let pointer = raw as *const Mutex<RenderSurface>;
   unsafe {
     Arc::increment_strong_count(pointer);
-    Some(Arc::from_raw(pointer))
   }
+  drop(registry);
+  Some(unsafe { Arc::from_raw(pointer) })
 }
 
 fn unregister_composition_surface(parent: isize) {

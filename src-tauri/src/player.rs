@@ -262,10 +262,9 @@ mod imp {
         let mpv = Mpv::with_initializer(|init| {
             init.set_option("vo", if composition_mode { "libmpv" } else { "gpu" })?;
             init.set_option("hwdec", "auto-safe")?;
-            // O OSC do mpv é a interface de controles no Windows: a janela de vídeo
-            // nativa cobre a WebView, portanto os controles HTML do CineHub não ficam visíveis.
-            // Não deixar em "auto": o usuário precisa ter controles acessíveis durante o vídeo.
-            init.set_option("osc", "yes")?;
+            // No modo de composição, os controles HTML do CineHub recebem o mouse.
+            // O OSC nativo do mpv fica desativado para não exibir uma barra sem hit testing.
+            init.set_option("osc", if composition_mode { "no" } else { "yes" })?;
             // osc-visibility e osc-idle são opções do script OSC, não opções globais do mpv.
             // Passá-las diretamente a set_option causa MPV_ERROR_OPTION_NOT_FOUND (-5).
             init.set_option("script-opts", "osc-visibility=always,osc-idlescreen=yes")?;

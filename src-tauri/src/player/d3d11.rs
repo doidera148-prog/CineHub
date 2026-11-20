@@ -4,13 +4,11 @@
 //! parâmetros D3D11. Esta camada usa a ABI C documentada pelo libmpv 0.40+.
 //! O dispositivo e a textura devem pertencer ao mesmo ID3D11Device.
 //!
-//! Esta ponte ainda não cria o dispositivo/swap chain nem se conecta à árvore
-//! DirectComposition do Wry. Ela fornece o lado libmpv da integração para a
-//! próxima fatia; o player padrão continua usando a janela nativa (wid).
+//! O Wry cria e mantém o dispositivo/swap chain compartilhado; esta ponte
+//! fornece ao libmpv o mesmo dispositivo e os backbuffers apresentados pelo host.
+//! O caminho experimental permanece opt-in; o player padrão usa a janela nativa.
 
 use std::{ffi::c_void, marker::PhantomData, mem, ptr::NonNull};
-
-use windows::core::Interface;
 
 use libmpv2::Mpv;
 use windows::{
@@ -180,7 +178,6 @@ impl Drop for D3d11RenderContext<'_> {
     }
 }
 
-/// Checks the C ABI layout used by libmpv's render.h/render_d3d11.h headers.
 unsafe extern "C" {
     fn cinehub_wry_composition_get_device(parent: isize) -> *mut c_void;
     fn cinehub_wry_composition_get_backbuffer(parent: isize) -> *mut c_void;
@@ -226,6 +223,18 @@ pub(super) fn render_to_host(
         ));
     }
     Ok(result == 0)
+}
+
+/// Checks the C ABI layout used by libmpv's render.h/render_d3d11.h headers.
+pub(super) fn abi_layout_is_valid() -> bool {
+    mem::size_of::<MpvRenderParam>() == mem::size_of::<usize>() * 2
+        && mem::offset_of!(MpvRenderParam, data) == mem::size_of::<usize>()
+        && mem::size_of::<MpvD3d11InitParams>() == mem::size_of::<usize>()
+        && mem::size_of::<MpvD3d11Fbo>() == mem::size_of::<usize>()
+        && MPV_RENDER_PARAM_API_TYPE == 1
+        && MPV_RENDER_PARAM_D3D11_INIT_PARAMS == 21
+        && MPV_RENDER_PARAM_D3D11_FBO == 22
+        && MPV_RENDER_API_TYPE_D3D11 == b"d3d11\\0"
 }
 
 /// Moves/resizes the video visual on the thread that owns the WebView HWND.
