@@ -373,6 +373,7 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
             "DXGI_SCALING_STRETCH",
             "DXGI_ALPHA_MODE_PREMULTIPLIED",
             "DXGI_FORMAT_B8G8R8A8_UNORM",
+            "Flags: 0,",
             "cinehub_wry_composition_get_device",
             "cinehub_wry_composition_get_backbuffer",
             "cinehub_wry_composition_present",
