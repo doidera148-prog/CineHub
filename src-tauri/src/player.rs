@@ -179,8 +179,9 @@ pub async fn player_play(
     let wid = embed_handle(&app);
     let segments = segments.unwrap_or_default();
     set_escape_shortcut(&app, true);
+    let player_app = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        imp::play(&url, start, wid, subtitle.as_deref(), &segments)
+        imp::play(&url, start, wid, subtitle.as_deref(), &segments, player_app)
     })
     .await;
     set_escape_shortcut(&app, false);
@@ -227,6 +228,7 @@ mod imp {
         wid: Option<i64>,
         subtitle: Option<&str>,
         segments: &[Segment],
+        app: tauri::AppHandle,
     ) -> Result<PlayerResult, String> {
         let mpv = Mpv::with_initializer(|init| {
             init.set_option("vo", "gpu")?;
@@ -314,8 +316,9 @@ mod imp {
             #[cfg(all(windows, feature = "mpv"))]
             if let (Some(parent), false) = (wid, embedded) {
                 if let Ok(video) = mpv.get_property::<i64>("window-id") {
-                    embedded = true;
-                    super::win::take_over(parent, video);
+                    if super::win::take_over(&app, parent, video) {
+                        embedded = true;
+                    }
                 }
             }
             // Guarda a última posição conhecida: depois do fim do arquivo as propriedades não existem mais.
@@ -348,7 +351,7 @@ mod imp {
         }
 
         #[cfg(all(windows, feature = "mpv"))]
-        super::win::restore();
+        super::win::restore(&app);
 
         if failed {
             return Err("o mpv não conseguiu tocar este vídeo".into());
@@ -468,6 +471,24 @@ mod win {
     > = std::sync::Mutex::new(None);
     /// Todas as janelas que recebem mensagens de entrada da WebView ou da janela principal.
     static SUBCLASS_WINDOWS: std::sync::Mutex<Vec<isize>> = std::sync::Mutex::new(Vec::new());
+
+    /// Executa operações de subclassificação na thread que possui as janelas Tauri/WebView2.
+    /// SetWindowSubclass e RemoveWindowSubclass não aceitam janelas pertencentes a outra thread.
+    fn run_on_main_thread_sync<T, F>(app: &tauri::AppHandle, task: F) -> Result<T, String>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> T + Send + 'static,
+    {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        app.run_on_main_thread(move || {
+            let result = task();
+            let _ = sender.send(result);
+        })
+        .map_err(|error| format!("não consegui agendar operação Win32 na thread principal: {error}"))?;
+        receiver
+            .recv()
+            .map_err(|error| format!("a thread principal encerrou antes da operação Win32: {error}"))
+    }
 
     pub(super) fn point_is_in_video(
         parent_x: i32,
@@ -629,44 +650,55 @@ mod win {
     }
 
     /// Mantém o mpv acima da WebView sem esconder os controles HTML.
-    pub fn take_over(parent: i64, video: i64) {
-        let parent = parent as usize as Hwnd;
-        let video = video as usize as Hwnd;
-        PARENT.store(
-            parent as usize as isize,
-            std::sync::atomic::Ordering::SeqCst,
-        );
-        VIDEO.store(video as usize as isize, std::sync::atomic::Ordering::SeqCst);
-        // SAFETY: os HWNDs vêm do Tauri e do libmpv e permanecem válidos durante a reprodução.
-        unsafe {
-            // O mpv.net encaminha as mensagens recebidas pela janela hospedeira
-            // diretamente ao HWND filho do mpv. Isso também funciona quando o filho
-            // está marcado WS_DISABLED e não recebe hit-testing normal do Windows.
-            SUBCLASS_WINDOWS
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .clear();
-            if SetWindowSubclass(parent, Some(parent_subclass_proc), SUBCLASS_ID, 0) != 0 {
+    pub fn take_over(app: &tauri::AppHandle, parent: i64, video: i64) -> bool {
+        match run_on_main_thread_sync(app, move || {
+            let parent = parent as usize as Hwnd;
+            let video = video as usize as Hwnd;
+            if parent.is_null() || video.is_null() {
+                return false;
+            }
+            PARENT.store(
+                parent as usize as isize,
+                std::sync::atomic::Ordering::SeqCst,
+            );
+            VIDEO.store(video as usize as isize, std::sync::atomic::Ordering::SeqCst);
+            // SAFETY: esta closure roda na thread principal, proprietária da janela Tauri
+            // e das janelas-filhas do WebView2 que serão subclassificadas.
+            unsafe {
                 SUBCLASS_WINDOWS
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
-                    .push(parent as usize as isize);
+                    .clear();
+                if SetWindowSubclass(parent, Some(parent_subclass_proc), SUBCLASS_ID, 0) != 0 {
+                    SUBCLASS_WINDOWS
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .push(parent as usize as isize);
+                }
+                // O WebView2 recebe WM_MOUSE* nas próprias janelas-filhas; a enumeração
+                // também ocorre na thread proprietária para que SetWindowSubclass seja válida.
+                EnumChildWindows(parent, Some(install_child_input_subclass), 0);
+                SetForegroundWindow(parent);
+                SetWindowPos(
+                    video,
+                    HWND_TOP,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+                );
             }
-            // O HWND retornado pelo Tauri é a janela de topo. O WebView2 recebe
-            // WM_MOUSE* nas próprias janelas-filhas, portanto também precisamos
-            // interceptar a árvore de filhos para que o mpv.net-style forwarding
-            // veja cliques e rolagem que nunca chegam ao WndProc da janela de topo.
-            EnumChildWindows(parent, Some(install_child_input_subclass), 0);
-            SetForegroundWindow(parent);
-            SetWindowPos(
-                video,
-                HWND_TOP,
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
-            );
+            !SUBCLASS_WINDOWS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty()
+        }) {
+            Ok(installed) => installed,
+            Err(error) => {
+                eprintln!("aviso: não consegui preparar entrada do mpv: {error}");
+                false
+            }
         }
     }
 
@@ -728,25 +760,33 @@ mod win {
         }
     }
 
-    /// Remove o recorte ao encerrar a reprodução.
-    pub fn restore() {
-        let video = VIDEO.swap(0, std::sync::atomic::Ordering::SeqCst);
-        let _parent = PARENT.swap(0, std::sync::atomic::Ordering::SeqCst);
-        // SAFETY: a subclass é removida da janela hospedeira antes de liberar o HWND do mpv.
-        unsafe {
-            let subclass_windows =
-                std::mem::take(&mut *SUBCLASS_WINDOWS.lock().unwrap_or_else(|e| e.into_inner()));
-            for hwnd in subclass_windows {
-                RemoveWindowSubclass(
-                    hwnd as usize as Hwnd,
-                    Some(parent_subclass_proc),
-                    SUBCLASS_ID,
-                );
+    /// Remove o recorte e as subclasses ao encerrar a reprodução.
+    pub fn restore(app: &tauri::AppHandle) {
+        if let Err(error) = run_on_main_thread_sync(app, || {
+            let video = VIDEO.swap(0, std::sync::atomic::Ordering::SeqCst);
+            PARENT.store(0, std::sync::atomic::Ordering::SeqCst);
+            // SAFETY: esta closure roda na thread proprietária das janelas subclassificadas.
+            unsafe {
+                let subclass_windows =
+                    std::mem::take(&mut *SUBCLASS_WINDOWS.lock().unwrap_or_else(|e| e.into_inner()));
+                for hwnd in subclass_windows {
+                    RemoveWindowSubclass(
+                        hwnd as usize as Hwnd,
+                        Some(parent_subclass_proc),
+                        SUBCLASS_ID,
+                    );
+                }
+                *INPUT_GEOMETRY.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                if video != 0 {
+                    SetWindowRgn(video as usize as Hwnd, std::ptr::null_mut(), 1);
+                }
             }
-            *INPUT_GEOMETRY.lock().unwrap_or_else(|e| e.into_inner()) = None;
-            if video != 0 {
-                SetWindowRgn(video as usize as Hwnd, std::ptr::null_mut(), 1);
-            }
+        }) {
+            VIDEO.store(0, std::sync::atomic::Ordering::SeqCst);
+            PARENT.store(0, std::sync::atomic::Ordering::SeqCst);
+            *INPUT_GEOMETRY.lock().unwrap_or_else(|e| e.into_inner()) =
+                None;
+            eprintln!("aviso: não consegui restaurar as subclasses do player: {error}");
         }
     }
 }
@@ -761,6 +801,7 @@ mod imp {
         _wid: Option<i64>,
         _subtitle: Option<&str>,
         _segments: &[crate::skip::Segment],
+        _app: tauri::AppHandle,
     ) -> Result<PlayerResult, String> {
         Err("player nativo não incluído nesta versão".into())
     }
