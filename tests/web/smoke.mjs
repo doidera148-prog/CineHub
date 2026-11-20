@@ -216,6 +216,14 @@ async function checkAndroidPlayerFallback() {
   await page.locator('.stream').waitFor({ state: 'visible' });
   await page.locator('.stream').click();
   await page.locator('#player:not(.hidden)').waitFor({ state: 'visible' });
+  // A camada do player fica visível imediatamente antes de o Video.js terminar
+  // de refletir a fonte no elemento <video>. Aguarda a URL efetiva para evitar
+  // uma leitura prematura que falhe intermitentemente no runner de CI.
+  await page.waitForFunction(() => {
+    const video = document.querySelector('video');
+    const source = video?.currentSrc || video?.src;
+    return source?.includes('/sample.mp4');
+  }, { timeout: 5000 }).catch(() => {});
   const result = await page.evaluate(() => ({
     nativeAttempted: window.__calls.some((call) => call.cmd === 'plugin:exoplayer|play'),
     source: document.querySelector('video')?.currentSrc || document.querySelector('video')?.src,
