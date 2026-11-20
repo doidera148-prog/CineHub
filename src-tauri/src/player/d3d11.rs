@@ -335,7 +335,7 @@ pub(super) fn create_smoke_swap_chain(
                 continue;
             }
         };
-        unsafe { multithread.SetMultithreadProtected(true) };
+        let _ = unsafe { multithread.SetMultithreadProtected(true) };
 
         let dxgi_device = match device.cast::<IDXGIDevice>() {
             Ok(dxgi_device) => dxgi_device,
@@ -410,8 +410,14 @@ impl D3d11RenderContext<'_> {
         self.render(&texture)?;
         drop(texture);
 
-        unsafe { swap_chain.Present(0, windows::Win32::Graphics::Dxgi::DXGI_PRESENT(0)) }
-            .map_err(|error| format!("DXGI Present falhou no smoke test: {error}"))?;
+        let present_result =
+            unsafe { swap_chain.Present(0, windows::Win32::Graphics::Dxgi::DXGI_PRESENT(0)) };
+        if present_result.0 < 0 {
+            return Err(format!(
+                "DXGI Present falhou no smoke test (HRESULT 0x{:08X})",
+                present_result.0 as u32
+            ));
+        }
         self.report_swap();
         Ok(())
     }
