@@ -9,7 +9,7 @@ WORKFLOW = ROOT / ".github" / "workflows" / "build.yml"
 
 def job_block(workflow, name):
     match = re.search(
-        rf"(?ms)^  {re.escape(name)}:\\n(.*?)(?=^  [a-zA-Z0-9_-]+:\\n|\\Z)",
+        rf"(?ms)^  {re.escape(name)}:\n(.*?)(?=^  [a-zA-Z0-9_-]+:\n|\Z)",
         workflow,
     )
     if not match:
@@ -31,7 +31,7 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
 
     def test_workflow_declares_required_jobs_without_duplicates(self):
         expected = ("test", "lint", "web-smoke", "desktop", "android", "release")
-        declared = re.findall(r"(?m)^  ([a-zA-Z0-9_-]+):\\s*$", self.workflow)
+        declared = re.findall(r"(?m)^  ([a-zA-Z0-9_-]+):\s*$", self.workflow)
         for name in expected:
             with self.subTest(job=name):
                 self.assertIn(name, declared, f"Job obrigatório ausente: {name}")
@@ -44,7 +44,7 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
                 selection = block.find("select-ubuntu-mirror.sh")
                 apt_commands = [
                     match.start()
-                    for match in re.finditer(r"(?m)^\\s+sudo apt-get\\b", block)
+                    for match in re.finditer(r"(?m)^\s+sudo apt-get\b", block)
                 ]
                 self.assertGreaterEqual(selection, 0, "Job não seleciona espelho Ubuntu")
                 self.assertTrue(apt_commands, "Job não contém operações APT")
@@ -145,7 +145,7 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
             with self.subTest(dependency=dependency):
                 self.assertRegex(
                     release,
-                    rf"needs:\\s*\\[[^\\]]*\\b{dependency}\\b",
+                    rf"needs:\s*\[[^\]]*\b{dependency}\b",
                 )
                 self.assertIn(f"needs.{dependency}.result == 'success'", release)
         for artifact in ("*.apk", "*.msi", "*.exe", "*.dmg", "*.deb", "*.AppImage"):
@@ -155,18 +155,18 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
     def test_workflow_uses_minimal_default_and_scoped_release_permissions(self):
         self.assertRegex(
             self.workflow,
-            r"(?m)^permissions:\\n  contents: read\\s",
+            r"(?m)^permissions:\n  contents: read\s",
         )
         release = job_block(self.workflow, "release")
         self.assertRegex(
             release,
-            r"(?m)^    permissions:\\n      contents: write\\s",
+            r"(?m)^    permissions:\n      contents: write\s",
         )
         for job in ("test", "lint", "web-smoke", "desktop", "android"):
             with self.subTest(job=job):
                 self.assertNotRegex(
                     job_block(self.workflow, job),
-                    r"(?m)^    permissions:\\n      contents: write",
+                    r"(?m)^    permissions:\n      contents: write",
                 )
 
 
