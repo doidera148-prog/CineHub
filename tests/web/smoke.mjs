@@ -174,6 +174,9 @@ async function checkWindowsNativeOverlayClose() {
 
   await page.mouse.move(640, 360);
   await page.waitForFunction(() => document.body.classList.contains('native-controls-idle'), null, { timeout: 5000 });
+  await page.waitForFunction(() => window.__calls.some((call) =>
+    call.cmd === 'player_set_geometry' && Array.isArray(call.args?.cutouts) && call.args.cutouts.length === 0,
+  ));
   const hiddenControls = await page.evaluate(() => ({
     visibility: getComputedStyle(document.querySelector('#native-controls')).visibility,
     geometry: window.__calls.filter((call) => call.cmd === 'player_set_geometry').at(-1)?.args,
@@ -182,6 +185,10 @@ async function checkWindowsNativeOverlayClose() {
   if (hiddenControls.geometry?.cutouts?.length) failures.push('[windows-player-auto-hide] superfície nativa ainda reserva recortes para controles ocultos');
   await page.mouse.move(660, 360);
   await page.waitForFunction(() => !document.body.classList.contains('native-controls-idle'));
+  await page.waitForFunction(() => {
+    const geometry = window.__calls.filter((call) => call.cmd === 'player_set_geometry').at(-1)?.args;
+    return Array.isArray(geometry?.cutouts) && geometry.cutouts.length > 0;
+  });
   if (await page.locator('#native-controls').isHidden()) failures.push('[windows-player-auto-hide] barra não reapareceu ao mover o mouse');
 
   await page.locator('#close-player').click();
