@@ -367,7 +367,7 @@ impl CompositionHost {
 
     // One hardware D3D11 device backs both libmpv's render target and the
     // composition swap chain. DComp is created from that same DXGI device.
-    let d3d_device = create_composition_d3d11_device()?;
+    let d3d_device = create_composition_d3d11_device().map_err(|error| windows::core::Error::new(E_FAIL, error.to_string()))?;
     let dxgi_device = d3d_device.cast::<IDXGIDevice>()?;
     let adapter = unsafe { dxgi_device.GetAdapter()? };
     let factory: IDXGIFactory2 = unsafe { adapter.GetParent()? };
