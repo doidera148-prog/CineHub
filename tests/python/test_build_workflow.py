@@ -303,6 +303,8 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("SetTouchContactRaw(contact_raw)", composition)
         self.assertIn("SetPenPressure(pen_info.pressure)", composition)
         self.assertIn("himetric_client_origin", composition)
+        self.assertIn("to_client_himetric_rect", composition)
+        self.assertIn("SetPointerDeviceRect(pointer_device_rect_client)", composition)
         self.assertIn("screen_rect_to_client", composition)
         self.assertIn("native_info.pointerType != PT_TOUCH && native_info.pointerType != PT_PEN", composition)
         self.assertIn("GetCapture, ReleaseCapture, SetCapture, TrackMouseEvent", composition)
