@@ -217,7 +217,11 @@ impl Drop for D3d11RenderContext<'_> {
         // SAFETY: this wrapper uniquely owns the native context and drops
         // before Mpv due to the lifetime marker.
         unsafe {
-            mpv_render_context_set_update_callback(self.context.as_ptr(), None, std::ptr::null_mut());
+            mpv_render_context_set_update_callback(
+                self.context.as_ptr(),
+                None,
+                std::ptr::null_mut(),
+            );
             mpv_render_context_free(self.context.as_ptr());
         }
     }
@@ -282,14 +286,15 @@ pub(super) fn create_smoke_swap_chain(
         Graphics::{
             Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP},
             Direct3D11::{
-                D3D11CreateDevice, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS,
-                D3D11_SDK_VERSION, ID3D11Multithread,
+                D3D11CreateDevice, ID3D11Multithread, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS, D3D11_SDK_VERSION,
+            },
+            Dxgi::Common::{
+                DXGI_ALPHA_MODE_PREMULTIPLIED, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC,
             },
             Dxgi::{
                 IDXGIAdapter, IDXGIDevice, IDXGIFactory2, IDXGIOutput, DXGI_SCALING_STRETCH,
-                DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
-                DXGI_USAGE_RENDER_TARGET_OUTPUT,
+                DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT,
             },
             Dxgi::Common::{
                 DXGI_ALPHA_MODE_PREMULTIPLIED, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC,
@@ -324,7 +329,9 @@ pub(super) fn create_smoke_swap_chain(
         }
 
         let Some(device) = device else {
-            failures.push(format!("{label}: D3D11CreateDevice retornou dispositivo nulo"));
+            failures.push(format!(
+                "{label}: D3D11CreateDevice retornou dispositivo nulo"
+            ));
             continue;
         };
 
@@ -376,11 +383,7 @@ pub(super) fn create_smoke_swap_chain(
             Flags: 0,
         };
         let swap_chain = match unsafe {
-            factory.CreateSwapChainForComposition(
-                &device,
-                &desc,
-                None::<&IDXGIOutput>,
-            )
+            factory.CreateSwapChainForComposition(&device, &desc, None::<&IDXGIOutput>)
         } {
             Ok(swap_chain) => swap_chain,
             Err(error) => {
