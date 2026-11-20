@@ -77,6 +77,7 @@ const MOUSE_BUTTON_MASK: usize = 0x0073;
 // through the enabled WindowsAndMessaging feature set.
 const WM_MOUSELEAVE: u32 = 0x02A3;
 const WM_CINEHUB_SET_VIDEO_RECT: u32 = 0x8000 + 0x4C1;
+const WM_CINEHUB_RECOVER_DEVICE: u32 = 0x8000 + 0x4C2;
 
 static COMPOSITION_SURFACES: OnceLock<Mutex<HashMap<isize, usize>>> = OnceLock::new();
 
@@ -92,15 +93,17 @@ struct RenderSurface {
   host_hwnd: HWND,
   pending_size: Option<(u32, u32)>,
   pending_rect: Option<(i32, i32, u32, u32)>,
+  last_backbuffer_error: i32,
 }
 
 impl RenderSurface {
   fn acquire_backbuffer(&mut self) -> *mut c_void {
+    self.last_backbuffer_error = 0;
     if let Some((width, height)) = self.pending_size {
       if width == 0 || height == 0 {
         return ptr::null_mut();
       }
-      if unsafe {
+      if let Err(error) = unsafe {
         self.swap_chain.ResizeBuffers(
           0,
           width,
@@ -108,9 +111,8 @@ impl RenderSurface {
           DXGI_FORMAT_UNKNOWN,
           DXGI_SWAP_CHAIN_FLAG(0),
         )
-      }
-      .is_err()
-      {
+      } {
+        self.last_backbuffer_error = error.code().0;
         return ptr::null_mut();
       }
       self.pending_size = None;
@@ -118,7 +120,10 @@ impl RenderSurface {
 
     match unsafe { self.swap_chain.GetBuffer::<ID3D11Texture2D>(0) } {
       Ok(texture) => texture.into_raw(),
-      Err(_) => ptr::null_mut(),
+      Err(error) => {
+        self.last_backbuffer_error = error.code().0;
+        ptr::null_mut()
+      }
     }
   }
 
@@ -235,6 +240,39 @@ pub extern "C" fn cinehub_wry_composition_present(parent: isize) -> i32 {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn cinehub_wry_composition_get_backbuffer_error(parent: isize) -> i32 {
+  let Some(surface) = find_composition_surface(parent) else {
+    return E_POINTER.0;
+  };
+  surface
+    .lock()
+    .unwrap_or_else(|poisoned| poisoned.into_inner())
+    .last_backbuffer_error
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn cinehub_wry_composition_recreate_device(parent: isize) -> i32 {
+  let Some(surface) = find_composition_surface(parent) else {
+    return E_POINTER.0;
+  };
+  let host_hwnd = surface
+    .lock()
+    .unwrap_or_else(|poisoned| poisoned.into_inner())
+    .host_hwnd;
+  drop(surface);
+
+  unsafe {
+    SendMessageW(
+      host_hwnd,
+      WM_CINEHUB_RECOVER_DEVICE,
+      Some(WPARAM(0)),
+      Some(LPARAM(0)),
+    )
+  }
+  .0 as i32
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn cinehub_wry_composition_set_video_rect(
   parent: isize,
   x: i32,
@@ -270,10 +308,15 @@ struct CompositionInputState {
   environment: ICoreWebView2Environment3,
   mouse_tracking: bool,
   captured: bool,
+  parent: HWND,
   surface: Arc<Mutex<RenderSurface>>,
   dcomp_device: IDCompositionDesktopDevice,
+  dcomp_target: IDCompositionTarget,
+  root_visual: IDCompositionVisual2,
   video_visual: IDCompositionVisual2,
+  webview_visual: IDCompositionVisual2,
   video_visual3: IDCompositionVisual3,
+  video_rect: Option<(i32, i32, u32, u32)>,
 }
 
 pub(super) struct CompositionHost {
@@ -283,12 +326,6 @@ pub(super) struct CompositionHost {
   parent: HWND,
   input_state: *mut CompositionInputState,
   cursor_changed_token: Option<i64>,
-  _device: IDCompositionDesktopDevice,
-  _target: IDCompositionTarget,
-  _root_visual: IDCompositionVisual2,
-  _video_visual: IDCompositionVisual2,
-  _webview_visual: IDCompositionVisual2,
-  _surface: Arc<Mutex<RenderSurface>>,
 }
 
 impl CompositionHost {
@@ -389,6 +426,7 @@ impl CompositionHost {
       host_hwnd: hwnd,
       pending_size: None,
       pending_rect: None,
+      last_backbuffer_error: 0,
     }));
 
     // Cursor changes are raised by WebView2 when the pointer crosses elements with
@@ -427,10 +465,15 @@ impl CompositionHost {
       environment: environment.clone(),
       mouse_tracking: false,
       captured: false,
+      parent,
       surface: surface.clone(),
       dcomp_device: device.clone(),
+      dcomp_target: target.clone(),
+      root_visual: root_visual.clone(),
       video_visual: video_visual.clone(),
+      webview_visual: webview_visual.clone(),
       video_visual3,
+      video_rect: None,
     });
     let input_state_ptr = (&mut *input_state) as *mut CompositionInputState;
     if !unsafe {
@@ -460,13 +503,99 @@ impl CompositionHost {
       parent,
       input_state,
       cursor_changed_token: Some(cursor_changed_token),
-      _device: device,
-      _target: target,
-      _root_visual: root_visual,
-      _video_visual: video_visual,
-      _webview_visual: webview_visual,
-      _surface: surface,
     })
+  }
+
+  fn recreate_device(hwnd: HWND, state: &mut CompositionInputState) -> windows::core::Result<()> {
+    // The render thread has already dropped libmpv's context before requesting this
+    // operation. All DirectComposition and HWND work stays on the host's UI thread.
+    let d3d_device = create_composition_d3d11_device()?;
+    let dxgi_device = d3d_device.cast::<IDXGIDevice>()?;
+    let adapter = unsafe { dxgi_device.GetAdapter()? };
+    let factory: IDXGIFactory2 = unsafe { adapter.GetParent()? };
+
+    let mut client_bounds = RECT::default();
+    unsafe { GetClientRect(hwnd, &mut client_bounds)? };
+    let width = (client_bounds.right - client_bounds.left).max(1) as u32;
+    let height = (client_bounds.bottom - client_bounds.top).max(1) as u32;
+    let swap_chain_desc = windows::Win32::Graphics::Dxgi::DXGI_SWAP_CHAIN_DESC1 {
+      Width: width,
+      Height: height,
+      Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+      Stereo: Default::default(),
+      SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+      BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
+      BufferCount: 2,
+      Scaling: DXGI_SCALING_STRETCH,
+      SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
+      AlphaMode: DXGI_ALPHA_MODE_PREMULTIPLIED,
+      Flags: 0,
+    };
+    let swap_chain = unsafe {
+      factory.CreateSwapChainForComposition(
+        &d3d_device,
+        &swap_chain_desc,
+        None::<&IDXGIOutput>,
+      )?
+    };
+
+    let dcomp_rendering_device = dxgi_device.cast::<IUnknown>()?;
+    let dcomp_device = unsafe {
+      DCompositionCreateDevice2::<_, IDCompositionDesktopDevice>(Some(&dcomp_rendering_device))?
+    };
+
+    // A HWND can have only one active DirectComposition target. Detach the invalid
+    // tree before creating the replacement target for the same host window.
+    unsafe {
+      state.dcomp_target.SetRoot(None::<&IDCompositionVisual>)?;
+      state.dcomp_device.Commit()?;
+      state.composition_controller.SetRootVisualTarget(None::<&IUnknown>)?;
+    }
+
+    let target = unsafe { dcomp_device.CreateTargetForHwnd(state.parent, true)? };
+    let root_visual = unsafe { dcomp_device.CreateVisual()? };
+    let video_visual = unsafe { dcomp_device.CreateVisual()? };
+    let webview_visual = unsafe { dcomp_device.CreateVisual()? };
+    let video_visual_base = video_visual.cast::<IDCompositionVisual>()?;
+    let webview_visual_base = webview_visual.cast::<IDCompositionVisual>()?;
+    let video_visual3 = video_visual.cast::<IDCompositionVisual3>()?;
+
+    unsafe {
+      video_visual.SetContent(&swap_chain)?;
+      root_visual.AddVisual(&video_visual_base, false, None::<&IDCompositionVisual>)?;
+      root_visual.AddVisual(&webview_visual_base, true, Some(&video_visual_base))?;
+      if let Some((x, y, video_width, video_height)) = state.video_rect {
+        video_visual.SetOffsetX2(x as f32)?;
+        video_visual.SetOffsetY2(y as f32)?;
+        video_visual3.SetVisible(video_width > 0 && video_height > 0)?;
+      } else {
+        video_visual3.SetVisible(false)?;
+      }
+      target.SetRoot(Some(&root_visual.cast::<IDCompositionVisual>()?))?;
+      state
+        .composition_controller
+        .SetRootVisualTarget(Some(&webview_visual_base.cast::<IUnknown>()?))?;
+      dcomp_device.Commit()?;
+    }
+
+    {
+      let mut surface = state
+        .surface
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+      surface.device = d3d_device;
+      surface.swap_chain = swap_chain;
+      surface.pending_size = None;
+      surface.pending_rect = None;
+      surface.last_backbuffer_error = 0;
+    }
+    state.dcomp_device = dcomp_device;
+    state.dcomp_target = target;
+    state.root_visual = root_visual;
+    state.video_visual = video_visual;
+    state.webview_visual = webview_visual;
+    state.video_visual3 = video_visual3;
+    Ok(())
   }
 
   unsafe extern "system" fn input_subclass_proc(
@@ -493,12 +622,19 @@ impl CompositionHost {
           let Some((x, y, width, height)) = rect else {
             return windows::Win32::Foundation::LRESULT(0);
           };
+          state.video_rect = Some((x, y, width, height));
           let result: windows::core::Result<()> = (|| {
             state.video_visual.SetOffsetX2(x as f32)?;
             state.video_visual.SetOffsetY2(y as f32)?;
             state.video_visual3.SetVisible(width > 0 && height > 0)?;
             state.dcomp_device.Commit()
           })();
+          return windows::Win32::Foundation::LRESULT(
+            result.map_or_else(|error| error.code().0 as isize, |_| 0),
+          );
+        }
+        WM_CINEHUB_RECOVER_DEVICE => {
+          let result = Self::recreate_device(hwnd, state);
           return windows::Win32::Foundation::LRESULT(
             result.map_or_else(|error| error.code().0 as isize, |_| 0),
           );
