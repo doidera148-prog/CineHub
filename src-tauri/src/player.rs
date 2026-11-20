@@ -376,7 +376,7 @@ async fn fetch_subtitle_file(
 
 #[cfg(feature = "mpv")]
 mod imp {
-    use super::{PlayerControl, PlayerPlaybackState, PlayerResult};
+    use super::{PlayerControl, PlayerPlaybackState, PlayerResult, PlayerTrack};
     use crate::skip::{self, Segment};
     use libmpv2::events::Event;
     use libmpv2::{mpv_end_file_reason, Mpv};
