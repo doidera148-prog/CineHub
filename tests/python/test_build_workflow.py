@@ -357,10 +357,31 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("mpv_render_context_update", d3d11)
         self.assertIn("mpv_render_context_render", d3d11)
         self.assertIn("mpv_render_context_report_swap", d3d11)
+        self.assertIn("mpv_render_context_set_update_callback", d3d11)
+        self.assertIn("notify_render_update", d3d11)
+        self.assertIn("frame_pending.swap(false", d3d11)
         self.assertIn("mpv_render_context_free", d3d11)
         self.assertIn("texture.as_raw()", d3d11)
         self.assertIn("abi_layout_is_valid", d3d11)
-        self.assertIn('"Win32_Graphics_Direct3D11"', (ROOT / "src-tauri/Cargo.toml").read_text(encoding="utf-8"))
+        for feature in (
+            "Win32_Graphics_Direct3D",
+            "Win32_Graphics_Direct3D11",
+            "Win32_Graphics_Dxgi",
+            "Win32_Graphics_Dxgi_Common",
+        ):
+            with self.subTest(windows_feature=feature):
+                self.assertIn(f'"{feature}"', (ROOT / "src-tauri/Cargo.toml").read_text(encoding="utf-8"))
+
+        for required in (
+            "create_smoke_render_target",
+            "D3D_DRIVER_TYPE_HARDWARE",
+            "D3D_DRIVER_TYPE_WARP",
+            "D3D11_TEXTURE2D_DESC",
+            "D3D11_BIND_RENDER_TARGET.0",
+            "device.CreateTexture2D(&desc, None, Some(&mut texture))",
+        ):
+            with self.subTest(d3d11_runtime=required):
+                self.assertIn(required, d3d11)
 
         for required in (
             "D3D11CreateDevice",
@@ -411,6 +432,17 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn('init.set_option("vo", if composition_mode { "libmpv" } else { "gpu" })?', player)
         self.assertIn("super::mpv_d3d11::D3d11RenderContext::new(&mpv, &device)", player)
         self.assertIn("super::mpv_d3d11::render_to_host(parent, renderer)", player)
+        self.assertIn('init.set_option("vo", "libmpv")?', player)
+        self.assertIn('command("loadfile", &[frame_path_string.as_str(), "replace"])', player)
+        self.assertIn('.render(&texture)', player)
+        self.assertIn("rendered_frame", player)
+        self.assertEqual(
+            job_block(self.workflow, "desktop").count(
+                "cargo test --features mpv --lib mpv_osc_script_options_are_valid"
+            ),
+            1,
+            "O teste de integração D3D11 deve executar uma única vez no build Windows",
+        )
         self.assertIn("COMPOSITION_CLOSE_REQUESTED", player)
         self.assertIn("mpv_d3d11::set_video_rect(parent, x, y, width, height)", player)
 
