@@ -391,6 +391,10 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("notify_render_update", d3d11)
         self.assertIn("frame_pending.swap(false", d3d11)
         self.assertIn("mpv_render_context_free", d3d11)
+        self.assertIn("GetDeviceRemovedReason", d3d11)
+        self.assertIn("is_device_loss_hresult", d3d11)
+        self.assertIn("RenderError::DeviceLost", d3d11)
+        self.assertIn("recreate_host_device", d3d11)
         self.assertIn("texture.as_raw()", d3d11)
         self.assertIn("abi_layout_is_valid", d3d11)
         for feature in (
@@ -459,6 +463,13 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
             "root_visual.AddVisual(&webview_visual_base, true",
             "SetRootVisualTarget(&webview_visual_base",
             "WM_CINEHUB_SET_VIDEO_RECT",
+            "WM_CINEHUB_RECOVER_DEVICE",
+            "last_backbuffer_error",
+            "cinehub_wry_composition_get_backbuffer_error",
+            "cinehub_wry_composition_recreate_device",
+            "fn recreate_device(",
+            "SetRoot(None::<&IDCompositionVisual>)",
+            "SetRootVisualTarget(None::<&IUnknown>)",
             "ResizeBuffers(",
         ):
             with self.subTest(required=required):
@@ -508,6 +519,9 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn('init.set_option("vo", if composition_mode { "libmpv" } else { "gpu" })?', player)
         self.assertIn("super::mpv_d3d11::D3d11RenderContext::new(&mpv, &device)", player)
         self.assertIn("super::mpv_d3d11::render_to_host(parent, renderer)", player)
+        self.assertIn("device_recovery_attempts == 0", player)
+        self.assertIn("super::mpv_d3d11::recreate_host_device(parent)", player)
+        self.assertIn("drop(render_context.take())", player)
         self.assertIn('init.set_option("vo", "libmpv")?', player)
         self.assertIn('command("loadfile", &[frame_path_string.as_str(), "replace"])', player)
         self.assertIn('.render_to_smoke_swap_chain(&swap_chain)', player)
