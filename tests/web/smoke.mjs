@@ -138,12 +138,41 @@ async function checkWindowsNativeOverlayClose() {
   await page.waitForFunction(() => window.__calls.some((call) => call.cmd === 'player_control' && call.args?.action === 'toggle-pause'));
   await page.evaluate(() => window.__emitTauriEvent('player-state', {
     positionMs: 42000, durationMs: 100000, paused: true, volume: 65, muted: false,
+    audioTracks: [
+      { id: 1, title: 'English', language: 'en', codec: 'AAC', selected: false },
+      { id: 2, title: 'Português', language: 'pt', codec: 'AAC', selected: true },
+    ],
+    subtitleTracks: [
+      { id: 3, title: 'Português', language: 'pt', codec: 'SubRip', selected: true },
+    ],
   }));
   await page.waitForFunction(() =>
     document.querySelector('#native-current-time')?.textContent === '0:42'
     && document.querySelector('#native-duration')?.textContent === '1:40'
-    && document.querySelector('#native-play-pause')?.textContent === 'Reproduzir',
+    && document.querySelector('#native-play-pause')?.textContent === 'Reproduzir'
+    && document.querySelector('#native-audio-track')?.options.length === 2
+    && document.querySelector('#native-audio-track')?.value === '2'
+    && document.querySelector('#native-subtitle-track')?.options.length === 2
+    && document.querySelector('#native-subtitle-track')?.value === '3',
   );
+  if (await page.locator('#native-audio-track-control').isHidden()) failures.push('[windows-player-tracks] seletor de áudio não apareceu');
+  if (await page.locator('#native-subtitle-track-control').isHidden()) failures.push('[windows-player-tracks] seletor de legenda não apareceu');
+  if (await page.locator('#native-subtitle-track option').first().textContent() !== 'Desativada') {
+    failures.push('[windows-player-tracks] opção de desligar legenda não apareceu');
+  }
+  await page.locator('#native-audio-track').selectOption('1');
+  await page.waitForFunction(() => window.__calls.some((call) =>
+    call.cmd === 'player_control' && call.args?.action === 'select-audio' && call.args?.value === 1,
+  ));
+  await page.locator('#native-subtitle-track').selectOption('');
+  await page.waitForFunction(() => window.__calls.some((call) =>
+    call.cmd === 'player_control' && call.args?.action === 'select-subtitle'
+      && !Object.hasOwn(call.args || {}, 'value'),
+  ));
+  await page.locator('#native-subtitle-track').selectOption('3');
+  await page.waitForFunction(() => window.__calls.some((call) =>
+    call.cmd === 'player_control' && call.args?.action === 'select-subtitle' && call.args?.value === 3,
+  ));
   await page.locator('#native-mute').click();
   await page.waitForFunction(() => window.__calls.some((call) => call.cmd === 'player_control' && call.args?.action === 'toggle-mute'));
   await page.locator('#native-seek').evaluate((input) => {
