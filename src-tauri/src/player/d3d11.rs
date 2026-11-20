@@ -103,9 +103,10 @@ pub(super) struct D3d11RenderContext<'a> {
 }
 
 unsafe extern "C" fn notify_render_update(callback_ctx: *mut c_void) {
-    if let Some(pending) = (callback_ctx as *const AtomicBool).as_ref() {
-        pending.store(true, Ordering::Release);
-    }
+    let Some(pending) = (unsafe { (callback_ctx as *const AtomicBool).as_ref() }) else {
+        return;
+    };
+    pending.store(true, Ordering::Release);
 }
 
 impl<'a> D3d11RenderContext<'a> {
@@ -290,7 +291,7 @@ pub(super) fn create_smoke_swap_chain(
             },
             Dxgi::{
                 IDXGIAdapter, IDXGIDevice, IDXGIFactory2, IDXGIOutput, DXGI_SCALING_STRETCH,
-                DXGI_SWAP_CHAIN_FLAG, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
+                DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
                 DXGI_USAGE_RENDER_TARGET_OUTPUT,
             },
             Dxgi::Common::{
