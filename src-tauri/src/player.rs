@@ -765,11 +765,17 @@ mod tests {
                 width: 30,
                 height: 15,
             }];
+            // Fora do recorte: coordenadas locais (50, 30), dentro do vídeo.
             assert!(super::win::point_is_in_video(
-                120, 130, 100, 100, 100, 100, &cuts
+                150, 130, 100, 100, 100, 100, &cuts
             ));
+            // Dentro do recorte HTML (10..40, 20..35): não encaminhar ao mpv.
             assert!(!super::win::point_is_in_video(
                 115, 125, 100, 100, 100, 100, &cuts
+            ));
+            // A borda direita do recorte é exclusiva; x=40 já pertence ao vídeo.
+            assert!(super::win::point_is_in_video(
+                140, 130, 100, 100, 100, 100, &cuts
             ));
             assert!(!super::win::point_is_in_video(
                 99, 130, 100, 100, 100, 100, &cuts
