@@ -19,7 +19,7 @@ use windows::{
       IDCompositionVisual,
     },
   },
-  core::Interface,
+  core::{Interface, IUnknown},
 };
 
 use crate::Result;
@@ -58,13 +58,14 @@ impl CompositionHost {
 
     // The WebView2 composition visual is attached to the existing Wry container HWND.
     // The standard HWND controller is not created in this opt-in path.
-    let device = unsafe { DCompositionCreateDevice2(None)? };
+    let device = unsafe { DCompositionCreateDevice2(None::<&IUnknown>)? };
     let target = unsafe { device.CreateTargetForHwnd(hwnd, true)? };
     let visual = unsafe { device.CreateVisual()?.cast::<IDCompositionVisual>()? };
 
+    let visual_unknown = visual.cast::<IUnknown>()?;
     unsafe {
       target.SetRoot(&visual)?;
-      composition_controller.SetRootVisualTarget(&visual)?;
+      composition_controller.SetRootVisualTarget(&visual_unknown)?;
       device.Commit()?;
     }
 
