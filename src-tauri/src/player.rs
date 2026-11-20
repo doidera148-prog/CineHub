@@ -616,7 +616,7 @@ mod imp {
                         }) if device_recovery_attempts == 0 => {
                             device_recovery_attempts += 1;
                             eprintln!(
-                                "perda do dispositivo D3D11 em {operation}                                  (HRESULT 0x{:08X}; motivo 0x{:08X}); tentando uma recuperação",
+                                "perda do dispositivo D3D11 em {operation} (HRESULT 0x{:08X}; motivo 0x{:08X}); tentando uma recuperação",
                                 hresult as u32,
                                 removal_reason as u32
                             );
