@@ -49,7 +49,7 @@ opt-level = "s"
 
 # Dependência D3D11 usada apenas pelo renderizador experimental do Windows.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", optional = true, features = ["Win32_Graphics_Direct3D11"] }
+windows = { version = "0.62", optional = true, features = ["Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common"] }
 
 # Atalho global (Esc durante o vídeo): só desktop.
 [target.'cfg(not(target_os = "android"))'.dependencies]
