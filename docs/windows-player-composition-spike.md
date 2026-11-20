@@ -130,6 +130,10 @@ The opt-in Windows hosting slice now has a mouse-input implementation in the ven
 
 The existing Python regression test was expanded to guard the API module paths and ensure mouse events are sent through the composition interface, not the common controller. The existing `.github/workflows/build.yml` is still the sole CI workflow.
 
+
+
+The `WM_MOUSELEAVE` message is declared locally as the Win32 value `0x02A3` because the pinned `windows` 0.62.2 feature set does not expose that constant in the generated `WindowsAndMessaging` module. A failed `SetWindowSubclass` call now returns an explicit `E_FAIL` with a diagnostic message through `windows::core::Error::new`, avoiding APIs absent from `windows-result` 0.4.x.
+
 **Not complete:** this slice handles Win32 mouse messages; touch/pen `WM_POINTER` conversion through `SendPointerInput` is still pending. It also does not render libmpv video through D3D11. Do not enable this path for normal CineHub use or consider the player mouse issue fixed yet.
 
 Next gate: compile and run the Windows job, then validate click/double-click, both wheel axes, drag outside the WebView, cursor changes, focus, resize and repeated close/reopen on a physical Windows machine. CI compilation does not prove physical mouse behavior or visual correctness.
