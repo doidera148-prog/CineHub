@@ -56,7 +56,7 @@ impl CompositionHost {
       environment.CreateCoreWebView2CompositionController(hwnd, &handler)?;
     }
 
-    let composition_controller = webview2_com::wait_with_pump(rx)?;
+    let composition_controller = webview2_com::wait_with_pump(rx)??;
     let controller = composition_controller.cast::<ICoreWebView2Controller>()?;
 
     // The WebView2 composition visual is attached to the existing Wry container HWND.
