@@ -1894,6 +1894,7 @@ async function play(stream, label, id, meta, subs) {
     }
   }
   const segments = await skipSegmentsFor(id, meta);
+  skipSegs = segments;
   // No Windows, libmpv é o player principal para todos os formatos de mídia:
   // vídeo, áudio, contêineres e protocolos suportados pelo próprio mpv.
   // Não restringir por extensão: URLs sem extensão e streams também são válidos.
