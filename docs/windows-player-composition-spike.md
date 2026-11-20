@@ -109,6 +109,20 @@ The exact upstream source seam has been identified, but no Wry fork or productio
 
 To avoid requiring the repository owner to create a separate GitHub fork, the exact Wry `0.57.2` source is vendored under `src-tauri/vendor/wry` and selected with the existing Cargo `[patch.crates-io]` mechanism. This keeps the upstream source baseline, licenses and package metadata inside CineHub, while all changes remain reviewable in the CineHub branch. The upstream baseline is tag `wry-v0.57.2`, commit `bbba6b6312af92fbb969789a63768f4b4bb6d268`.
 
-The vendor baseline is now connected to Cargo and the lockfile points to the local package. This is intentionally still behavior-preserving: the composition controller has not yet been implemented, and the existing standard WebView2 host remains unchanged. The next code patch can therefore be made directly in `src-tauri/vendor/wry/src/webview2/mod.rs` without a separate repository or manual fork step.
+The vendor baseline is connected to Cargo and the lockfile points to the local package. The standard WebView2 controller remains the default. An experimental Windows-only composition path now exists behind `CINEHUB_WEBVIEW2_COMPOSITION_POC`; it creates `ICoreWebView2CompositionController`, attaches a DirectComposition visual to the existing Wry container HWND, and retains the COM objects for the WebView lifetime. The path is deliberately opt-in and is not yet a usable player host because mouse/pointer forwarding, cursor handling, and keyboard focus integration are not implemented.
 
 The normal `.github/workflows/build.yml` is the validation path. The first gate is that the existing Linux, Windows and macOS Rust builds/tests continue to compile against the vendored Wry package before any composition behavior is added.
+
+
+## Hosting POC progress — 2026-11-20
+
+The first implementation slice is committed in the vendored Wry Windows backend:
+
+- `src-tauri/vendor/wry/src/webview2/composition.rs` creates the WebView2 composition controller, creates a DirectComposition device/target/visual, assigns `RootVisualTarget`, and commits the visual tree.
+- `InnerWebView` selects this path only when the explicit `CINEHUB_WEBVIEW2_COMPOSITION_POC` environment variable is present. Otherwise it uses the original standard HWND controller unchanged.
+- The common `ICoreWebView2Controller` interface continues through Wry's existing initialization path, so navigation, IPC, permissions and other existing WebView handlers are retained.
+- The existing Python regression suite was extended to verify the opt-in switch, standard-controller fallback and composition-host API seam. The existing Windows desktop job compiles the Windows-only code.
+
+**Not complete:** this slice does not forward mouse/pointer messages through `SendMouseInput` / `SendPointerInput`, handle cursor changes or fully integrate keyboard focus. Do not enable it for normal CineHub use or treat it as a fix for the player's mouse bug yet. It also does not render libmpv video; the D3D11 libmpv render context remains a later stage.
+
+Next gate: implement and test composition-host input forwarding, cursor/focus behavior, resize and deterministic teardown before integrating libmpv rendering. CI compilation is only a compile gate; visual behavior and physical mouse input still require a real Windows run.
