@@ -393,7 +393,7 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("mpv_render_context_free", d3d11)
         self.assertIn("GetDeviceRemovedReason", d3d11)
         self.assertIn("is_device_loss_hresult", d3d11)
-        self.assertIn("RenderError::DeviceLost", d3d11)
+        self.assertIn("DeviceLost {", d3d11)
         self.assertIn("recreate_host_device", d3d11)
         self.assertIn("texture.as_raw()", d3d11)
         self.assertIn("abi_layout_is_valid", d3d11)
