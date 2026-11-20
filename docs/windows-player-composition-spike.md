@@ -134,6 +134,14 @@ The existing Python regression test was expanded to guard the API module paths a
 
 The `WM_MOUSELEAVE` message is declared locally as the Win32 value `0x02A3` because the pinned `windows` 0.62.2 feature set does not expose that constant in the generated `WindowsAndMessaging` module. A failed `SetWindowSubclass` call now returns an explicit `E_FAIL` with a diagnostic message through `windows::core::Error::new`, avoiding APIs absent from `windows-result` 0.4.x.
 
-**Not complete:** this slice handles Win32 mouse messages; touch/pen `WM_POINTER` conversion through `SendPointerInput` is still pending. It also does not render libmpv video through D3D11. Do not enable this path for normal CineHub use or consider the player mouse issue fixed yet.
+- Handles `WM_POINTERDOWN`, `WM_POINTERUPDATE`, `WM_POINTERUP`, `WM_POINTERENTER` and `WM_POINTERLEAVE` for `PT_TOUCH` and `PT_PEN`; pointer-mouse and touchpad types are left to the normal Win32 procedure.
+- Builds the stable `ICoreWebView2PointerInfo` from Win32 `POINTER_INFO`, `POINTER_TOUCH_INFO` or `POINTER_PEN_INFO`, including contact area, pressure, rotation and pen tilt.
+- Converts screen pixel positions/contact rectangles and HIMETRIC positions to WebView-relative client coordinates before calling `SendPointerInput`; keeps the source digitizer's physical calibration rectangle intact.
+- Consumes a recognized touch/pen pointer message only after WebView2 successfully accepts it, avoiding an additional synthesized mouse stream for the same handled input.
+
+**Not complete:** the composition host still does not render libmpv video through D3D11, and touch/pen behavior has not yet been verified on physical Windows hardware. Do not enable this path for normal CineHub use or consider the player input issue fixed yet.
 
 Next gate: compile and run the Windows job, then validate click/double-click, both wheel axes, drag outside the WebView, cursor changes, focus, resize and repeated close/reopen on a physical Windows machine. CI compilation does not prove physical mouse behavior or visual correctness.
+
+
+The pointer path uses the existing pinned `windows 0.62.2` and `webview2-com 0.39.1` APIs. The Windows CI job validates compilation and static regression assertions only; physical touch/pen testing remains a separate gate.
