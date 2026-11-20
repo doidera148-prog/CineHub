@@ -57,11 +57,11 @@ use windows::{
       },
       Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
       WindowsAndMessaging::{
-        GetClientRect, SendMessageW, SetCursor, WM_CAPTURECHANGED, WM_LBUTTONDBLCLK,
+        GetClientRect, SendMessageW, SetCursor, HTCLIENT, WM_CAPTURECHANGED, WM_LBUTTONDBLCLK,
         WM_LBUTTONDOWN, PT_PEN, PT_TOUCH, WM_LBUTTONUP, WM_MBUTTONDBLCLK, WM_MBUTTONDOWN,
         WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_POINTERDOWN,
         WM_POINTERENTER, WM_POINTERLEAVE, WM_POINTERUP, WM_POINTERUPDATE, WM_RBUTTONDBLCLK,
-        WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_XBUTTONDBLCLK,
+        WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SETFOCUS, WM_SIZE, WM_XBUTTONDBLCLK,
         WM_XBUTTONDOWN, WM_XBUTTONUP, SIZE_MINIMIZED,
       },
     },
@@ -495,6 +495,16 @@ impl CompositionHost {
           let _ = state
             .controller
             .MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+        }
+        WM_SETCURSOR if (lparam.0 as u16) == HTCLIENT as u16 => {
+          // DefWindowProc can restore the host class cursor (the arrow) after
+          // WebView2 raises CursorChanged. Reapply WebView2's current cursor
+          // for every client-area WM_SETCURSOR so CSS cursor:pointer stays visible.
+          let mut cursor = Default::default();
+          if state.composition_controller.Cursor(&mut cursor).is_ok() {
+            SetCursor(Some(cursor));
+            return windows::Win32::Foundation::LRESULT(1);
+          }
         }
         WM_SIZE if wparam.0 != SIZE_MINIMIZED as usize => {
           // Keep the composition controller bounds in sync with the host client area.
