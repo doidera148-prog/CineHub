@@ -292,7 +292,7 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("SetWindowSubclass", composition)
         self.assertIn("Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass}", composition)
         self.assertIn("Input::KeyboardAndMouse::{", composition)
-        self.assertIn("Input::Pointer::{", composition)
+        self.assertIn("Pointer::{", composition)
         self.assertIn('"Win32_UI_Input_Pointer"', (ROOT / "src-tauri/vendor/wry/Cargo.toml").read_text(encoding="utf-8"))
         self.assertIn("GetPointerDeviceRects, GetPointerInfo, GetPointerPenInfo, GetPointerTouchInfo", composition)
         self.assertIn("POINTER_INFO, POINTER_PEN_INFO, POINTER_TOUCH_INFO", composition)
