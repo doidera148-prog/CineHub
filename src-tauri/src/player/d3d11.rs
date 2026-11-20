@@ -234,7 +234,7 @@ pub(super) fn abi_layout_is_valid() -> bool {
         && MPV_RENDER_PARAM_API_TYPE == 1
         && MPV_RENDER_PARAM_D3D11_INIT_PARAMS == 21
         && MPV_RENDER_PARAM_D3D11_FBO == 22
-        && MPV_RENDER_API_TYPE_D3D11 == b"d3d11\\0"
+        && MPV_RENDER_API_TYPE_D3D11 == b"d3d11\0"
 }
 
 /// Moves/resizes the video visual on the thread that owns the WebView HWND.

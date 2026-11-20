@@ -1703,6 +1703,9 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
   let completed = false;
   const saved = store.get('progress', {})[id];
   const startMs = saved && saved.t > 5 && !saved.watched ? saved.t * 1000 : 0;
+  const compositionMode = IS_WINDOWS
+    ? await call('player_composition_enabled').catch(() => false)
+    : false;
   current = { id, label, meta, src: stream.url, mime: '' };
   document.title = `${label} · CineHub`;
   try {
@@ -1717,9 +1720,10 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
     args.segments = IS_ANDROID ? JSON.stringify(segments) : segments;
     let playback;
     if (IS_WINDOWS) {
-      // Mostra a interface HTML do CineHub enquanto o mpv desenha apenas a superfície
-      // do vídeo. A região nativa será recortada para deixar título e botão Fechar clicáveis.
+      // Mostra os controles do CineHub acima do vídeo nativo. Na composição,
+      // a página ao fundo fica transparente para revelar o visual DirectComposition.
       nativePlayerActive = true;
+      document.body.classList.toggle('native-composition-mode', compositionMode);
       showPlayer();
       keepScreenOn(true);
       playback = invoke(command, args);
@@ -1748,6 +1752,7 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
   } finally {
     if (IS_WINDOWS && nativePlayerActive) {
       nativePlayerActive = false;
+      document.body.classList.remove('native-composition-mode');
       closePlayer(false, false);
     }
     current = null;

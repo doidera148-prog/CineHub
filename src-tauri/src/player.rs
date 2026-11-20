@@ -92,6 +92,18 @@ pub fn player_set_geometry(
 }
 
 #[tauri::command]
+pub fn player_composition_enabled() -> bool {
+    #[cfg(all(windows, feature = "mpv"))]
+    {
+        std::env::var_os("CINEHUB_WEBVIEW2_COMPOSITION_POC").is_some()
+    }
+    #[cfg(not(all(windows, feature = "mpv")))]
+    {
+        false
+    }
+}
+
+#[tauri::command]
 pub fn player_close() {
     request_close();
 }

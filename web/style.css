@@ -773,6 +773,18 @@ input[type="search"], input[type="text"], input[type="url"] {
 }
 .player-box { position: relative; width: min(1280px, 96vw); }
 #video { width: 100%; max-height: 85vh; background: #000; }
+
+/* The native composition swap chain is below WebView2. Make only its player
+   state transparent and hide the page behind it; custom controls stay above video. */
+body.native-composition-mode { background: transparent !important; }
+body.native-composition-mode > .sidebar,
+body.native-composition-mode > #main-content { visibility: hidden; }
+body.native-composition-mode #player { background: transparent; }
+body.native-composition-mode #player .player-box { background: transparent; }
+body.native-composition-mode #player .video-js {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
 .close {
   position: absolute;
   top: 0.6rem;

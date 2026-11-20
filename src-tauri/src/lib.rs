@@ -208,6 +208,7 @@ pub fn run() {
             diag::save_diagnostics,
             player::player_play,
             player::player_set_geometry,
+            player::player_composition_enabled,
             player::player_close,
             skip::skip_segments,
         ])

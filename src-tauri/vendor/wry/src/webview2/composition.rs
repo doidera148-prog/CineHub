@@ -318,6 +318,15 @@ impl CompositionHost {
 
     let composition_controller = webview2_com::wait_with_pump(rx)??;
     let controller = composition_controller.cast::<ICoreWebView2Controller>()?;
+    let controller2 = controller.cast::<ICoreWebView2Controller2>()?;
+    unsafe {
+      controller2.SetDefaultBackgroundColor(COREWEBVIEW2_COLOR {
+        R: 0,
+        G: 0,
+        B: 0,
+        A: 0,
+      })?;
+    }
 
     // One hardware D3D11 device backs both libmpv's render target and the
     // composition swap chain. DComp is created from that same DXGI device.

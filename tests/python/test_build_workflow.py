@@ -385,6 +385,9 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
             with self.subTest(required=required):
                 self.assertIn(required, composition)
 
+        self.assertIn("SetDefaultBackgroundColor(COREWEBVIEW2_COLOR", composition)
+        self.assertIn("A: 0", composition)
+
         wry_mod = (ROOT / "src-tauri/vendor/wry/src/webview2/mod.rs").read_text(encoding="utf-8")
         self.assertIn("CompositionHost::new(parent, hwnd, &env)", wry_mod)
         self.assertIn('"Win32_Graphics_Dxgi"', (ROOT / "src-tauri/vendor/wry/Cargo.toml").read_text(encoding="utf-8"))
@@ -401,11 +404,20 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
                 self.assertIn(required, d3d11)
 
         player = (ROOT / "src-tauri/src/player.rs").read_text(encoding="utf-8")
+        self.assertIn("pub fn player_composition_enabled() -> bool", player)
+        self.assertIn("player::player_composition_enabled", (ROOT / "src-tauri/src/lib.rs").read_text(encoding="utf-8"))
         self.assertIn('init.set_option("vo", if composition_mode { "libmpv" } else { "gpu" })?', player)
         self.assertIn("super::mpv_d3d11::D3d11RenderContext::new(&mpv, &device)", player)
         self.assertIn("super::mpv_d3d11::render_to_host(parent, renderer)", player)
         self.assertIn("COMPOSITION_CLOSE_REQUESTED", player)
         self.assertIn("mpv_d3d11::set_video_rect(parent, x, y, width, height)", player)
+
+        app_js = (ROOT / "web/app.js").read_text(encoding="utf-8")
+        self.assertIn("call('player_composition_enabled')", app_js)
+        self.assertIn("native-composition-mode", app_js)
+        css = (ROOT / "web/style.css").read_text(encoding="utf-8")
+        self.assertIn("body.native-composition-mode { background: transparent !important; }", css)
+        self.assertIn("body.native-composition-mode #player .video-js", css)
 
     def test_only_optional_ffmpeg_download_can_fail_without_stopping_android_job(self):
         android = job_block(self.workflow, "android")
