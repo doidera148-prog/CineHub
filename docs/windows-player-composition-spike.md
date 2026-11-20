@@ -145,3 +145,18 @@ Next gate: compile and run the Windows job, then validate click/double-click, bo
 
 
 The pointer path uses the existing pinned `windows 0.62.2` and `webview2-com 0.39.1` APIs. The Windows CI job validates compilation and static regression assertions only; physical touch/pen testing remains a separate gate.
+
+
+## Native libmpv D3D11 render bridge — 2026-11-20
+
+The Windows player now has an isolated Rust bridge for libmpv's native Direct3D 11 render API in src-tauri/src/player/d3d11.rs:
+
+- Creates mpv_render_context with MPV_RENDER_API_TYPE_D3D11 and the host-owned ID3D11Device.
+- Passes a host-owned ID3D11Texture2D through MPV_RENDER_PARAM_D3D11_FBO.
+- Exposes render-update polling, frame rendering, swap reporting and deterministic render-context release.
+- Keeps the native ABI structs/constants local because the pinned libmpv2-sys 4.0.1 pregenerated bindings include the generic render API but not the newer D3D11 parameter declarations.
+- Ties the render context lifetime to Mpv so it is dropped before the mpv core.
+
+The bridge is not wired into playback yet. It deliberately does not create a D3D11 device, a DXGI swap chain, or a DirectComposition visual, and it does not change the existing wid/native-window path. The next integration seam is to let the opt-in Wry composition host own a shared D3D11 device and composition swap chain, then provide that device/texture to this bridge. The default player remains unchanged.
+
+The existing Windows CI build compiles this module with the mpv feature. The existing Rust OSC test now also checks the native ABI structure layout/constants, and the existing Python regression test checks the bridge entry points and feature gate. No additional workflow or duplicate test run was added.
