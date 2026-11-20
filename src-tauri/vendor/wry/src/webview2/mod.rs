@@ -79,6 +79,12 @@ pub(crate) struct InnerWebView {
 
 impl Drop for InnerWebView {
   fn drop(&mut self) {
+    // The composition subclass and cursor callback must be detached while the
+    // host HWND and WebView2 controller are still alive.
+    if let Some(host) = self.composition_host.as_mut() {
+      host.shutdown();
+    }
+
     let _ = unsafe { self.controller.Close() };
     if self.is_child {
       let _ = unsafe { DestroyWindow(self.hwnd) };
