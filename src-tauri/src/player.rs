@@ -914,6 +914,62 @@ mod tests {
                 super::mpv_d3d11::abi_layout_is_valid(),
                 "a ABI do render API D3D11 precisa corresponder aos headers nativos do libmpv"
             );
+
+            // Runtime smoke test: initialize libmpv's D3D11 render backend, decode
+            // a local test frame, and render it into a real D3D11 render-target
+            // texture. The helper tries hardware first and WARP only as CI fallback.
+            let d3d_mpv = Mpv::with_initializer(|init| {
+                init.set_option("vo", "libmpv")?;
+                init.set_option("ao", "null")?;
+                init.set_option("hwdec", "no")?;
+                init.set_option("osc", "no")?;
+                Ok(())
+            })
+            .expect("libmpv precisa inicializar o render backend libmpv");
+
+            let (device, texture, driver) = super::mpv_d3d11::create_smoke_render_target()
+                .expect("Windows precisa criar um dispositivo e uma textura D3D11");
+            let renderer = super::mpv_d3d11::D3d11RenderContext::new(&d3d_mpv, &device)
+                .expect("libmpv precisa criar o render context D3D11");
+
+            let frame_path = std::env::temp_dir().join(format!(
+                "cinehub-d3d11-smoke-{}.ppm",
+                std::process::id()
+            ));
+            let mut ppm = b"P6\n64 64\n255\n".to_vec();
+            for y in 0..64 {
+                for x in 0..64 {
+                    ppm.extend_from_slice(&[
+                        if x < 32 { 255 } else { 0 },
+                        if y < 32 { 255 } else { 0 },
+                        if (x / 8 + y / 8) % 2 == 0 { 255 } else { 32 },
+                    ]);
+                }
+            }
+            std::fs::write(&frame_path, ppm).expect("quadro PPM temporário precisa ser gravado");
+            let frame_path_string = frame_path.to_string_lossy().into_owned();
+            d3d_mpv
+                .command("loadfile", &[frame_path_string.as_str(), "replace"])
+                .expect("libmpv precisa abrir o quadro PPM de teste");
+
+            let mut rendered_frame = false;
+            for _ in 0..100 {
+                let _ = d3d_mpv.wait_event(0.05);
+                if renderer.frame_is_pending() {
+                    renderer
+                        .render(&texture)
+                        .expect("libmpv precisa renderizar o quadro na textura D3D11");
+                    rendered_frame = true;
+                    break;
+                }
+            }
+            let _ = std::fs::remove_file(&frame_path);
+            assert!(
+                rendered_frame,
+                "libmpv não sinalizou nem renderizou o quadro de teste pelo backend D3D11"
+            );
+            eprintln!("D3D11 runtime smoke test aprovado usando driver {driver}");
+
             for message in [
                 0x0200, // WM_MOUSEMOVE
                 0x0201, // WM_LBUTTONDOWN
