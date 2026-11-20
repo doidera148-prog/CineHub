@@ -206,7 +206,7 @@ A inicialização do host agora é transacional nas duas últimas etapas de publ
 - O estado de entrada permanece sob propriedade de um `Box` até `SetWindowSubclass` confirmar sucesso. Se a instalação falhar, o `Box` é liberado automaticamente, a superfície é desregistrada, o callback é removido e o visual é desconectado.
 - Após a instalação bem-sucedida, o ponteiro bruto passa a ser propriedade do host e é liberado por `CompositionHost::shutdown`, antes do fechamento do controller comum.
 
-O caminho padrão HWND continua preservado para rollback. O smoke test de CI exercita libmpv/D3D11/DXGI, mas não simula perda real do dispositivo gráfico nem substitui a validação de transparência, escala DPI e interação física em hardware Windows. A recuperação automática após remoção do dispositivo D3D11 ainda é um item separado; uma falha de renderização encerra a reprodução em vez de reutilizar um contexto gráfico inválido.
+O caminho padrão HWND continua preservado para rollback. O smoke test de CI exercita libmpv/D3D11/DXGI, mas não simula perda real do dispositivo gráfico nem substitui a validação de transparência, escala DPI e interação física em hardware Windows. **Naquele checkpoint**, a recuperação automática após remoção do dispositivo D3D11 ainda era um item separado; a implementação posterior está descrita na seção seguinte.
 
 
 ## Recuperação de perda do dispositivo D3D11 — 2026-11-20
