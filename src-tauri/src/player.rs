@@ -388,15 +388,60 @@ mod win {
             cy: i32,
             flags: u32,
         ) -> Bool;
-        fn SetFocus(hwnd: Hwnd) -> Hwnd;
         fn SetForegroundWindow(hwnd: Hwnd) -> Bool;
-        fn GetCurrentThreadId() -> u32;
-        fn GetWindowThreadProcessId(hwnd: Hwnd, process_id: *mut u32) -> u32;
-        fn AttachThreadInput(attach: u32, attach_to: u32, attach_input: Bool) -> Bool;
         fn PostMessageW(hwnd: Hwnd, msg: u32, wparam: usize, lparam: isize) -> Bool;
+        fn SendMessageW(hwnd: Hwnd, msg: u32, wparam: usize, lparam: isize) -> isize;
+        fn MapWindowPoints(from: Hwnd, to: Hwnd, points: *mut Point, count: u32) -> i32;
+    }
+
+    #[link(name = "comctl32")]
+    extern "system" {
+        fn SetWindowSubclass(
+            hwnd: Hwnd,
+            callback: Option<unsafe extern "system" fn(Hwnd, u32, usize, isize, usize, usize) -> isize>,
+            subclass_id: usize,
+            reference: usize,
+        ) -> Bool;
+        fn RemoveWindowSubclass(
+            hwnd: Hwnd,
+            callback: Option<unsafe extern "system" fn(Hwnd, u32, usize, isize, usize, usize) -> isize>,
+            subclass_id: usize,
+        ) -> Bool;
+        fn DefSubclassProc(hwnd: Hwnd, msg: u32, wparam: usize, lparam: isize) -> isize;
+    }
+
+    #[repr(C)]
+    struct Point {
+        x: i32,
+        y: i32,
     }
 
     const WM_CLOSE: u32 = 0x0010;
+    const WM_SETFOCUS: u32 = 0x0007;
+    const WM_KILLFOCUS: u32 = 0x0008;
+    const WM_MOUSEACTIVATE: u32 = 0x0021;
+    const WM_KEYDOWN: u32 = 0x0100;
+    const WM_KEYUP: u32 = 0x0101;
+    const WM_SYSKEYDOWN: u32 = 0x0104;
+    const WM_SYSKEYUP: u32 = 0x0105;
+    const WM_MOUSEMOVE: u32 = 0x0200;
+    const WM_LBUTTONDOWN: u32 = 0x0201;
+    const WM_LBUTTONUP: u32 = 0x0202;
+    const WM_LBUTTONDBLCLK: u32 = 0x0203;
+    const WM_RBUTTONDOWN: u32 = 0x0204;
+    const WM_RBUTTONUP: u32 = 0x0205;
+    const WM_RBUTTONDBLCLK: u32 = 0x0206;
+    const WM_MBUTTONDOWN: u32 = 0x0207;
+    const WM_MBUTTONUP: u32 = 0x0208;
+    const WM_MBUTTONDBLCLK: u32 = 0x0209;
+    const WM_MOUSEWHEEL: u32 = 0x020a;
+    const WM_XBUTTONDOWN: u32 = 0x020b;
+    const WM_XBUTTONUP: u32 = 0x020c;
+    const WM_MOUSEHWHEEL: u32 = 0x020e;
+    const WM_MOUSELEAVE: u32 = 0x02a3;
+    const WM_IME_FIRST: u32 = 0x0280;
+    const WM_IME_LAST: u32 = 0x0291;
+    const SUBCLASS_ID: usize = 0x43494e45;
     const HWND_TOP: Hwnd = std::ptr::null_mut();
     const SWP_NOMOVE: u32 = 0x0002;
     const SWP_NOSIZE: u32 = 0x0001;
@@ -404,8 +449,56 @@ mod win {
     const SWP_SHOWWINDOW: u32 = 0x0040;
     const RGN_DIFF: i32 = 4;
 
-    /// HWND do vídeo embutido enquanto ele toca (0 = nenhum).
+    /// HWNDs das janelas principal e filha enquanto o player está ativo.
     pub static VIDEO: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+    static PARENT: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+    fn forwards_input_message(msg: u32) -> bool {
+        matches!(
+            msg,
+            WM_SETFOCUS | WM_KILLFOCUS | WM_MOUSEACTIVATE |
+            WM_KEYDOWN | WM_KEYUP | WM_SYSKEYDOWN | WM_SYSKEYUP |
+            WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK |
+            WM_RBUTTONDOWN | WM_RBUTTONUP | WM_RBUTTONDBLCLK |
+            WM_MBUTTONDOWN | WM_MBUTTONUP | WM_MBUTTONDBLCLK |
+            WM_MOUSEWHEEL | WM_XBUTTONDOWN | WM_XBUTTONUP | WM_MOUSEHWHEEL |
+            WM_MOUSELEAVE
+        ) || (WM_IME_FIRST..=WM_IME_LAST).contains(&msg)
+    }
+
+    unsafe extern "system" fn parent_subclass_proc(
+        hwnd: Hwnd,
+        msg: u32,
+        wparam: usize,
+        lparam: isize,
+        _subclass_id: usize,
+        _reference: usize,
+    ) -> isize {
+        let video = VIDEO.load(std::sync::atomic::Ordering::SeqCst);
+        if video != 0 && forwards_input_message(msg) {
+            let mut forwarded_lparam = lparam;
+            // Mouse button/move coordinates are client-relative. Convert from the
+            // Tauri parent to the mpv child; wheel coordinates are screen-relative
+            // and must remain unchanged.
+            if matches!(
+                msg,
+                WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK |
+                WM_RBUTTONDOWN | WM_RBUTTONUP | WM_RBUTTONDBLCLK |
+                WM_MBUTTONDOWN | WM_MBUTTONUP | WM_MBUTTONDBLCLK |
+                WM_XBUTTONDOWN | WM_XBUTTONUP
+            ) {
+                let mut point = Point {
+                    x: (lparam as u32 & 0xffff) as u16 as i16 as i32,
+                    y: ((lparam as u32 >> 16) & 0xffff) as u16 as i16 as i32,
+                };
+                MapWindowPoints(hwnd, video as usize as Hwnd, &mut point, 1);
+                forwarded_lparam =
+                    ((point.y as u16 as u32) << 16 | point.x as u16 as u32) as isize;
+            }
+            return SendMessageW(video as usize as Hwnd, msg, wparam, forwarded_lparam);
+        }
+        DefSubclassProc(hwnd, msg, wparam, lparam)
+    }
 
     /// Fecha o vídeo embutido: WM_CLOSE para a janela do mpv, que encerra a reprodução.
     pub fn request_close() {
@@ -419,27 +512,18 @@ mod win {
     }
 
     /// Mantém o mpv acima da WebView sem esconder os controles HTML.
-    pub fn take_over(_parent: i64, video: i64) {
+    pub fn take_over(parent: i64, video: i64) {
+        let parent = parent as usize as Hwnd;
         let video = video as usize as Hwnd;
+        PARENT.store(parent as usize as isize, std::sync::atomic::Ordering::SeqCst);
         VIDEO.store(video as usize as isize, std::sync::atomic::Ordering::SeqCst);
-        // SAFETY: video é o HWND retornado pelo próprio libmpv.
+        // SAFETY: os HWNDs vêm do Tauri e do libmpv e permanecem válidos durante a reprodução.
         unsafe {
-            SetForegroundWindow(video);
-
-            // WM_MOUSEWHEEL é entregue à janela com foco, não necessariamente à janela
-            // sob o ponteiro. O HWND do mpv pode pertencer a outra thread; nesse caso,
-            // SetFocus falha se as filas de entrada não estiverem temporariamente anexadas.
-            let current_thread = GetCurrentThreadId();
-            let video_thread = GetWindowThreadProcessId(video, std::ptr::null_mut());
-            if video_thread != 0 && video_thread != current_thread {
-                if AttachThreadInput(current_thread, video_thread, 1) != 0 {
-                    SetFocus(video);
-                    AttachThreadInput(current_thread, video_thread, 0);
-                }
-            } else if video_thread == current_thread {
-                SetFocus(video);
-            }
-
+            // O mpv.net encaminha as mensagens recebidas pela janela hospedeira
+            // diretamente ao HWND filho do mpv. Isso também funciona quando o filho
+            // está marcado WS_DISABLED e não recebe hit-testing normal do Windows.
+            SetWindowSubclass(parent, Some(parent_subclass_proc), SUBCLASS_ID, 0);
+            SetForegroundWindow(parent);
             SetWindowPos(
                 video,
                 HWND_TOP,
@@ -511,9 +595,17 @@ mod win {
     /// Remove o recorte ao encerrar a reprodução.
     pub fn restore() {
         let video = VIDEO.swap(0, std::sync::atomic::Ordering::SeqCst);
-        if video != 0 {
-            // SAFETY: região nula restaura a forma retangular padrão da janela.
-            unsafe {
+        let parent = PARENT.swap(0, std::sync::atomic::Ordering::SeqCst);
+        // SAFETY: a subclass é removida da janela hospedeira antes de liberar o HWND do mpv.
+        unsafe {
+            if parent != 0 {
+                RemoveWindowSubclass(
+                    parent as usize as Hwnd,
+                    Some(parent_subclass_proc),
+                    SUBCLASS_ID,
+                );
+            }
+            if video != 0 {
                 SetWindowRgn(video as usize as Hwnd, std::ptr::null_mut(), 1);
             }
         }
@@ -558,6 +650,21 @@ mod tests {
             "libmpv rejeitou as opções do OSC: {:?}",
             result.err()
         );
+        #[cfg(all(windows, feature = "mpv"))]
+        {
+            for message in [
+                0x0200, // WM_MOUSEMOVE
+                0x0201, // WM_LBUTTONDOWN
+                0x0202, // WM_LBUTTONUP
+                0x020a, // WM_MOUSEWHEEL
+                0x020e, // WM_MOUSEHWHEEL
+                0x0100, // WM_KEYDOWN
+                0x0101, // WM_KEYUP
+            ] {
+                assert!(super::win::forwards_input_message(message));
+            }
+            assert!(!super::win::forwards_input_message(0x000f)); // WM_PAINT
+        }
     }
 
     #[test]
