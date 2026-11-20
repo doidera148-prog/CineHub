@@ -290,7 +290,7 @@ def inspect_node(node, path = "$")
       inspect_node(value, "#{path}.#{key.respond_to?(:value) ? key.value : "?"}")
     end
   elsif node.respond_to?(:children)
-    node.children.each_with_index { |child, index| inspect_node(child, "#{path}[#{index}]") }
+    Array(node.children).each_with_index { |child, index| inspect_node(child, "#{path}[#{index}]") }
   end
 end
 inspect_node(root)
