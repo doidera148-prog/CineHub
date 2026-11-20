@@ -301,7 +301,6 @@ mod imp {
         let mut failed = false;
         // Dentro da janela do app: esconde os controles web e traz o vídeo para frente (Windows).
         #[cfg(all(windows, feature = "mpv"))]
-        #[cfg(all(windows, feature = "mpv"))]
         let mut embedded = false;
         loop {
             match mpv.wait_event(0.25) {
@@ -400,7 +399,9 @@ mod win {
     extern "system" {
         fn SetWindowSubclass(
             hwnd: Hwnd,
-            callback: Option<unsafe extern "system" fn(Hwnd, u32, usize, isize, usize, usize) -> isize>,
+            callback: Option<
+                unsafe extern "system" fn(Hwnd, u32, usize, isize, usize, usize) -> isize,
+            >,
             subclass_id: usize,
             reference: usize,
         ) -> Bool;
@@ -490,13 +491,28 @@ mod win {
     fn forwards_input_message(msg: u32) -> bool {
         matches!(
             msg,
-            WM_SETFOCUS | WM_KILLFOCUS | WM_MOUSEACTIVATE |
-            WM_KEYDOWN | WM_KEYUP | WM_SYSKEYDOWN | WM_SYSKEYUP |
-            WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK |
-            WM_RBUTTONDOWN | WM_RBUTTONUP | WM_RBUTTONDBLCLK |
-            WM_MBUTTONDOWN | WM_MBUTTONUP | WM_MBUTTONDBLCLK |
-            WM_MOUSEWHEEL | WM_XBUTTONDOWN | WM_XBUTTONUP | WM_MOUSEHWHEEL |
-            WM_MOUSELEAVE
+            WM_SETFOCUS
+                | WM_KILLFOCUS
+                | WM_MOUSEACTIVATE
+                | WM_KEYDOWN
+                | WM_KEYUP
+                | WM_SYSKEYDOWN
+                | WM_SYSKEYUP
+                | WM_MOUSEMOVE
+                | WM_LBUTTONDOWN
+                | WM_LBUTTONUP
+                | WM_LBUTTONDBLCLK
+                | WM_RBUTTONDOWN
+                | WM_RBUTTONUP
+                | WM_RBUTTONDBLCLK
+                | WM_MBUTTONDOWN
+                | WM_MBUTTONUP
+                | WM_MBUTTONDBLCLK
+                | WM_MOUSEWHEEL
+                | WM_XBUTTONDOWN
+                | WM_XBUTTONUP
+                | WM_MOUSEHWHEEL
+                | WM_MOUSELEAVE
         ) || (WM_IME_FIRST..=WM_IME_LAST).contains(&msg)
     }
 
@@ -512,19 +528,29 @@ mod win {
         if video != 0 && forwards_input_message(msg) {
             let is_mouse_message = matches!(
                 msg,
-                WM_MOUSEACTIVATE | WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP |
-                WM_LBUTTONDBLCLK | WM_RBUTTONDOWN | WM_RBUTTONUP | WM_RBUTTONDBLCLK |
-                WM_MBUTTONDOWN | WM_MBUTTONUP | WM_MBUTTONDBLCLK | WM_MOUSEWHEEL |
-                WM_XBUTTONDOWN | WM_XBUTTONUP | WM_MOUSEHWHEEL
+                WM_MOUSEACTIVATE
+                    | WM_MOUSEMOVE
+                    | WM_LBUTTONDOWN
+                    | WM_LBUTTONUP
+                    | WM_LBUTTONDBLCLK
+                    | WM_RBUTTONDOWN
+                    | WM_RBUTTONUP
+                    | WM_RBUTTONDBLCLK
+                    | WM_MBUTTONDOWN
+                    | WM_MBUTTONUP
+                    | WM_MBUTTONDBLCLK
+                    | WM_MOUSEWHEEL
+                    | WM_XBUTTONDOWN
+                    | WM_XBUTTONUP
+                    | WM_MOUSEHWHEEL
             );
             if is_mouse_message {
                 let mut cursor = Point { x: 0, y: 0 };
                 if GetCursorPos(&mut cursor) != 0 && ScreenToClient(hwnd, &mut cursor) != 0 {
                     let geometry = INPUT_GEOMETRY.lock().unwrap_or_else(|e| e.into_inner());
                     if let Some((x, y, width, height, cutouts)) = geometry.as_ref() {
-                        if !point_is_in_video(
-                            cursor.x, cursor.y, *x, *y, *width, *height, cutouts,
-                        ) {
+                        if !point_is_in_video(cursor.x, cursor.y, *x, *y, *width, *height, cutouts)
+                        {
                             return DefSubclassProc(hwnd, msg, wparam, lparam);
                         }
                     }
@@ -536,18 +562,25 @@ mod win {
             // and must remain unchanged.
             if matches!(
                 msg,
-                WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK |
-                WM_RBUTTONDOWN | WM_RBUTTONUP | WM_RBUTTONDBLCLK |
-                WM_MBUTTONDOWN | WM_MBUTTONUP | WM_MBUTTONDBLCLK |
-                WM_XBUTTONDOWN | WM_XBUTTONUP
+                WM_MOUSEMOVE
+                    | WM_LBUTTONDOWN
+                    | WM_LBUTTONUP
+                    | WM_LBUTTONDBLCLK
+                    | WM_RBUTTONDOWN
+                    | WM_RBUTTONUP
+                    | WM_RBUTTONDBLCLK
+                    | WM_MBUTTONDOWN
+                    | WM_MBUTTONUP
+                    | WM_MBUTTONDBLCLK
+                    | WM_XBUTTONDOWN
+                    | WM_XBUTTONUP
             ) {
                 let mut point = Point {
                     x: (lparam as u32 & 0xffff) as u16 as i16 as i32,
                     y: ((lparam as u32 >> 16) & 0xffff) as u16 as i16 as i32,
                 };
                 MapWindowPoints(hwnd, video as usize as Hwnd, &mut point, 1);
-                forwarded_lparam =
-                    ((point.y as u16 as u32) << 16 | point.x as u16 as u32) as isize;
+                forwarded_lparam = ((point.y as u16 as u32) << 16 | point.x as u16 as u32) as isize;
             }
             return SendMessageW(video as usize as Hwnd, msg, wparam, forwarded_lparam);
         }
@@ -569,7 +602,10 @@ mod win {
     pub fn take_over(parent: i64, video: i64) {
         let parent = parent as usize as Hwnd;
         let video = video as usize as Hwnd;
-        PARENT.store(parent as usize as isize, std::sync::atomic::Ordering::SeqCst);
+        PARENT.store(
+            parent as usize as isize,
+            std::sync::atomic::Ordering::SeqCst,
+        );
         VIDEO.store(video as usize as isize, std::sync::atomic::Ordering::SeqCst);
         // SAFETY: os HWNDs vêm do Tauri e do libmpv e permanecem válidos durante a reprodução.
         unsafe {
@@ -727,9 +763,15 @@ mod tests {
                 width: 30,
                 height: 15,
             }];
-            assert!(super::win::point_is_in_video(120, 130, 100, 100, 100, 100, &cuts));
-            assert!(!super::win::point_is_in_video(115, 125, 100, 100, 100, 100, &cuts));
-            assert!(!super::win::point_is_in_video(99, 130, 100, 100, 100, 100, &cuts));
+            assert!(super::win::point_is_in_video(
+                120, 130, 100, 100, 100, 100, &cuts
+            ));
+            assert!(!super::win::point_is_in_video(
+                115, 125, 100, 100, 100, 100, &cuts
+            ));
+            assert!(!super::win::point_is_in_video(
+                99, 130, 100, 100, 100, 100, &cuts
+            ));
         }
     }
 
