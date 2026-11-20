@@ -116,19 +116,20 @@ The normal `.github/workflows/build.yml` is the validation path. The first gate 
 
 ## Hosting POC progress — 2026-11-20
 
-The initial hosting slice and the next input-integration slice are now present in the vendored Wry Windows backend:
+The opt-in Windows hosting slice now has a mouse-input implementation in the vendored Wry backend:
 
-- The opt-in path creates `ICoreWebView2CompositionController`, a DirectComposition device/target/visual, assigns `RootVisualTarget`, and commits the visual tree.
-- The common `ICoreWebView2Controller` continues through Wry's existing initialization path, preserving navigation, IPC, permissions and the standard WebView setup.
-- A subclass on the Wry container HWND forwards mouse movement, leave, left/right/middle/X button down/up/double-click, vertical wheel and horizontal wheel messages through `SendMouseInput`.
-- Mouse capture is acquired while a button is held and released after the final button-up. Mouse-leave is forwarded so WebView2 can dismiss hover UI.
-- `CursorChanged` updates the host cursor from WebView2. Focus is returned to the composition controller on `WM_SETFOCUS`.
-- Host client bounds are synchronized to the composition controller on `WM_SIZE`; Wry's existing parent resize and explicit bounds paths remain in place.
-- Shutdown removes the cursor event handler and HWND subclass, sends a final leave event, releases any capture owned by the host, detaches `RootVisualTarget`, and runs before the common controller is closed.
-- The normal standard-controller path remains unchanged and is still the default. The composition path is selected only with `CINEHUB_WEBVIEW2_COMPOSITION_POC`.
+- Creates `ICoreWebView2CompositionController`, a DirectComposition device/target/visual, assigns `RootVisualTarget`, and commits the visual tree.
+- Retains both COM interfaces with distinct responsibilities: `ICoreWebView2Controller` handles focus and bounds; `ICoreWebView2CompositionController` handles composition-specific cursor and mouse input.
+- Installs a subclass on the Wry host HWND and forwards mouse move/leave, left/right/middle/X button down/up/double-click, and vertical/horizontal wheel messages through `SendMouseInput`.
+- Converts wheel coordinates from screen to client space; tracks pointer leave; captures the mouse while a button is held and releases capture after the last button-up.
+- Applies WebView2 cursor changes through the host `SetCursor` API.
+- Synchronizes the composition controller's bounds on `WM_SIZE` and moves focus into the common controller on `WM_SETFOCUS`.
+- Removes the cursor callback and host subclass, sends a final leave event, releases capture, and detaches `RootVisualTarget` before Wry closes the common controller.
+- Uses the correct `windows 0.62.2` module paths: subclassing helpers in `Win32::UI::Shell`, capture/tracking in `Win32::UI::Input::KeyboardAndMouse`, and `ScreenToClient` in `Win32::Graphics::Gdi`.
+- The normal standard-controller path remains unchanged and is selected by default. Composition remains opt-in through `CINEHUB_WEBVIEW2_COMPOSITION_POC`.
 
-The existing Python regression suite was expanded in-place to check the input, cursor, focus, bounds and teardown seams. The existing `.github/workflows/build.yml` remains the sole CI workflow.
+The existing Python regression test was expanded to guard the API module paths and ensure mouse events are sent through the composition interface, not the common controller. The existing `.github/workflows/build.yml` is still the sole CI workflow.
 
-**Not complete:** this slice forwards Win32 mouse messages; touch/pen `WM_POINTER` conversion through `SendPointerInput` is still pending. The composition path also does not yet render libmpv video through D3D11. Do not enable it for normal CineHub use or call the player mouse bug fixed yet.
+**Not complete:** this slice handles Win32 mouse messages; touch/pen `WM_POINTER` conversion through `SendPointerInput` is still pending. It also does not render libmpv video through D3D11. Do not enable this path for normal CineHub use or consider the player mouse issue fixed yet.
 
-Next gate: compile and run the Windows job, inspect any compiler/runtime failures, then validate clicks, double-clicks, both wheel axes, drag outside the WebView, cursor changes, focus, resize and repeated close/reopen on a real Windows machine. CI compilation is not proof of physical mouse behavior or visual correctness.
+Next gate: compile and run the Windows job, then validate click/double-click, both wheel axes, drag outside the WebView, cursor changes, focus, resize and repeated close/reopen on a physical Windows machine. CI compilation does not prove physical mouse behavior or visual correctness.
