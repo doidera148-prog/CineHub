@@ -916,8 +916,8 @@ mod tests {
             );
 
             // Runtime smoke test: initialize libmpv's D3D11 render backend, decode
-            // a local test frame, and render it into a real D3D11 render-target
-            // texture. The helper tries hardware first and WARP only as CI fallback.
+            // a local test frame, render it into a DXGI composition backbuffer, and
+            // Present it. The helper tries hardware first and WARP only as CI fallback.
             let d3d_mpv = Mpv::with_initializer(|init| {
                 init.set_option("vo", "libmpv")?;
                 init.set_option("ao", "null")?;
