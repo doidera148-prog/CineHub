@@ -734,11 +734,8 @@ mod win {
         let _parent = PARENT.swap(0, std::sync::atomic::Ordering::SeqCst);
         // SAFETY: a subclass é removida da janela hospedeira antes de liberar o HWND do mpv.
         unsafe {
-            let subclass_windows = std::mem::take(
-                &mut *SUBCLASS_WINDOWS
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner()),
-            );
+            let subclass_windows =
+                std::mem::take(&mut *SUBCLASS_WINDOWS.lock().unwrap_or_else(|e| e.into_inner()));
             for hwnd in subclass_windows {
                 RemoveWindowSubclass(
                     hwnd as usize as Hwnd,
