@@ -109,7 +109,7 @@ The exact upstream source seam has been identified, but no Wry fork or productio
 
 To avoid requiring the repository owner to create a separate GitHub fork, the exact Wry `0.57.2` source is vendored under `src-tauri/vendor/wry` and selected with the existing Cargo `[patch.crates-io]` mechanism. This keeps the upstream source baseline, licenses and package metadata inside CineHub, while all changes remain reviewable in the CineHub branch. The upstream baseline is tag `wry-v0.57.2`, commit `bbba6b6312af92fbb969789a63768f4b4bb6d268`.
 
-The vendor baseline is connected to Cargo and the lockfile points to the local package. The standard WebView2 controller remains the default. An experimental Windows-only composition path now exists behind `CINEHUB_WEBVIEW2_COMPOSITION_POC`; it creates `ICoreWebView2CompositionController`, attaches a DirectComposition visual to the existing Wry container HWND, and retains the COM objects for the WebView lifetime. The path is deliberately opt-in. Win32 mouse, touch and pen input forwarding plus cursor/focus/bounds integration are now present, but this is still a hosting prototype: libmpv D3D11 video rendering and physical Windows input/visual validation remain outstanding.
+The vendor baseline is connected to Cargo and the lockfile points to the local package. The standard WebView2 controller remains the default. An experimental Windows-only composition path now exists behind `CINEHUB_WEBVIEW2_COMPOSITION_POC`; it creates `ICoreWebView2CompositionController`, attaches a DirectComposition visual to the existing Wry container HWND, and retains the COM objects for the WebView lifetime. The path is deliberately opt-in. Win32 mouse, touch and pen input forwarding plus cursor/focus/bounds integration are now present, but this was the initial hosting slice; later sections below document the connected D3D11 renderer and runtime smoke test, while physical Windows input/visual validation remains outstanding.
 
 The normal `.github/workflows/build.yml` is the validation path. The first gate is that the existing Linux, Windows and macOS Rust builds/tests continue to compile against the vendored Wry package before any composition behavior is added.
 
@@ -139,7 +139,7 @@ The `WM_MOUSELEAVE` message is declared locally as the Win32 value `0x02A3` beca
 - Converts screen pixel positions/contact rectangles and HIMETRIC positions to WebView-relative client coordinates before calling `SendPointerInput`; keeps the source digitizer's physical calibration rectangle intact.
 - Consumes a recognized touch/pen pointer message only after WebView2 successfully accepts it, avoiding an additional synthesized mouse stream for the same handled input.
 
-**Not complete:** the composition host still does not render libmpv video through D3D11, and touch/pen behavior has not yet been verified on physical Windows hardware. Do not enable this path for normal CineHub use or consider the player input issue fixed yet.
+**Status at this earlier checkpoint:** video rendering was not yet connected; later sections below document the D3D11 integration and runtime validation. Touch/pen behavior still requires physical Windows validation. Do not enable this path for normal CineHub use or consider the player input issue fixed yet.
 
 Next gate: compile and run the Windows job, then validate click/double-click, both wheel axes, drag outside the WebView, cursor changes, focus, resize and repeated close/reopen on a physical Windows machine. CI compilation does not prove physical mouse behavior or visual correctness.
 
@@ -179,3 +179,17 @@ The opt-in Windows path now has an end-to-end code connection between Wry and li
 - The existing Python regression method was expanded. The Windows build/test command remains the existing single targeted player test in `.github/workflows/build.yml`; no new workflow or duplicate test step was added.
 
 **Not yet established:** a successful Windows CI build can verify Rust/API integration and the ABI guards, but cannot verify the GPU output, transparent WebView player region, physical pointer behavior, real resize/DPI/fullscreen, audio/video frame pacing or repeated open/close on a Windows desktop. This is an opt-in implementation slice, not a validated fix and not a change to the default player.
+
+## Runtime D3D11/DXGI smoke test — 2026-11-20
+
+The existing Windows-targeted Rust test mpv_osc_script_options_are_valid now also performs a native runtime smoke test rather than stopping at ABI layout assertions:
+
+- Creates a D3D11 device with BGRA support, trying the hardware driver first and WARP as a software fallback for hosted CI runners.
+- Creates a 64×64 DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL composition swap chain with DXGI_ALPHA_MODE_PREMULTIPLIED, matching the production surface descriptor.
+- Starts a separate libmpv instance with vo=libmpv, creates the D3D11 render context before loading media, and opens a locally generated PPM test frame (no network fixture).
+- Waits for libmpv's render-update callback, renders the decoded frame into the swap-chain backbuffer, releases the backbuffer reference, calls Present, and reports the swap.
+- The callback only writes an atomic notification flag. mpv_render_context_update, mpv_render_context_render, and presentation remain on the test/player render thread.
+
+This exercises the libmpv D3D11 backend at runtime, the texture/backbuffer contract, the composition swap-chain creation, and DXGI presentation. The Windows job runs it through the existing single targeted test step; no workflow or duplicate test step was added.
+
+**What it does not prove:** when WARP is selected, this is software rasterization rather than the user's physical GPU. The test does not create the full WebView2/DirectComposition visual tree, prove alpha transparency or z-order, or simulate physical mouse/touch input. Those remain acceptance checks on a real Windows desktop. The standard player remains the default, and composition stays opt-in.
