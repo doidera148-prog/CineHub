@@ -229,8 +229,7 @@ impl<'a> D3d11RenderContext<'a> {
         } else {
             RenderError::Other(format!(
                 "{message} (HRESULT 0x{:08X}; GetDeviceRemovedReason 0x{:08X})",
-                hresult as u32,
-                removal_reason as u32
+                hresult as u32, removal_reason as u32
             ))
         }
     }
@@ -506,8 +505,7 @@ impl D3d11RenderContext<'_> {
             if is_device_loss_hresult(present_result.0) || is_device_loss_hresult(reason) {
                 return Err(format!(
                     "DXGI Present indicou perda do dispositivo (HRESULT 0x{:08X}; motivo 0x{:08X})",
-                    present_result.0 as u32,
-                    reason as u32
+                    present_result.0 as u32, reason as u32
                 ));
             }
             return Err(format!(
