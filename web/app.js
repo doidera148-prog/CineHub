@@ -2018,6 +2018,7 @@ function nativePlayerGeometry() {
       element
       && !element.hidden
       && element.getClientRects().length
+      && !document.body.classList.contains('native-controls-idle')
       && getComputedStyle(element).visibility !== 'hidden'
     )
     .map((element) => {
