@@ -23,6 +23,48 @@ pub struct PlayerCutout {
     pub height: u32,
 }
 
+#[derive(Clone, Copy, Debug)]
+enum PlayerControl {
+    TogglePause,
+    SeekRelative(f64),
+    SeekAbsolute(f64),
+    ToggleMute,
+    SetVolume(f64),
+}
+
+static PLAYER_CONTROL_SENDER: std::sync::Mutex<
+    Option<std::sync::mpsc::Sender<PlayerControl>>,
+> = std::sync::Mutex::new(None);
+
+fn parse_player_control(action: &str, value: Option<f64>) -> Result<PlayerControl, String> {
+    match action {
+        "toggle-pause" => Ok(PlayerControl::TogglePause),
+        "seek-relative" => {
+            let seconds = value.ok_or_else(|| "tempo de busca ausente".to_string())?;
+            if !seconds.is_finite() {
+                return Err("tempo de busca inválido".into());
+            }
+            Ok(PlayerControl::SeekRelative(seconds.clamp(-600.0, 600.0)))
+        }
+        "seek-absolute" => {
+            let seconds = value.ok_or_else(|| "posição de busca ausente".to_string())?;
+            if !seconds.is_finite() || seconds < 0.0 {
+                return Err("posição de busca inválida".into());
+            }
+            Ok(PlayerControl::SeekAbsolute(seconds))
+        }
+        "toggle-mute" => Ok(PlayerControl::ToggleMute),
+        "set-volume" => {
+            let volume = value.ok_or_else(|| "volume ausente".to_string())?;
+            if !volume.is_finite() {
+                return Err("volume inválido".into());
+            }
+            Ok(PlayerControl::SetVolume(volume.clamp(0.0, 100.0)))
+        }
+        _ => Err("comando de player desconhecido".into()),
+    }
+}
+
 #[cfg(any(all(windows, feature = "mpv"), test))]
 /// Limites e recortes da região Win32 em coordenadas locais da janela filha.
 /// SetWindowRgn interpreta (0, 0) como o canto superior esquerdo da própria janela,
@@ -107,11 +149,34 @@ pub fn player_close() {
     request_close();
 }
 
+#[tauri::command]
+pub fn player_control(action: String, value: Option<f64>) -> Result<(), String> {
+    let control = parse_player_control(&action, value)?;
+    let sender = PLAYER_CONTROL_SENDER
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+        .ok_or_else(|| "o player ainda não está pronto para receber comandos".to_string())?;
+    sender
+        .send(control)
+        .map_err(|_| "o player encerrou antes de receber o comando".to_string())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlayerResult {
     pub position_ms: i64,
     pub duration_ms: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlayerPlaybackState {
+    position_ms: i64,
+    duration_ms: i64,
+    paused: bool,
+    volume: f64,
+    muted: bool,
 }
 
 /// Só aceita http/https: o mpv não pode abrir arquivos locais nem opções de linha de comando.
@@ -206,11 +271,26 @@ pub async fn player_play(
     let wid = embed_handle(&app);
     let segments = segments.unwrap_or_default();
     set_escape_shortcut(&app, true);
+    let (control_sender, control_receiver) = std::sync::mpsc::channel();
+    *PLAYER_CONTROL_SENDER
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = Some(control_sender);
     let player_app = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        imp::play(&url, start, wid, subtitle.as_deref(), &segments, player_app)
+        imp::play(
+            &url,
+            start,
+            wid,
+            subtitle.as_deref(),
+            &segments,
+            player_app,
+            control_receiver,
+        )
     })
     .await;
+    *PLAYER_CONTROL_SENDER
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = None;
     set_escape_shortcut(&app, false);
     result.map_err(|e| e.to_string())?
 }
@@ -241,7 +321,7 @@ async fn fetch_subtitle_file(
 
 #[cfg(feature = "mpv")]
 mod imp {
-    use super::PlayerResult;
+    use super::{PlayerControl, PlayerPlaybackState, PlayerResult};
     use crate::skip::{self, Segment};
     use libmpv2::events::Event;
     use libmpv2::{mpv_end_file_reason, Mpv};
@@ -261,7 +341,8 @@ mod imp {
         wid: Option<i64>,
         subtitle: Option<&str>,
         segments: &[Segment],
-        _app: tauri::AppHandle,
+        app: tauri::AppHandle,
+        controls: std::sync::mpsc::Receiver<PlayerControl>,
     ) -> Result<PlayerResult, String> {
         COMPOSITION_CLOSE_REQUESTED.store(false, std::sync::atomic::Ordering::SeqCst);
         #[cfg(windows)]
@@ -353,6 +434,7 @@ mod imp {
         // Fim do trecho cuja tecla está ligada (None: nenhum trecho agora)
         let mut bound_end: Option<f64> = None;
         let mut failed = false;
+        let mut last_state_emit = std::time::Instant::now();
         // Dentro da janela do app: esconde os controles web e traz o vídeo para frente (Windows).
         #[cfg(all(windows, feature = "mpv"))]
         let mut embedded = composition_mode;
@@ -368,6 +450,28 @@ mod imp {
 
             if COMPOSITION_CLOSE_REQUESTED.swap(false, std::sync::atomic::Ordering::SeqCst) {
                 let _ = mpv.command("quit", &[]);
+            }
+
+            while let Ok(control) = controls.try_recv() {
+                let result = match control {
+                    PlayerControl::TogglePause => mpv.command("cycle", &["pause"]),
+                    PlayerControl::SeekRelative(seconds) => {
+                        let seconds = format!("{seconds:.3}");
+                        mpv.command("seek", &[&seconds, "relative"])
+                    }
+                    PlayerControl::SeekAbsolute(seconds) => {
+                        let seconds = format!("{seconds:.3}");
+                        mpv.command("seek", &[&seconds, "absolute+exact"])
+                    }
+                    PlayerControl::ToggleMute => mpv.command("cycle", &["mute"]),
+                    PlayerControl::SetVolume(volume) => {
+                        let volume = format!("{volume:.1}");
+                        mpv.command("set", &["volume", &volume])
+                    }
+                };
+                if let Err(error) = result {
+                    eprintln!("aviso: comando do player não foi aplicado: {error}");
+                }
             }
 
             #[cfg(windows)]
@@ -401,6 +505,18 @@ mod imp {
             }
             if let Ok(d) = mpv.get_property::<f64>("duration") {
                 duration = d;
+            }
+            if composition_mode && last_state_emit.elapsed() >= std::time::Duration::from_millis(200) {
+                use tauri::Emitter;
+                let state = PlayerPlaybackState {
+                    position_ms: (position.max(0.0) * 1000.0) as i64,
+                    duration_ms: (duration.max(0.0) * 1000.0) as i64,
+                    paused: mpv.get_property::<bool>("pause").unwrap_or(false),
+                    volume: mpv.get_property::<f64>("volume").unwrap_or(100.0),
+                    muted: mpv.get_property::<bool>("mute").unwrap_or(false),
+                };
+                let _ = app.emit("player-state", state);
+                last_state_emit = std::time::Instant::now();
             }
             // Pular: ao entrar num trecho, avisa na tela e liga SKIP_KEY a um pulo para o fim dele.
             // Ao sair, a tecla volta a não fazer nada.
@@ -880,6 +996,7 @@ mod imp {
         _subtitle: Option<&str>,
         _segments: &[crate::skip::Segment],
         _app: tauri::AppHandle,
+        _controls: std::sync::mpsc::Receiver<super::PlayerControl>,
     ) -> Result<PlayerResult, String> {
         Err("player nativo não incluído nesta versão".into())
     }
@@ -888,6 +1005,28 @@ mod imp {
 #[cfg(test)]
 mod tests {
     use super::is_playable_url;
+
+    #[test]
+    fn player_control_actions_validate_and_clamp_values() {
+        assert!(matches!(
+            super::parse_player_control("toggle-pause", None),
+            Ok(super::PlayerControl::TogglePause)
+        ));
+        assert!(matches!(
+            super::parse_player_control("seek-relative", Some(900.0)),
+            Ok(super::PlayerControl::SeekRelative(600.0))
+        ));
+        assert!(matches!(
+            super::parse_player_control("seek-absolute", Some(-1.0)),
+            Err(_)
+        ));
+        assert!(matches!(
+            super::parse_player_control("set-volume", Some(150.0)),
+            Ok(super::PlayerControl::SetVolume(100.0))
+        ));
+        assert!(super::parse_player_control("set-volume", Some(f64::NAN)).is_err());
+        assert!(super::parse_player_control("unknown", None).is_err());
+    }
 
     #[cfg(feature = "mpv")]
     #[test]
