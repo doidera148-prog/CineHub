@@ -348,6 +348,8 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("RemoveWindowSubclass", composition)
 
         d3d11 = (ROOT / "src-tauri/src/player/d3d11.rs").read_text(encoding="utf-8")
+        self.assertEqual(d3d11.count("pub(super) fn abi_layout_is_valid"), 1)
+        self.assertIn("MPV_RENDER_API_TYPE_D3D11 == b\"d3d11\\0\"", d3d11)
         self.assertIn("ID3D11Device, ID3D11Texture2D", d3d11)
         self.assertIn("MPV_RENDER_PARAM_D3D11_INIT_PARAMS: u32 = 21", d3d11)
         self.assertIn("MPV_RENDER_PARAM_D3D11_FBO: u32 = 22", d3d11)

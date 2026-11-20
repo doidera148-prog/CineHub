@@ -238,31 +238,6 @@ pub(super) fn abi_layout_is_valid() -> bool {
 }
 
 /// Moves/resizes the video visual on the thread that owns the WebView HWND.
-pub(super) fn set_video_rect(
-    parent: i64,
-    x: i32,
-    y: i32,
-    width: u32,
-    height: u32,
-) -> bool {
-    unsafe {
-        cinehub_wry_composition_set_video_rect(
-            parent as isize,
-            x,
-            y,
-            width,
-            height,
-        ) == 0
-    }
-}
-
-pub(super) fn abi_layout_is_valid() -> bool {
-    mem::size_of::<MpvRenderParam>() == mem::size_of::<usize>() * 2
-        && mem::offset_of!(MpvRenderParam, data) == mem::size_of::<usize>()
-        && mem::size_of::<MpvD3d11InitParams>() == mem::size_of::<usize>()
-        && mem::size_of::<MpvD3d11Fbo>() == mem::size_of::<usize>()
-        && MPV_RENDER_PARAM_API_TYPE == 1
-        && MPV_RENDER_PARAM_D3D11_INIT_PARAMS == 21
-        && MPV_RENDER_PARAM_D3D11_FBO == 22
-        && MPV_RENDER_API_TYPE_D3D11 == b"d3d11\0"
+pub(super) fn set_video_rect(parent: i64, x: i32, y: i32, width: u32, height: u32) -> bool {
+    unsafe { cinehub_wry_composition_set_video_rect(parent as isize, x, y, width, height) == 0 }
 }

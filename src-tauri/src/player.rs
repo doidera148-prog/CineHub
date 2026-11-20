@@ -78,9 +78,8 @@ pub fn player_set_geometry(
     #[cfg(all(windows, feature = "mpv"))]
     {
         if std::env::var_os("CINEHUB_WEBVIEW2_COMPOSITION_POC").is_some() {
-            return embed_handle(&app).is_some_and(|parent| {
-                mpv_d3d11::set_video_rect(parent, x, y, width, height)
-            });
+            return embed_handle(&app)
+                .is_some_and(|parent| mpv_d3d11::set_video_rect(parent, x, y, width, height));
         }
         win::set_shape(x, y, width, height, &cutouts)
     }
@@ -389,12 +388,12 @@ mod imp {
             #[cfg(all(windows, feature = "mpv"))]
             if !composition_mode {
                 if let (Some(parent), false) = (wid, embedded) {
-                if let Ok(video) = mpv.get_property::<i64>("window-id") {
-                    if super::win::take_over(&_app, parent, video) {
-                        embedded = true;
+                    if let Ok(video) = mpv.get_property::<i64>("window-id") {
+                        if super::win::take_over(&_app, parent, video) {
+                            embedded = true;
+                        }
                     }
                 }
-            }
             }
             // Guarda a última posição conhecida: depois do fim do arquivo as propriedades não existem mais.
             if let Ok(t) = mpv.get_property::<f64>("time-pos") {
