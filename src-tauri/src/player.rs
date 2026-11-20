@@ -23,6 +23,8 @@ pub struct PlayerCutout {
     pub height: u32,
 }
 
+// Payload fields are consumed by the libmpv loop, which is compiled only with feature `mpv`.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 enum PlayerControl {
     TogglePause,
@@ -168,6 +170,7 @@ pub struct PlayerResult {
     pub duration_ms: i64,
 }
 
+#[cfg(feature = "mpv")]
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PlayerPlaybackState {
