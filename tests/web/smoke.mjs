@@ -104,6 +104,9 @@ async function checkWindowsPlayer() {
       ${fixtures}`);
     await page.goto(`${base}/#/detail/movie/tt1`);
     await page.locator('.stream').waitFor({ state: 'visible' });
+    await page.evaluate(() => localStorage.setItem('progress', JSON.stringify({
+      tt1: { t: 123, duration: 600, updated: Date.now(), watched: false, label: 'Teste', seriesId: 'tt1', type: 'movie', name: 'Título de teste' },
+    })));
     await page.locator('.stream').click();
     await page.waitForFunction(() => window.__calls.some((call) => call.cmd === 'player_play'));
     const result = await page.evaluate(() => ({
@@ -113,6 +116,7 @@ async function checkWindowsPlayer() {
       htmlSource: document.querySelector('video')?.currentSrc || document.querySelector('video')?.src || '',
     }));
     if (result.native?.args?.url !== url) failures.push(`[windows-player] ${label}: URL não foi entregue ao libmpv`);
+    if (result.native?.args?.startMs !== 123000) failures.push(`[windows-player] ${label}: progresso salvo não foi enviado ao libmpv para retomar`);
     if (!result.geometry || result.geometry.width < 16 || result.geometry.height < 16) failures.push(`[windows-player] ${label}: geometria física do vídeo não foi enviada ao mpv`);
     if (!Array.isArray(result.geometry?.cutouts) || result.geometry.cutouts.length < 2) failures.push(`[windows-player] ${label}: controles HTML não foram recortados da superfície nativa`);
     if (!result.proxy) failures.push(`[windows-player] ${label}: fonte externa não passou pelo proxy de mídia`);
@@ -280,9 +284,13 @@ async function checkAndroidPlayer() {
   await page.addInitScript(fixtures);
   await page.goto(`${base}/#/detail/movie/tt1`);
   await page.locator('.stream').waitFor({ state: 'visible' });
+  await page.evaluate(() => localStorage.setItem('progress', JSON.stringify({
+    tt1: { t: 123, duration: 600, updated: Date.now(), watched: false, label: 'Teste', seriesId: 'tt1', type: 'movie', name: 'Título de teste' },
+  })));
   await page.locator('.stream').click();
   await page.waitForFunction(() => window.__calls.some((call) => call.cmd === 'plugin:exoplayer|play'));
   const args = await page.evaluate(() => window.__calls.find((call) => call.cmd === 'plugin:exoplayer|play')?.args);
+  if (args?.startMs !== 123000) failures.push('[android-player] progresso salvo não foi enviado ao ExoPlayer para retomar');
   const subtitles = JSON.parse(args?.subtitles || '[]');
   if (!Array.isArray(subtitles) || subtitles.length !== 1) failures.push('[android-player] legenda externa não foi enviada ao ExoPlayer');
   if (subtitles[0]?.language !== 'pt' || subtitles[0]?.isDefault !== true) failures.push('[android-player] idioma/preferência da legenda não foi preservado');
