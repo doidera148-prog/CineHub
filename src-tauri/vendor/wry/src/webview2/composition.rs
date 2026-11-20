@@ -312,9 +312,9 @@ struct CompositionInputState {
   surface: Arc<Mutex<RenderSurface>>,
   dcomp_device: IDCompositionDesktopDevice,
   dcomp_target: Option<IDCompositionTarget>,
-  root_visual: IDCompositionVisual2,
+  _root_visual: IDCompositionVisual2,
   video_visual: IDCompositionVisual2,
-  webview_visual: IDCompositionVisual2,
+  _webview_visual: IDCompositionVisual2,
   video_visual3: IDCompositionVisual3,
   video_rect: Option<(i32, i32, u32, u32)>,
 }
@@ -469,9 +469,9 @@ impl CompositionHost {
       surface: surface.clone(),
       dcomp_device: device.clone(),
       dcomp_target: Some(target.clone()),
-      root_visual: root_visual.clone(),
+      _root_visual: root_visual.clone(),
       video_visual: video_visual.clone(),
-      webview_visual: webview_visual.clone(),
+      _webview_visual: webview_visual.clone(),
       video_visual3,
       video_rect: None,
     });
@@ -599,9 +599,9 @@ impl CompositionHost {
     }
     state.dcomp_device = dcomp_device;
     state.dcomp_target = Some(target);
-    state.root_visual = root_visual;
+    state._root_visual = root_visual;
     state.video_visual = video_visual;
-    state.webview_visual = webview_visual;
+    state._webview_visual = webview_visual;
     state.video_visual3 = video_visual3;
     Ok(())
   }
