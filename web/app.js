@@ -1740,8 +1740,63 @@ function formatNativeTime(seconds) {
     : `${minutes}:${String(remainder).padStart(2, '0')}`;
 }
 
+function nativeTrackLabel(track, index) {
+  const parts = [track.title, track.language?.toUpperCase(), track.codec]
+    .filter((value) => typeof value === 'string' && value.trim());
+  if (track.external) parts.push('externa');
+  return parts.length ? parts.join(' · ') : `Faixa ${index + 1}`;
+}
+
+function updateNativeTrackSelectors(state) {
+  const sync = (selectId, controlId, source, kind) => {
+    const select = $(`#${selectId}`);
+    const control = $(`#${controlId}`);
+    const tracks = Array.isArray(source) ? source : [];
+    const visible = tracks.length > 0;
+    const wasHidden = control.hidden;
+    control.hidden = !visible;
+    let layoutChanged = wasHidden !== control.hidden;
+
+    const signature = JSON.stringify(tracks.map((track) => [
+      track.id, track.title, track.language, track.codec, track.external,
+    ]));
+    if (select.dataset.trackSignature !== signature) {
+      const options = [];
+      if (kind === 'subtitle') options.push(new Option('Desativada', ''));
+      tracks.forEach((track, index) => {
+        options.push(new Option(nativeTrackLabel(track, index), String(track.id)));
+      });
+      select.replaceChildren(...options);
+      select.dataset.trackSignature = signature;
+      layoutChanged = true;
+    }
+
+    const active = tracks.find((track) => track.selected === true);
+    const selectedValue = active
+      ? String(active.id)
+      : (kind === 'subtitle' ? '' : String(tracks[0]?.id ?? ''));
+    if (select.value !== selectedValue) select.value = selectedValue;
+    return layoutChanged;
+  };
+
+  const audioChanged = sync(
+    'native-audio-track',
+    'native-audio-track-control',
+    state.audioTracks,
+    'audio',
+  );
+  const subtitlesChanged = sync(
+    'native-subtitle-track',
+    'native-subtitle-track-control',
+    state.subtitleTracks,
+    'subtitle',
+  );
+  return audioChanged || subtitlesChanged;
+}
+
 function updateNativePlayerState(state) {
   if (!state || !nativePlayerCompositionActive) return;
+  if (updateNativeTrackSelectors(state)) void syncNativePlayerGeometry();
   const position = Math.max(0, Number(state.positionMs) / 1000 || 0);
   const duration = Math.max(0, Number(state.durationMs) / 1000 || 0);
   nativePlayerState = { ...state, positionSeconds: position, durationSeconds: duration };
@@ -1783,6 +1838,15 @@ function stopNativePlayerStateListener() {
   }
   nativePlayerState = null;
   nativeSeeking = false;
+  for (const [controlId, selectId] of [
+    ['native-audio-track-control', 'native-audio-track'],
+    ['native-subtitle-track-control', 'native-subtitle-track'],
+  ]) {
+    $(`#${controlId}`).hidden = true;
+    const select = $(`#${selectId}`);
+    select.replaceChildren();
+    delete select.dataset.trackSignature;
+  }
 }
 
 async function sendNativePlayerControl(action, value) {
@@ -1801,6 +1865,18 @@ $('#native-rewind').onclick = () => sendNativePlayerControl('seek-relative', -10
 $('#native-forward').onclick = () => sendNativePlayerControl('seek-relative', 10);
 $('#native-play-pause').onclick = () => sendNativePlayerControl('toggle-pause');
 $('#native-mute').onclick = () => sendNativePlayerControl('toggle-mute');
+$('#native-audio-track').addEventListener('change', (event) => {
+  const id = Number(event.currentTarget.value);
+  if (Number.isSafeInteger(id) && id >= 0) sendNativePlayerControl('select-audio', id);
+});
+$('#native-subtitle-track').addEventListener('change', (event) => {
+  const value = event.currentTarget.value;
+  if (value === '') sendNativePlayerControl('select-subtitle');
+  else {
+    const id = Number(value);
+    if (Number.isSafeInteger(id) && id >= 0) sendNativePlayerControl('select-subtitle', id);
+  }
+});
 
 async function setNativeFullscreen(enabled, quiet = false) {
   if (!nativePlayerCompositionActive || nativeFullscreen === enabled) return false;
