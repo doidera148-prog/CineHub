@@ -594,10 +594,9 @@ mod imp {
             #[cfg(windows)]
             {
                 let render_result = match (wid, render_context.as_ref()) {
-                    (Some(parent), Some(renderer)) if renderer.frame_is_pending() => Some((
-                        parent,
-                        super::mpv_d3d11::render_to_host(parent, renderer),
-                    )),
+                    (Some(parent), Some(renderer)) if renderer.frame_is_pending() => {
+                        Some((parent, super::mpv_d3d11::render_to_host(parent, renderer)))
+                    },
                     _ => None,
                 };
 
@@ -624,8 +623,8 @@ mod imp {
                             // libmpv must release all references to the removed device
                             // before Wry replaces its swap chain and DirectComposition tree.
                             drop(render_context.take());
-                            let recovery = super::mpv_d3d11::recreate_host_device(parent)
-                                .and_then(|()| {
+                            let recovery =
+                                super::mpv_d3d11::recreate_host_device(parent).and_then(|()| {
                                     let device = super::mpv_d3d11::host_device(parent)?;
                                     let renderer =
                                         super::mpv_d3d11::D3d11RenderContext::new(&mpv, &device)?;
@@ -1239,7 +1238,9 @@ mod tests {
                 );
             }
             assert!(!super::mpv_d3d11::is_device_loss_hresult(0));
-            assert!(!super::mpv_d3d11::is_device_loss_hresult(0x887A0001_u32 as i32));
+            assert!(!super::mpv_d3d11::is_device_loss_hresult(
+                0x887A0001_u32 as i32
+            ));
 
             // Runtime smoke test: initialize libmpv's D3D11 render backend, decode
             // a local test frame, render it into a DXGI composition backbuffer, and
