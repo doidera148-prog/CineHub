@@ -1701,8 +1701,34 @@ let nativePlayerCompositionActive = false;
 let nativeStateUnlisten = null;
 let nativeSeeking = false;
 let nativePlayerState = null;
+let nativeFullscreen = false;
+let nativeControlsHideTimer = null;
+let nativeKeyboardInteraction = false;
+const NATIVE_CONTROLS_IDLE_MS = 2800;
 const nativeControls = $('#native-controls');
 const nativeSeek = $('#native-seek');
+
+function showNativeControls(fromKeyboard = false) {
+  if (!nativePlayerCompositionActive) return;
+  nativeKeyboardInteraction = fromKeyboard;
+  if (nativeControlsHideTimer !== null) clearTimeout(nativeControlsHideTimer);
+  nativeControlsHideTimer = null;
+  if (document.body.classList.contains('native-controls-idle')) {
+    document.body.classList.remove('native-controls-idle');
+    void syncNativePlayerGeometry();
+  }
+  nativeControlsHideTimer = setTimeout(() => {
+    nativeControlsHideTimer = null;
+    if (!nativePlayerCompositionActive) return;
+    if (nativeKeyboardInteraction && player.contains(document.activeElement)) return;
+    document.body.classList.add('native-controls-idle');
+    void syncNativePlayerGeometry();
+  }, NATIVE_CONTROLS_IDLE_MS);
+}
+
+player.addEventListener('pointermove', () => showNativeControls(false));
+player.addEventListener('pointerdown', () => showNativeControls(false));
+player.addEventListener('keydown', () => showNativeControls(true));
 
 function formatNativeTime(seconds) {
   const safe = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -1775,6 +1801,32 @@ $('#native-rewind').onclick = () => sendNativePlayerControl('seek-relative', -10
 $('#native-forward').onclick = () => sendNativePlayerControl('seek-relative', 10);
 $('#native-play-pause').onclick = () => sendNativePlayerControl('toggle-pause');
 $('#native-mute').onclick = () => sendNativePlayerControl('toggle-mute');
+
+async function setNativeFullscreen(enabled, quiet = false) {
+  if (!nativePlayerCompositionActive || nativeFullscreen === enabled) return false;
+  try {
+    await call('player_set_fullscreen', { enabled });
+    nativeFullscreen = enabled;
+    document.body.classList.toggle('native-player-fullscreen', enabled);
+    const button = $('#native-fullscreen');
+    button.textContent = enabled ? 'Sair da tela cheia' : 'Tela cheia';
+    button.setAttribute('aria-label', enabled ? 'Sair da tela cheia' : 'Tela cheia');
+    button.title = enabled ? 'Sair da tela cheia' : 'Tela cheia';
+    button.setAttribute('aria-pressed', String(enabled));
+    showNativeControls(false);
+    await syncNativePlayerGeometry();
+    return true;
+  } catch (error) {
+    logEvent('WARN', `alterar tela cheia falhou: ${describeError(error)}`);
+    if (!quiet) toast(`Não consegui alterar a tela cheia: ${describeError(error)}`);
+    return false;
+  }
+}
+
+$('#native-fullscreen').onclick = () => {
+  void setNativeFullscreen(!nativeFullscreen);
+};
+
 nativeSeek.addEventListener('input', () => {
   nativeSeeking = true;
   $('#native-current-time').textContent = formatNativeTime(Number(nativeSeek.value));
@@ -1797,7 +1849,14 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
     : false;
   nativeControls.hidden = !compositionMode;
   nativePlayerCompositionActive = compositionMode;
+  nativeFullscreen = false;
+  document.body.classList.remove('native-player-fullscreen', 'native-controls-idle');
+  $('#native-fullscreen').textContent = 'Tela cheia';
+  $('#native-fullscreen').setAttribute('aria-label', 'Tela cheia');
+  $('#native-fullscreen').title = 'Tela cheia';
+  $('#native-fullscreen').setAttribute('aria-pressed', 'false');
   if (compositionMode) {
+    showNativeControls(false);
     nativeSeek.value = '0';
     $('#native-current-time').textContent = '0:00';
     $('#native-duration').textContent = '0:00';
@@ -1849,11 +1908,17 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
     logEvent('WARN', `player nativo indisponível: ${nativeFailure}`);
     return false;
   } finally {
+    if (nativePlayerCompositionActive && nativeFullscreen) {
+      await setNativeFullscreen(false, true);
+    }
+    if (nativeControlsHideTimer !== null) clearTimeout(nativeControlsHideTimer);
+    nativeControlsHideTimer = null;
     if (IS_WINDOWS && nativePlayerActive) {
       nativePlayerActive = false;
       document.body.classList.remove('native-composition-mode');
       closePlayer(false, false);
     }
+    document.body.classList.remove('native-player-fullscreen', 'native-controls-idle');
     nativeControls.hidden = true;
     nativePlayerCompositionActive = false;
     stopNativePlayerStateListener();
@@ -1949,7 +2014,12 @@ function nativePlayerGeometry() {
   if (bounds.width < 16 || bounds.height < 16) return null;
   const cutouts = ['#close-player', '#player-title', '#next-ep', '#skip-seg', '#pip', '#native-controls']
     .map((selector) => document.querySelector(selector))
-    .filter((element) => element && !element.hidden && element.getClientRects().length)
+    .filter((element) =>
+      element
+      && !element.hidden
+      && element.getClientRects().length
+      && getComputedStyle(element).visibility !== 'hidden'
+    )
     .map((element) => {
       const rect = element.getBoundingClientRect();
       return {
@@ -2120,8 +2190,13 @@ skipBtn.onclick = () => {
 document.addEventListener('keydown', (e) => {
   if (player.classList.contains('hidden') || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+  if (nativePlayerCompositionActive && e.key.toLowerCase() === 'f') {
+    e.preventDefault();
+    void setNativeFullscreen(!nativeFullscreen);
+    return;
+  }
   if (e.key === '?') {
-    toast('0–9: pular para 0–90% do vídeo · ?: esta lista', 6000);
+    toast('0–9: pular para 0–90% do vídeo · ?: esta lista · F: tela cheia', 6000);
     return;
   }
   const duration = nativePlayerCompositionActive
