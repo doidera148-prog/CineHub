@@ -347,6 +347,19 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("remove_CursorChanged", composition)
         self.assertIn("RemoveWindowSubclass", composition)
 
+        d3d11 = (ROOT / "src-tauri/src/player/d3d11.rs").read_text(encoding="utf-8")
+        self.assertIn("ID3D11Device, ID3D11Texture2D", d3d11)
+        self.assertIn("MPV_RENDER_PARAM_D3D11_INIT_PARAMS: u32 = 21", d3d11)
+        self.assertIn("MPV_RENDER_PARAM_D3D11_FBO: u32 = 22", d3d11)
+        self.assertIn("mpv_render_context_create", d3d11)
+        self.assertIn("mpv_render_context_update", d3d11)
+        self.assertIn("mpv_render_context_render", d3d11)
+        self.assertIn("mpv_render_context_report_swap", d3d11)
+        self.assertIn("mpv_render_context_free", d3d11)
+        self.assertIn("texture.as_raw()", d3d11)
+        self.assertIn("abi_layout_is_valid", d3d11)
+        self.assertIn('"Win32_Graphics_Direct3D11"', (ROOT / "src-tauri/Cargo.toml").read_text(encoding="utf-8"))
+
     def test_only_optional_ffmpeg_download_can_fail_without_stopping_android_job(self):
         android = job_block(self.workflow, "android")
         self.assertIn("name: Extensão FFmpeg do Media3 (opcional", android)
