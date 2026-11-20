@@ -311,7 +311,7 @@ struct CompositionInputState {
   parent: HWND,
   surface: Arc<Mutex<RenderSurface>>,
   dcomp_device: IDCompositionDesktopDevice,
-  dcomp_target: IDCompositionTarget,
+  dcomp_target: Option<IDCompositionTarget>,
   root_visual: IDCompositionVisual2,
   video_visual: IDCompositionVisual2,
   webview_visual: IDCompositionVisual2,
@@ -468,7 +468,7 @@ impl CompositionHost {
       parent,
       surface: surface.clone(),
       dcomp_device: device.clone(),
-      dcomp_target: target.clone(),
+      dcomp_target: Some(target.clone()),
       root_visual: root_visual.clone(),
       video_visual: video_visual.clone(),
       webview_visual: webview_visual.clone(),
@@ -550,11 +550,15 @@ impl CompositionHost {
 
     // A HWND can have only one active DirectComposition target. Detach the invalid
     // tree before creating the replacement target for the same host window.
+    let old_target = state.dcomp_target.take().ok_or_else(|| {
+      windows::core::Error::new(E_FAIL, "DirectComposition target ausente durante recovery")
+    })?;
     unsafe {
-      state.dcomp_target.SetRoot(None::<&IDCompositionVisual>)?;
+      old_target.SetRoot(None::<&IDCompositionVisual>)?;
       state.dcomp_device.Commit()?;
       state.composition_controller.SetRootVisualTarget(None::<&IUnknown>)?;
     }
+    drop(old_target);
 
     let target = unsafe { dcomp_device.CreateTargetForHwnd(state.parent, true)? };
     let root_visual = unsafe { dcomp_device.CreateVisual()? };
@@ -594,7 +598,7 @@ impl CompositionHost {
       surface.last_backbuffer_error = 0;
     }
     state.dcomp_device = dcomp_device;
-    state.dcomp_target = target;
+    state.dcomp_target = Some(target);
     state.root_visual = root_visual;
     state.video_visual = video_visual;
     state.webview_visual = webview_visual;
