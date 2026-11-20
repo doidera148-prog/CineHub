@@ -10,7 +10,10 @@
 
 use std::sync::mpsc;
 
-use webview2_com::Microsoft::Web::WebView2::Win32::*;
+use webview2_com::{
+  CreateCoreWebView2CompositionControllerCompletedHandler,
+  Microsoft::Web::WebView2::Win32::*,
+};
 use windows::{
   Win32::{
     Foundation::{E_POINTER, E_UNEXPECTED, HWND},
@@ -58,7 +61,9 @@ impl CompositionHost {
 
     // The WebView2 composition visual is attached to the existing Wry container HWND.
     // The standard HWND controller is not created in this opt-in path.
-    let device = unsafe { DCompositionCreateDevice2(None::<&IUnknown>)? };
+    let device = unsafe {
+      DCompositionCreateDevice2::<_, IDCompositionDesktopDevice>(None::<&IUnknown>)?
+    };
     let target = unsafe { device.CreateTargetForHwnd(hwnd, true)? };
     let visual = unsafe { device.CreateVisual()?.cast::<IDCompositionVisual>()? };
 
