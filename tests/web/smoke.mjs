@@ -162,7 +162,7 @@ async function checkWindowsNativeOverlayClose() {
     && document.querySelector('#native-play-pause')?.textContent === 'Reproduzir'
     && document.querySelector('#native-audio-track')?.options.length === 2
     && document.querySelector('#native-audio-track')?.value === '2'
-    && document.querySelector('#native-subtitle-track')?.options.length === 2
+    && document.querySelector('#native-subtitle-track')?.options.length === 3
     && document.querySelector('#native-subtitle-track')?.value === '3',
   );
   if (await page.locator('#native-audio-track-control').isHidden()) failures.push('[windows-player-tracks] seletor de áudio não apareceu');

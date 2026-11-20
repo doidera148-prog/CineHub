@@ -732,9 +732,15 @@ function subPref() {
   return Object.prototype.hasOwnProperty.call(SUB_LANGS, v) ? v : 'pt';
 }
 
+function nativeTrackLanguage(track) {
+  return window.CineHubLib.normalizeTrackLanguage(track?.language)
+    || window.CineHubLib.normalizeTrackLanguage(track?.title);
+}
+
 function nativeTrackForLanguage(tracks, language) {
+  const preferred = window.CineHubLib.normalizeTrackLanguage(language);
   return (Array.isArray(tracks) ? tracks : []).find((track) =>
-    window.CineHubLib.trackMatchesLanguage(track?.language, language),
+    preferred && nativeTrackLanguage(track) === preferred,
   ) || null;
 }
 
@@ -1920,7 +1926,7 @@ $('#native-audio-track').addEventListener('change', (event) => {
   if (!Number.isSafeInteger(id) || id < 0) return;
   const track = nativePlayerState?.audioTracks?.find((item) => item.id === id);
   void sendNativePlayerControl('select-audio', id).then((success) => {
-    if (success) store.set('playerAudioLanguage', window.CineHubLib.normalizeTrackLanguage(track?.language));
+    if (success) store.set('playerAudioLanguage', nativeTrackLanguage(track));
   });
 });
 $('#native-subtitle-track').addEventListener('change', (event) => {
@@ -1940,7 +1946,7 @@ $('#native-subtitle-track').addEventListener('change', (event) => {
   void sendNativePlayerControl('select-subtitle', id).then((success) => {
     if (success) {
       store.set('playerSubtitlesDisabled', false);
-      store.set('playerSubtitleLanguage', window.CineHubLib.normalizeTrackLanguage(track?.language));
+      store.set('playerSubtitleLanguage', nativeTrackLanguage(track));
     }
   });
 });

@@ -283,7 +283,7 @@
   function normalizeTrackLanguage(value) {
     const raw = str(value).trim().toLowerCase().replace(/_/g, '-');
     if (!raw || raw === 'und' || raw === 'unknown') return '';
-    const token = raw.split(/[-\\s(]/, 1)[0];
+    const token = raw.split(/[-\s(]/, 1)[0];
     const aliases = {
       por: 'pt', pt: 'pt', portuguese: 'pt', 'português': 'pt',
       eng: 'en', en: 'en', english: 'en',
