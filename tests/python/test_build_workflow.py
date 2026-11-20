@@ -269,5 +269,107 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("|| echo \"Extensão FFmpeg ainda não publicada", android)
 
 
+    def test_workflow_yaml_parses_and_has_no_duplicate_mapping_keys(self):
+        # Psych faz parte do Ruby disponível nos runners Ubuntu do GitHub Actions.
+        # A inspeção da AST evita o problema do YAML 1.1 converter a chave "on" em booleano.
+        ruby_check = r"""
+require "psych"
+root = Psych.parse_file(ARGV.fetch(0)).root
+abort "build.yml está vazio" unless root
+def inspect_node(node, path = "$")
+  return unless node
+  if node.is_a?(Psych::Nodes::Mapping)
+    seen = {}
+    node.children.each_slice(2) do |key, value|
+      if key.is_a?(Psych::Nodes::Scalar)
+        name = key.value
+        abort "Chave YAML duplicada em #{path}: #{name}" if seen.key?(name)
+        seen[name] = true
+      end
+      inspect_node(value, "#{path}.#{key.respond_to?(:value) ? key.value : "?"}")
+    end
+  elsif node.respond_to?(:children)
+    node.children.each_with_index { |child, index| inspect_node(child, "#{path}[#{index}]") }
+  end
+end
+inspect_node(root)
+"""
+        result = subprocess.run(
+            ["ruby", "-e", ruby_check, str(WORKFLOW)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"YAML inválido ou com chaves duplicadas:\n{result.stderr}",
+        )
+
+    def test_job_dependencies_reference_existing_jobs_and_form_acyclic_graph(self):
+        declared = set(re.findall(r"(?m)^  ([a-zA-Z0-9_-]+):\\s*$", self.workflow))
+        dependencies = {}
+        for name in declared:
+            block = job_block(self.workflow, name)
+            match = re.search(r"(?m)^    needs:\\s*(?:\\[([^\\]]*)\\]|([a-zA-Z0-9_-]+))", block)
+            values = []
+            if match:
+                raw = match.group(1) if match.group(1) is not None else match.group(2)
+                values = re.findall(r"[a-zA-Z0-9_-]+", raw)
+            missing = set(values) - declared
+            self.assertFalse(missing, f"Job {name} depende de jobs inexistentes: {sorted(missing)}")
+            dependencies[name] = values
+
+        visiting = set()
+        visited = set()
+
+        def visit(name):
+            self.assertNotIn(name, visiting, f"Ciclo de dependências envolvendo o job {name}")
+            if name in visited:
+                return
+            visiting.add(name)
+            for dependency in dependencies[name]:
+                visit(dependency)
+            visiting.remove(name)
+            visited.add(name)
+
+        for name in declared:
+            visit(name)
+
+    def test_step_ids_are_unique_and_every_steps_reference_exists(self):
+        for name in re.findall(r"(?m)^  ([a-zA-Z0-9_-]+):\\s*$", self.workflow):
+            block = job_block(self.workflow, name)
+            ids = re.findall(r"(?m)^      - name:.*?\\n        id: ([a-zA-Z0-9_-]+)\\s*$", block)
+            # Também reconhece steps que declaram id antes de name.
+            ids.extend(re.findall(r"(?m)^        id: ([a-zA-Z0-9_-]+)\\s*$", block))
+            self.assertEqual(len(ids), len(set(ids)), f"IDs de steps duplicados no job {name}")
+            referenced = set(re.findall(r"steps\\.([a-zA-Z0-9_-]+)\\.", block))
+            missing = referenced - set(ids)
+            self.assertFalse(
+                missing,
+                f"Job {name} referencia outputs de steps sem ID: {sorted(missing)}",
+            )
+
+    def test_github_expression_delimiters_are_balanced(self):
+        # Evita expressões truncadas que podem passar por verificações de substring.
+        self.assertEqual(
+            self.workflow.count("${{"),
+            self.workflow.count("}}"),
+            "Há expressão GitHub Actions sem delimitador de abertura/fechamento correspondente",
+        )
+
+    def test_each_job_has_steps_and_each_step_has_one_execution_or_action(self):
+        for name in re.findall(r"(?m)^  ([a-zA-Z0-9_-]+):\\s*$", self.workflow):
+            block = job_block(self.workflow, name)
+            self.assertRegex(block, r"(?m)^    steps:\\s*$", f"Job {name} não declara steps")
+            steps = re.findall(r"(?m)^      - (?:name:|uses:)", block)
+            self.assertTrue(steps, f"Job {name} não contém etapas executáveis")
+            self.assertEqual(
+                len(steps),
+                block.count("\\n      - "),
+                f"Há etapa sem name/uses no job {name}",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
