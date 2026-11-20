@@ -387,6 +387,21 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         ):
             with self.subTest(d3d11_runtime=required):
                 self.assertIn(required, d3d11)
+        smoke_imports = d3d11.split(
+            "pub(super) fn create_smoke_swap_chain", 1
+        )[1].split("let flags", 1)[0]
+        for imported in (
+            "DXGI_ALPHA_MODE_PREMULTIPLIED",
+            "DXGI_FORMAT_B8G8R8A8_UNORM",
+            "DXGI_SAMPLE_DESC",
+        ):
+            with self.subTest(smoke_import=imported):
+                self.assertEqual(
+                    smoke_imports.count(imported),
+                    1,
+                    f"Import DXGI duplicado no smoke test: {imported}",
+                )
+
         self.assertIn(
             "let _ = unsafe { multithread.SetMultithreadProtected(true) };", d3d11
         )
