@@ -98,8 +98,9 @@ impl CompositionHost {
     // different CSS/system cursors. Apply the WebView-provided cursor on the UI thread.
     let cursor_controller = composition_controller.clone();
     let cursor_handler = CursorChangedEventHandler::create(Box::new(move |_, _| {
-      let cursor = unsafe { cursor_controller.Cursor()? };
+      let mut cursor = Default::default();
       unsafe {
+        cursor_controller.Cursor(&mut cursor)?;
         SetCursor(cursor);
       }
       Ok(())
@@ -273,13 +274,15 @@ impl CompositionHost {
       y: ((lparam >> 16) as u16 as i16) as i32,
     };
     if msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL {
-      let _ = ScreenToClient(hwnd, &mut point);
+      let _ = unsafe { ScreenToClient(hwnd, &mut point) };
     }
 
-    let virtual_keys = COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS((wparam & 0x007f) as u32);
-    let _ = state
-      .controller
-      .SendMouseInput(event_kind, virtual_keys, mouse_data, point);
+    let virtual_keys = COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS((wparam & 0x007f) as i32);
+    let _ = unsafe {
+      state
+        .controller
+        .SendMouseInput(event_kind, virtual_keys, mouse_data, point)
+    };
   }
 
   /// Detach callbacks and the HWND subclass before the common controller is closed.
