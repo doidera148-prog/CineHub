@@ -391,7 +391,9 @@ mod win {
         fn SetForegroundWindow(hwnd: Hwnd) -> Bool;
         fn PostMessageW(hwnd: Hwnd, msg: u32, wparam: usize, lparam: isize) -> Bool;
         fn SendMessageW(hwnd: Hwnd, msg: u32, wparam: usize, lparam: isize) -> isize;
-        fn MapWindowPoints(from: Hwnd, to: Hwnd, points: *mut Point, count: u32) -> i32;
+        fn MapWindowPoints(from: Hwnd, to: Hwnd, points: *mut Point, count: i32) -> i32;
+        fn GetCursorPos(point: *mut Point) -> Bool;
+        fn ScreenToClient(hwnd: Hwnd, point: *mut Point) -> Bool;
     }
 
     #[link(name = "comctl32")]
@@ -452,6 +454,32 @@ mod win {
     /// HWNDs das janelas principal e filha enquanto o player está ativo.
     pub static VIDEO: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
     static PARENT: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+    static INPUT_GEOMETRY: std::sync::Mutex<
+        Option<(i32, i32, u32, u32, Vec<super::PlayerCutout>)>,
+    > = std::sync::Mutex::new(None);
+
+    fn point_is_in_video(
+        parent_x: i32,
+        parent_y: i32,
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+        cutouts: &[super::PlayerCutout],
+    ) -> bool {
+        let local_x = parent_x - x;
+        let local_y = parent_y - y;
+        local_x >= 0
+            && local_y >= 0
+            && local_x < width.min(i32::MAX as u32) as i32
+            && local_y < height.min(i32::MAX as u32) as i32
+            && !cutouts.iter().any(|cutout| {
+                local_x >= cutout.x
+                    && local_y >= cutout.y
+                    && local_x < cutout.x.saturating_add(cutout.width as i32)
+                    && local_y < cutout.y.saturating_add(cutout.height as i32)
+            })
+    }
 
     fn forwards_input_message(msg: u32) -> bool {
         matches!(
@@ -476,6 +504,26 @@ mod win {
     ) -> isize {
         let video = VIDEO.load(std::sync::atomic::Ordering::SeqCst);
         if video != 0 && forwards_input_message(msg) {
+            let is_mouse_message = matches!(
+                msg,
+                WM_MOUSEACTIVATE | WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP |
+                WM_LBUTTONDBLCLK | WM_RBUTTONDOWN | WM_RBUTTONUP | WM_RBUTTONDBLCLK |
+                WM_MBUTTONDOWN | WM_MBUTTONUP | WM_MBUTTONDBLCLK | WM_MOUSEWHEEL |
+                WM_XBUTTONDOWN | WM_XBUTTONUP | WM_MOUSEHWHEEL
+            );
+            if is_mouse_message {
+                let mut cursor = Point { x: 0, y: 0 };
+                if GetCursorPos(&mut cursor) != 0 && ScreenToClient(hwnd, &mut cursor) != 0 {
+                    let geometry = INPUT_GEOMETRY.lock().unwrap_or_else(|e| e.into_inner());
+                    if let Some((x, y, width, height, cutouts)) = geometry.as_ref() {
+                        if !point_is_in_video(
+                            cursor.x, cursor.y, *x, *y, *width, *height, cutouts,
+                        ) {
+                            return DefSubclassProc(hwnd, msg, wparam, lparam);
+                        }
+                    }
+                }
+            }
             let mut forwarded_lparam = lparam;
             // Mouse button/move coordinates are client-relative. Convert from the
             // Tauri parent to the mpv child; wheel coordinates are screen-relative
@@ -570,6 +618,8 @@ mod win {
             }
             // SetWindowRgn usa coordenadas locais à janela filha, não coordenadas
             // absolutas da WebView. A região começa sempre em (0, 0).
+            *INPUT_GEOMETRY.lock().unwrap_or_else(|e| e.into_inner()) =
+                Some((x, y, width, height, cutouts.to_vec()));
             let region_shape = super::window_region(width, height, cutouts);
             let bounds = region_shape.bounds;
             let region = CreateRectRgn(bounds.0, bounds.1, bounds.2, bounds.3);
@@ -605,6 +655,7 @@ mod win {
                     SUBCLASS_ID,
                 );
             }
+            *INPUT_GEOMETRY.lock().unwrap_or_else(|e| e.into_inner()) = None;
             if video != 0 {
                 SetWindowRgn(video as usize as Hwnd, std::ptr::null_mut(), 1);
             }
@@ -664,6 +715,15 @@ mod tests {
                 assert!(super::win::forwards_input_message(message));
             }
             assert!(!super::win::forwards_input_message(0x000f)); // WM_PAINT
+            let cuts = [super::PlayerCutout {
+                x: 10,
+                y: 20,
+                width: 30,
+                height: 15,
+            }];
+            assert!(super::win::point_is_in_video(120, 130, 100, 100, 100, 100, &cuts));
+            assert!(!super::win::point_is_in_video(115, 125, 100, 100, 100, 100, &cuts));
+            assert!(!super::win::point_is_in_video(99, 130, 100, 100, 100, 100, &cuts));
         }
     }
 
