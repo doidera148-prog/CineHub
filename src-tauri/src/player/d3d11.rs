@@ -20,14 +20,11 @@ use std::{
 };
 
 use libmpv2::Mpv;
+#[cfg(test)]
+use windows::Win32::Graphics::Dxgi::IDXGISwapChain1;
 use windows::{
     core::Interface,
-    Win32::{
-        Graphics::{
-            Direct3D11::{ID3D11Device, ID3D11Texture2D},
-            Dxgi::IDXGISwapChain1,
-        },
-    },
+    Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11Texture2D},
 };
 
 const MPV_RENDER_PARAM_INVALID: u32 = 0;
