@@ -390,5 +390,20 @@ inspect_node(root)
             )
 
 
+    def test_vendored_wry_webview2_source_is_complete_and_keeps_windows_version_use(self):
+        wry_root = ROOT / "src-tauri/vendor/wry"
+        webview2 = (wry_root / "src/webview2/mod.rs").read_text(encoding="utf-8")
+        manifest = (wry_root / "Cargo.toml").read_text(encoding="utf-8")
+        self.assertGreater(
+            len(webview2.splitlines()),
+            1900,
+            "O módulo WebView2 do Wry parece truncado",
+        )
+        self.assertIn("fn is_windows_7()", webview2)
+        self.assertIn("windows_version::OsVersion::current()", webview2)
+        self.assertIn('windows-version = "0.1"', manifest)
+        self.assertTrue(webview2.rstrip().endswith("}"))
+
+
 if __name__ == "__main__":
     unittest.main()
