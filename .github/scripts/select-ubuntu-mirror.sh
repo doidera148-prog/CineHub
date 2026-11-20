@@ -51,12 +51,19 @@ for mirror in "${candidates[@]}"; do
   [[ -z "${seen[$mirror]+x}" ]] || continue
   seen["$mirror"]=1
 
+  # A mirror só é elegível se servir tanto o arquivo principal quanto
+  # o pocket de segurança; assim não selecionamos um endpoint incompleto.
   elapsed=$(curl --silent --show-error --fail --location \
     --connect-timeout 5 --max-time 12 \
     --output /dev/null --write-out '%{time_total}' \
     "${mirror}/dists/${codename}/InRelease" 2>/dev/null) || continue
+  security_elapsed=$(curl --silent --show-error --fail --location \
+    --connect-timeout 5 --max-time 12 \
+    --output /dev/null --write-out '%{time_total}' \
+    "${mirror}/dists/${codename}-security/InRelease" 2>/dev/null) || continue
 
   [[ "$elapsed" =~ ^[0-9]+([.][0-9]+)?$ ]] || continue
+  [[ "$security_elapsed" =~ ^[0-9]+([.][0-9]+)?$ ]] || continue
   reachable+=("$elapsed"$'\t'"$mirror")
   if [[ -z "$best_time" ]] || awk -v candidate="$elapsed" -v best="$best_time" 'BEGIN { exit !(candidate < best) }'; then
     best_mirror="$mirror"
@@ -93,5 +100,6 @@ for file in "${files[@]}"; do
   sed -i -E \
     -e "s#https?://([a-z]{2,3}\\.)?archive\\.ubuntu\\.com/ubuntu#${mirror_uri}#g" \
     -e "s#https?://azure\\.archive\\.ubuntu\\.com/ubuntu#${mirror_uri}#g" \
+    -e "s#https?://security\\.ubuntu\\.com/ubuntu#${mirror_uri}#g" \
     "$file"
 done
