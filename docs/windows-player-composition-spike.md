@@ -32,3 +32,44 @@ Replace the embedded libmpv child HWND (wid) with libmpv's render API so video p
 ## Safety / rollout
 
 This is a spike on fix/windows-mpv-composition. Do not merge into main, remove the existing player path, or publish a release until the Windows proof of concept and regression checks pass on a real Windows machine. CI compilation alone does not validate visual composition or physical mouse input.
+
+
+## Exact dependency baseline and Wry patch surface
+
+The current branch lockfile pins the relevant Windows stack to:
+
+- Tauri `2.12.5`
+- Wry `0.57.2`
+- `webview2-com` `0.39.1`
+- `windows` / `windows-core` `0.62.2`
+
+Do not float these versions while implementing the spike. Wry 0.57.2 is the correct source baseline for a minimal fork; the application should continue to consume the same Tauri/Wry versions except for a pinned Wry source override.
+
+### Where the current Wry implementation must change
+
+The Windows backend in Wry currently stores a standard `ICoreWebView2Controller` in `InnerWebView`. Its `create_controller` helper creates that controller through `ICoreWebView2Environment::CreateCoreWebView2Controller` (or the options overload). The WebView is then obtained from the controller with `CoreWebView2()`. The normal child-HWND container, parent subclass, resize and focus paths are coupled to this controller model.
+
+A composition implementation therefore needs an explicit Windows hosting mode and must cover all of these seams together:
+
+1. **Controller creation:** add an opt-in composition path using `ICoreWebView2Environment3::CreateCoreWebView2CompositionController` (and the matching completion handler). Retain the returned `ICoreWebView2CompositionController` for the lifetime of the WebView; obtain the common controller/WebView interfaces through COM interface casts where supported.
+2. **Visual hosting:** create and own the DirectComposition device, target and visual on the window's UI thread; set the composition controller's `RootVisualTarget` to the WebView visual; commit after changes. The visual must be attached to the actual Tauri window and participate in resize, DPI, visibility and teardown.
+3. **Input:** composition mode does not receive normal child-HWND input automatically. Route host mouse/pointer events through `SendMouseInput` / `SendPointerInput`, handle cursor changes, keyboard focus and accelerator events, and preserve Tauri's normal WebView event/IPC behavior. Do not reuse the old HWND-forwarding workaround as the primary input path.
+4. **Lifecycle:** disconnect `RootVisualTarget`, close the controller, release COM and DirectComposition objects, and remove callbacks/subclasses in a deterministic order on the UI thread.
+5. **Compatibility:** keep the existing standard-controller path as the default and fallback. Expose composition as a Windows-only opt-in so Android, Linux and macOS compile and behave exactly as before.
+
+### Why this is a Wry fork, not an application-only patch
+
+Tauri creates its WebView through Wry before application setup code runs. The app's existing `with_webview` access gives access to an already-created standard controller; it does not convert that controller into a composition controller or replace the WebView's visual host. The composition choice must be made inside Wry's Windows creation path (or by replacing the entire WebView host, which would also require rebuilding Tauri navigation, IPC, permissions and lifecycle integration).
+
+The pinned `webview2-com` 0.39.1 bindings provide the WebView2 COM API surface, including the composition-controller completion handler. Microsoft documents that composition hosting requires a composition controller, a host-owned visual tree, and explicit forwarding of spatial input. This makes a narrowly scoped Wry fork technically viable, but it is not a small `player.rs` change.
+
+### Safe implementation decision
+
+Proceed in this order:
+
+- First create a minimal fork of Wry 0.57.2, pinned to an immutable commit, and add only the opt-in controller/visual-hosting seam. Do not change the default controller path.
+- Compile the fork through CineHub's existing Windows job before integrating libmpv rendering.
+- Add a Windows-only host test/diagnostic mode that proves composition WebView creation, resize, cursor and click delivery, teardown/recreation. CI compilation is necessary but not sufficient; the visual and physical-mouse acceptance checks still require a real Windows machine.
+- Only after this passes, connect the mpv D3D11 render texture into the same DirectComposition visual tree. Keep the existing player path until the full acceptance criteria above pass.
+
+No dependency override, player switch, or production code path is changed by this investigation.
