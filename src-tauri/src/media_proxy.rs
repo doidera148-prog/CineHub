@@ -19,7 +19,7 @@ use axum::{
 };
 use futures::stream;
 use quick_xml::{
-    events::{BytesStart, BytesText, Event},
+    events::{BytesRef, BytesStart, BytesText, Event},
     reader::Reader,
     writer::Writer,
 };
@@ -537,6 +537,7 @@ struct MpdFrame {
     base: Url,
     is_base_url: bool,
     base_url_seen: bool,
+    text: String,
 }
 
 fn xml_local_name(name: &[u8]) -> String {
@@ -549,6 +550,32 @@ fn xml_local_name(name: &[u8]) -> String {
 
 fn dash_error(message: impl Into<String>) -> (StatusCode, String) {
     (StatusCode::BAD_GATEWAY, message.into())
+}
+
+fn is_mpd_url_text(frame: &MpdFrame) -> bool {
+    frame.is_base_url || frame.name == "Location" || frame.name == "PatchLocation"
+}
+
+fn resolve_mpd_general_ref(reference: &BytesRef<'_>) -> Result<String, (StatusCode, String)> {
+    if let Some(character) = reference
+        .resolve_char_ref()
+        .map_err(|_| dash_error("referência de caractere inválida no manifesto DASH"))?
+    {
+        return Ok(character.to_string());
+    }
+    let name = reference
+        .decode()
+        .map_err(|_| dash_error("referência XML inválida no manifesto DASH"))?;
+    match name.as_ref() {
+        "amp" => Ok("&".into()),
+        "lt" => Ok("<".into()),
+        "gt" => Ok(">".into()),
+        "apos" => Ok("'".into()),
+        "quot" => Ok("\"".into()),
+        _ => Err(dash_error(
+            "entidade XML personalizada em URL DASH não é suportada",
+        )),
+    }
 }
 
 /// Registra um caminho dinâmico DASH sob uma origem fixa. O caminho recebido posteriormente
@@ -640,19 +667,14 @@ async fn rewrite_mpd(
                     .last()
                     .map(|frame| frame.base.clone())
                     .unwrap_or_else(|| manifest_url.clone());
-                let rewritten = rewrite_mpd_attributes(
-                    state,
-                    &base,
-                    headers,
-                    &name,
-                    &event,
-                )
-                .await?;
+                let rewritten =
+                    rewrite_mpd_attributes(state, &base, headers, &name, &event).await?;
                 frames.push(MpdFrame {
                     name: name.clone(),
                     base,
                     is_base_url: name == "BaseURL",
                     base_url_seen: false,
+                    text: String::new(),
                 });
                 writer
                     .write_event(Event::Start(rewritten))
@@ -668,107 +690,82 @@ async fn rewrite_mpd(
                     .last()
                     .map(|frame| frame.base.clone())
                     .unwrap_or_else(|| manifest_url.clone());
-                let rewritten = rewrite_mpd_attributes(
-                    state,
-                    &base,
-                    headers,
-                    &name,
-                    &event,
-                )
-                .await?;
+                let rewritten =
+                    rewrite_mpd_attributes(state, &base, headers, &name, &event).await?;
                 writer
                     .write_event(Event::Empty(rewritten))
                     .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
             }
             Ok(Event::Text(event)) => {
-                let current = frames.last();
-                if current.is_some_and(|frame| frame.is_base_url || frame.name == "Location" || frame.name == "PatchLocation") {
+                if frames.last().is_some_and(is_mpd_url_text) {
                     let decoded = event
                         .decode()
                         .map_err(|e| dash_error(format!("texto DASH inválido: {e}")))?;
-                    let unescaped = quick_xml::escape::unescape(&decoded)
-                        .map_err(|_| dash_error("entidade XML não suportada no manifesto DASH"))?;
-                    let original = unescaped.as_ref();
-                    let trimmed = original.trim();
-                    if trimmed.is_empty() {
-                        writer
-                            .write_event(Event::Text(event.into_owned()))
-                            .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
-                    } else if current.is_some_and(|frame| frame.is_base_url) {
-                        let base = current.expect("BaseURL frame missing").base.clone();
-                        let (local, resolved) =
-                            register_dash_path(state, &base, trimmed, headers).await?;
-                        let frame = frames.last_mut().expect("BaseURL frame missing");
-                        frame.base = resolved;
-                        let leading = original.len() - original.trim_start().len();
-                        let trailing = original.len() - original.trim_end().len();
-                        let end = original.len().saturating_sub(trailing);
-                        let replacement = format!("{}{}{}", &original[..leading], local, &original[end..]);
-                        writer
-                            .write_event(Event::Text(BytesText::new(&replacement)))
-                            .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
-                    } else {
-                        let base = current.expect("Location frame missing").base.clone();
-                        let local = register_child(state, &base, trimmed, headers).await?;
-                        let leading = original.len() - original.trim_start().len();
-                        let trailing = original.len() - original.trim_end().len();
-                        let end = original.len().saturating_sub(trailing);
-                        let replacement = format!("{}{}{}", &original[..leading], local, &original[end..]);
-                        writer
-                            .write_event(Event::Text(BytesText::new(&replacement)))
-                            .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
-                    }
+                    frames
+                        .last_mut()
+                        .expect("URL text frame missing")
+                        .text
+                        .push_str(&decoded);
                 } else {
                     writer
                         .write_event(Event::Text(event.into_owned()))
                         .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
                 }
             }
-            Ok(Event::GeneralRef(_event))
-                if frames.last().is_some_and(|frame| {
-                    frame.is_base_url || frame.name == "Location" || frame.name == "PatchLocation"
-                }) =>
-            {
-                return Err(dash_error(
-                    "referência de entidade em URL DASH não é suportada",
-                ));
-            }
-            Ok(Event::End(event)) => {
-                if let Some(frame) = frames.pop() {
-                    if frame.is_base_url {
-                        if let Some(parent) = frames.last_mut() {
-                            parent.base = frame.base;
-                        }
-                    }
+            Ok(Event::GeneralRef(event)) => {
+                if frames.last().is_some_and(is_mpd_url_text) {
+                    let resolved = resolve_mpd_general_ref(&event)?;
+                    frames
+                        .last_mut()
+                        .expect("URL text frame missing")
+                        .text
+                        .push_str(&resolved);
+                } else {
+                    writer
+                        .write_event(Event::GeneralRef(event.into_owned()))
+                        .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
                 }
-                writer
-                    .write_event(Event::End(event.into_owned()))
-                    .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
             }
             Ok(Event::CData(event)) => {
-                if frames.last().is_some_and(|frame| frame.is_base_url) {
+                if frames.last().is_some_and(is_mpd_url_text) {
                     let decoded = event
                         .decode()
                         .map_err(|e| dash_error(format!("CDATA DASH inválido: {e}")))?;
-                    let trimmed = decoded.trim();
-                    if trimmed.is_empty() {
-                        writer
-                            .write_event(Event::CData(event.into_owned()))
-                            .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
-                    } else {
-                        let base = frames.last().expect("BaseURL frame missing").base.clone();
-                        let (local, resolved) =
-                            register_dash_path(state, &base, trimmed, headers).await?;
-                        frames.last_mut().expect("BaseURL frame missing").base = resolved;
-                        writer
-                            .write_event(Event::Text(BytesText::new(&local)))
-                            .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
-                    }
+                    frames
+                        .last_mut()
+                        .expect("URL text frame missing")
+                        .text
+                        .push_str(&decoded);
                 } else {
                     writer
                         .write_event(Event::CData(event.into_owned()))
                         .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
                 }
+            }
+            Ok(Event::End(event)) => {
+                if let Some(frame) = frames.pop() {
+                    let reference = frame.text.trim();
+                    if !reference.is_empty() && frame.is_base_url {
+                        let (local, resolved) =
+                            register_dash_path(state, &frame.base, reference, headers).await?;
+                        writer
+                            .write_event(Event::Text(BytesText::new(&local)))
+                            .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
+                        if let Some(parent) = frames.last_mut() {
+                            parent.base = resolved;
+                        }
+                    } else if !reference.is_empty()
+                        && (frame.name == "Location" || frame.name == "PatchLocation")
+                    {
+                        let local = register_child(state, &frame.base, reference, headers).await?;
+                        writer
+                            .write_event(Event::Text(BytesText::new(&local)))
+                            .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
+                    }
+                }
+                writer
+                    .write_event(Event::End(event.into_owned()))
+                    .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
             }
             Ok(event) => {
                 writer
