@@ -411,9 +411,10 @@ async function checkBackupImport() {
   if (errors.length) failures.push(...errors);
 }
 
-async function checkTv(viewport, label) {
+async function checkTv(viewport, label, deviceScaleFactor = 1) {
   const page = await browser.newPage({
     viewport,
+    deviceScaleFactor,
     userAgent: 'Mozilla/5.0 (Linux; Android 11; Google TV) AppleWebKit/537.36 Chrome/120.0 Safari/537.36',
   });
   await page.addInitScript(fixtures);
@@ -436,7 +437,20 @@ async function checkTv(viewport, label) {
   }));
   const shouldUse4k = displayMode.screenPixels * displayMode.devicePixelRatio >= 3000;
   if (displayMode.tv4k !== shouldUse4k) failures.push(`[${label}] classe de layout 4K incompatível com a resolução detectada`);
-  if (await page.evaluate(() => document.querySelector('#nav-main a:last-child')?.getBoundingClientRect().bottom > innerHeight - 8)) failures.push(`[${label}] menu lateral ultrapassa a tela`);
+  const layout = await page.evaluate(() => {
+    const navLast = document.querySelector('#nav-main a:last-child');
+    const cards = [...document.querySelectorAll('#view .strip .card')].slice(0, 6);
+    return {
+      navBottom: navLast?.getBoundingClientRect().bottom ?? 0,
+      cardFlexBasis: cards[0] ? getComputedStyle(cards[0]).flexBasis : null,
+      cardWidths: cards.map((card) => card.getBoundingClientRect().width),
+      viewportHeight: innerHeight,
+    };
+  });
+  if (layout.navBottom > layout.viewportHeight - 8) failures.push(`[${label}] menu lateral ultrapassa a tela`);
+  if (layout.cardWidths.length < 2) failures.push(`[${label}] catálogo não renderizou cartazes suficientes para validar o layout`);
+  if (layout.cardFlexBasis === 'auto') failures.push(`[${label}] cartazes do trilho perderam a largura fixa da interface de TV`);
+  if (layout.cardWidths.length > 1 && Math.max(...layout.cardWidths) - Math.min(...layout.cardWidths) > 1) failures.push(`[${label}] cartazes do mesmo trilho ficaram com larguras inconsistentes`);
   if (await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)) failures.push(`[${label}] layout TV apresenta overflow horizontal`);
   const first = page.locator('#view .strip a').first();
   await first.focus();
@@ -444,7 +458,7 @@ async function checkTv(viewport, label) {
   if (await page.evaluate(() => document.activeElement?.closest('.strip') === document.querySelector('.strip'))) failures.push(`[${label}] controle ficou preso na borda do trilho`);
   await page.close();
 }
-try { await check({ width: 360, height: 800 }, 'celular'); await check({ width: 1280, height: 800 }, 'desktop'); await checkTv({ width: 1280, height: 720 }, 'Google TV 720p'); await checkTv({ width: 1920, height: 1080 }, 'Google TV 1080p'); await checkTv({ width: 3840, height: 2160 }, 'Google TV 4K'); await checkBackupImport(); await checkUntrustedMetadataEscaping(); await checkWindowsPlayer(); await checkWindowsNativeOverlayClose(); await checkWindowsOverlayFailureKeepsPlayback(); await checkWindowsPlayerFailure(); await checkAndroidPlayer(); await checkAndroidPlayerFallback(); }
+try { await check({ width: 360, height: 800 }, 'celular'); await check({ width: 1280, height: 800 }, 'desktop'); await checkTv({ width: 960, height: 540 }, 'Google TV layout compacto'); await checkTv({ width: 1280, height: 720 }, 'Google TV 720p'); await checkTv({ width: 1920, height: 1080 }, 'Google TV 1080p'); await checkTv({ width: 960, height: 540 }, 'Google TV 4K com escala lógica', 4); await checkTv({ width: 3840, height: 2160 }, 'Google TV 4K nativo'); await checkBackupImport(); await checkUntrustedMetadataEscaping(); await checkWindowsPlayer(); await checkWindowsNativeOverlayClose(); await checkWindowsOverlayFailureKeepsPlayback(); await checkWindowsPlayerFailure(); await checkAndroidPlayer(); await checkAndroidPlayerFallback(); }
 finally { await browser.close(); server.close(); }
 if (failures.length) { console.error('Falhas:\n- ' + failures.join('\n- ')); process.exit(1); }
 console.log('Smoke test ok: rotas, acessibilidade e navegação em celular, desktop e Google TV.');
