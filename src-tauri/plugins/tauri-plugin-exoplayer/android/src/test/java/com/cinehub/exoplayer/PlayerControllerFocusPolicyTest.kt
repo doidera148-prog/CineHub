@@ -7,6 +7,24 @@ import org.junit.Test
 
 class PlayerControllerFocusPolicyTest {
     @Test
+    fun nextEpisodeCountdownIsOfferedOnlyWhenANextEpisodeExists() {
+        assertEquals(NextEpisodeAutoPlayPolicy.COUNTDOWN_SECONDS, 10)
+        assertEquals(false, NextEpisodeAutoPlayPolicy.hasNextEpisode(null))
+        assertEquals(false, NextEpisodeAutoPlayPolicy.hasNextEpisode("  "))
+        assertEquals(true, NextEpisodeAutoPlayPolicy.hasNextEpisode("Série · T1E2"))
+    }
+
+    @Test
+    fun nextEpisodeCountdownStartsOnlyAfterExpiryAndNeverAfterCancellation() {
+        val hasNext = true
+        assertEquals(false, NextEpisodeAutoPlayPolicy.shouldStart(hasNext, cancelled = false, secondsRemaining = 1))
+        assertEquals(true, NextEpisodeAutoPlayPolicy.shouldStart(hasNext, cancelled = false, secondsRemaining = 0))
+        assertEquals(true, NextEpisodeAutoPlayPolicy.shouldStart(hasNext, cancelled = false, secondsRemaining = -1))
+        assertEquals(false, NextEpisodeAutoPlayPolicy.shouldStart(hasNext, cancelled = true, secondsRemaining = 0))
+        assertEquals(false, NextEpisodeAutoPlayPolicy.shouldStart(false, cancelled = false, secondsRemaining = 0))
+    }
+
+    @Test
     fun focusedTrackSelectorDisablesControllerAutoHide() {
         assertEquals(0, PlayerControllerFocusPolicy.timeoutMs(overlayControlHasFocus = true))
     }
