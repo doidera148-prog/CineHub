@@ -231,6 +231,7 @@ async fn proxy_request_inner(
     }
     .ok_or((StatusCode::NOT_FOUND, "sessão expirada".into()))?;
 
+    let has_resource = resource.is_some();
     let mut url = if let Some(resource) = resource {
         if !target.allow_suffix || !valid_proxy_resource_path(&resource) {
             return Err((StatusCode::BAD_REQUEST, "recurso DASH inválido".into()));
@@ -249,7 +250,7 @@ async fn proxy_request_inner(
     } else {
         target.url.clone()
     };
-    if resource.is_some() {
+    if has_resource {
         if let Some(query) = child_query.as_deref().or(target.default_query.as_deref()) {
             url.set_query(Some(query));
         }
@@ -1069,6 +1070,10 @@ mod tests {
             token.clone(),
             Target {
                 url: Url::parse(&format!("http://{redirect_address}/start.m3u8")).unwrap(),
+                force_hls: true,
+                force_dash: false,
+                allow_suffix: false,
+                default_query: None,
                 headers: vec![
                     (
                         header::AUTHORIZATION,
