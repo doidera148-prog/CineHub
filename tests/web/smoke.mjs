@@ -429,6 +429,13 @@ async function checkTv(viewport, label) {
   await page.goto(`${base}/#/movies`);
   await page.waitForTimeout(350);
   if (!(await page.locator('body').evaluate((el) => el.classList.contains('tv-mode')))) failures.push(`[${label}] interface dedicada não foi ativada`);
+  const displayMode = await page.evaluate(() => ({
+    tv4k: document.body.classList.contains('tv-4k'),
+    screenPixels: Math.max(screen.width || 0, screen.height || 0),
+    devicePixelRatio: Math.max(1, window.devicePixelRatio || 1),
+  }));
+  const shouldUse4k = displayMode.screenPixels * displayMode.devicePixelRatio >= 3000;
+  if (displayMode.tv4k !== shouldUse4k) failures.push(`[${label}] classe de layout 4K incompatível com a resolução detectada`);
   if (await page.evaluate(() => document.querySelector('#nav-main a:last-child')?.getBoundingClientRect().bottom > innerHeight - 8)) failures.push(`[${label}] menu lateral ultrapassa a tela`);
   if (await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)) failures.push(`[${label}] layout TV apresenta overflow horizontal`);
   const first = page.locator('#view .strip a').first();
@@ -437,7 +444,7 @@ async function checkTv(viewport, label) {
   if (await page.evaluate(() => document.activeElement?.closest('.strip') === document.querySelector('.strip'))) failures.push(`[${label}] controle ficou preso na borda do trilho`);
   await page.close();
 }
-try { await check({ width: 360, height: 800 }, 'celular'); await check({ width: 1280, height: 800 }, 'desktop'); await checkTv({ width: 1280, height: 720 }, 'Google TV 720p'); await checkTv({ width: 3840, height: 2160 }, 'Google TV 4K'); await checkBackupImport(); await checkUntrustedMetadataEscaping(); await checkWindowsPlayer(); await checkWindowsNativeOverlayClose(); await checkWindowsOverlayFailureKeepsPlayback(); await checkWindowsPlayerFailure(); await checkAndroidPlayer(); await checkAndroidPlayerFallback(); }
+try { await check({ width: 360, height: 800 }, 'celular'); await check({ width: 1280, height: 800 }, 'desktop'); await checkTv({ width: 1280, height: 720 }, 'Google TV 720p'); await checkTv({ width: 1920, height: 1080 }, 'Google TV 1080p'); await checkTv({ width: 3840, height: 2160 }, 'Google TV 4K'); await checkBackupImport(); await checkUntrustedMetadataEscaping(); await checkWindowsPlayer(); await checkWindowsNativeOverlayClose(); await checkWindowsOverlayFailureKeepsPlayback(); await checkWindowsPlayerFailure(); await checkAndroidPlayer(); await checkAndroidPlayerFallback(); }
 finally { await browser.close(); server.close(); }
 if (failures.length) { console.error('Falhas:\n- ' + failures.join('\n- ')); process.exit(1); }
 console.log('Smoke test ok: rotas, acessibilidade e navegação em celular, desktop e Google TV.');
