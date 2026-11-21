@@ -33,6 +33,7 @@ import app.tauri.plugin.Plugin
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.View
 import android.widget.Button
 import android.webkit.WebView
@@ -174,6 +175,9 @@ internal object NextEpisodeAutoPlayPolicy {
 
     fun shouldStart(hasNextEpisode: Boolean, cancelled: Boolean, secondsRemaining: Int): Boolean =
         hasNextEpisode && !cancelled && secondsRemaining <= 0
+
+    fun shouldDismissCountdownOnBack(panelVisible: Boolean, countdownActive: Boolean): Boolean =
+        panelVisible && countdownActive
 }
 
 /** Trecho a pular (abertura, recapitulação, créditos), em segundos. */
@@ -607,7 +611,7 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
             nextEpisodeStatus.text = "Abrindo próximo episódio…"
             dialog.dismiss()
         }
-        cancelNextEpisodeButton.setOnClickListener {
+        fun cancelNextEpisodeCountdown() {
             val returnFocus = nextEpisodeButton.hasFocus() || cancelNextEpisodeButton.hasFocus()
             nextEpisodeCountdownCancelled = true
             nextEpisodeCountdownActive = false
@@ -616,6 +620,24 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
             updatePlayerFocusNavigation()
             if (returnFocus) {
                 view.findViewById<View>(androidx.media3.ui.R.id.exo_play_pause)?.requestFocus()
+            }
+        }
+        cancelNextEpisodeButton.setOnClickListener {
+            cancelNextEpisodeCountdown()
+        }
+        dialog.setOnKeyListener { _, keyCode, event ->
+            val dismissCountdown = keyCode == KeyEvent.KEYCODE_BACK &&
+                NextEpisodeAutoPlayPolicy.shouldDismissCountdownOnBack(
+                    panelVisible = nextEpisodePanel.visibility == View.VISIBLE,
+                    countdownActive = nextEpisodeCountdownActive && !nextEpisodeCountdownCancelled,
+                )
+            if (!dismissCountdown) {
+                false
+            } else {
+                // Consome DOWN e UP: um único Voltar fecha somente o aviso, sem
+                // deixar o Dialog dispensar o player que já terminou de tocar.
+                if (event.action == KeyEvent.ACTION_UP) cancelNextEpisodeCountdown()
+                true
             }
         }
         player.addListener(object : Player.Listener {
