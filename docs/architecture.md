@@ -37,8 +37,9 @@ Fluxo simplificado:
 4. O player solicita o conteúdo ao proxy.
 5. Para mídia progressiva, o proxy encaminha a resposta e os cabeçalhos de Range necessários.
 6. Para HLS, reescreve a playlist e os recursos filhos para passarem pelo mesmo proxy.
+7. Para DASH, valida e reescreve o manifesto XML, incluindo `BaseURL`, `SegmentTemplate`, `SegmentURL` e referências de inicialização. Templates com variáveis como `$Number$` e `$Time$` recebem rotas locais com caminhos filhos dinâmicos.
 
-O proxy limita redirecionamentos e sessões. Não aceita URLs DASH com extensão `.mpd`. Os cabeçalhos encaminhados são limitados a `authorization`, `cookie`, `origin`, `referer` e `user-agent`, quando fornecidos em `proxyHeaders.request`.
+Manifestos HLS e DASH são limitados a 4 MiB. Cada URL filha é registrada com token, restrita à origem validada e revalidada contra a política de destinos públicos em cada requisição. O proxy limita redirecionamentos e sessões. Os cabeçalhos encaminhados são limitados a `authorization`, `cookie`, `origin`, `referer` e `user-agent`, quando fornecidos em `proxyHeaders.request`.
 
 O proxy de mídia é distinto do servidor de torrent. O proxy de addons/mídia bloqueia destinos privados; a reprodução local de torrent e a conexão Kodi são fluxos específicos, com regras próprias.
 
