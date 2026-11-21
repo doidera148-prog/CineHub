@@ -391,7 +391,7 @@ async fn is_safe_proxy_url(state: &ProxyState, raw_url: &str) -> bool {
     crate::addon::is_safe_url(raw_url).await
 }
 
-/// Preserva cabeçalhos sensíveis somente quando o recurso continua na origem inicial.
+/// Preserva autenticação e contexto de origem somente ao continuar na mesma origem.
 fn headers_for_origin(
     headers: &[(header::HeaderName, HeaderValue)],
     same_origin: bool,
@@ -401,7 +401,12 @@ fn headers_for_origin(
     }
     headers
         .iter()
-        .filter(|(name, _)| *name != header::AUTHORIZATION && *name != header::COOKIE)
+        .filter(|(name, _)| {
+            *name != header::AUTHORIZATION
+                && *name != header::COOKIE
+                && *name != header::ORIGIN
+                && *name != header::REFERER
+        })
         .cloned()
         .collect()
 }
@@ -506,7 +511,12 @@ async fn register_child(
     } else {
         headers
             .iter()
-            .filter(|(name, _)| *name != header::AUTHORIZATION && *name != header::COOKIE)
+            .filter(|(name, _)| {
+            *name != header::AUTHORIZATION
+                && *name != header::COOKIE
+                && *name != header::ORIGIN
+                && *name != header::REFERER
+        })
             .cloned()
             .collect()
     };
@@ -613,7 +623,10 @@ mod tests {
         headers: HeaderMap,
     ) -> &'static str {
         seen.lock().unwrap().push(
-            headers.contains_key(header::AUTHORIZATION) || headers.contains_key(header::COOKIE),
+            headers.contains_key(header::AUTHORIZATION)
+                || headers.contains_key(header::COOKIE)
+                || headers.contains_key(header::ORIGIN)
+                || headers.contains_key(header::REFERER),
         );
         "#EXTM3U\nsegment.ts\n"
     }
@@ -623,13 +636,16 @@ mod tests {
         headers: HeaderMap,
     ) -> &'static str {
         seen.lock().unwrap().push(
-            headers.contains_key(header::AUTHORIZATION) || headers.contains_key(header::COOKIE),
+            headers.contains_key(header::AUTHORIZATION)
+                || headers.contains_key(header::COOKIE)
+                || headers.contains_key(header::ORIGIN)
+                || headers.contains_key(header::REFERER),
         );
         "segment"
     }
 
     #[tokio::test]
-    async fn hls_redirect_to_another_origin_drops_authorization_and_cookie() {
+    async fn hls_redirect_to_another_origin_drops_credentials_and_origin_context() {
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
         let destination = Router::new()
             .route(
@@ -666,6 +682,14 @@ mod tests {
                     (
                         header::COOKIE,
                         HeaderValue::from_static("session=integration-test-secret"),
+                    ),
+                    (
+                        header::ORIGIN,
+                        HeaderValue::from_static("https://origin.example"),
+                    ),
+                    (
+                        header::REFERER,
+                        HeaderValue::from_static("https://origin.example/watch?id=private"),
                     ),
                 ],
                 force_hls: true,
@@ -902,16 +926,19 @@ mod tests {
             ),
             (header::COOKIE, HeaderValue::from_static("session=secret")),
             (
+                header::ORIGIN,
+                HeaderValue::from_static("https://origin.example"),
+            ),
+            (
                 header::REFERER,
-                HeaderValue::from_static("https://origin.example/"),
+                HeaderValue::from_static("https://origin.example/watch?id=private"),
             ),
         ];
 
         let same_origin = headers_for_origin(&headers, true);
-        assert_eq!(same_origin.len(), 3);
+        assert_eq!(same_origin.len(), 4);
 
         let redirected = headers_for_origin(&headers, false);
-        assert_eq!(redirected.len(), 1);
-        assert_eq!(redirected[0].0, header::REFERER);
+        assert!(redirected.is_empty());
     }
 }
