@@ -178,6 +178,9 @@ internal object NextEpisodeAutoPlayPolicy {
 
     fun shouldDismissCountdownOnBack(panelVisible: Boolean, countdownActive: Boolean): Boolean =
         panelVisible && countdownActive
+
+    fun shouldShowCompletionExit(playbackEnded: Boolean, hasNextEpisode: Boolean): Boolean =
+        playbackEnded && !hasNextEpisode
 }
 
 /** Trecho a pular (abertura, recapitulação, créditos), em segundos. */
@@ -382,6 +385,7 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         val nextEpisodeLabel = args.nextEpisodeLabel?.trim()
             ?.takeIf { NextEpisodeAutoPlayPolicy.hasNextEpisode(it) }
         var playbackEnded = false
+        var finishedWithoutNextEpisode = false
         var nextEpisodeCountdownActive = false
         var nextEpisodeCountdownCancelled = false
         var autoNextRequested = false
@@ -460,7 +464,9 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
             if (hasSkipButton) focusViews[PlayerControllerFocusPolicy.FocusNode.SKIP] = skipButton
             if (hasNextEpisode) {
                 focusViews[PlayerControllerFocusPolicy.FocusNode.NEXT_EPISODE] = nextEpisodeButton
-                focusViews[PlayerControllerFocusPolicy.FocusNode.NEXT_CANCEL] = cancelNextEpisodeButton
+                if (cancelNextEpisodeButton.visibility == View.VISIBLE) {
+                    focusViews[PlayerControllerFocusPolicy.FocusNode.NEXT_CANCEL] = cancelNextEpisodeButton
+                }
             }
 
             for ((node, source) in focusViews) {
@@ -589,10 +595,23 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
                 handler.postDelayed(this, 1_000)
             }
         }
+        fun showPlaybackFinishedWithoutNextEpisode() {
+            finishedWithoutNextEpisode = true
+            nextEpisodeStatus.text = "Episódio concluído · Não há próximo episódio disponível"
+            nextEpisodeButton.text = "Fechar player"
+            cancelNextEpisodeButton.visibility = View.GONE
+            nextEpisodePanel.visibility = View.VISIBLE
+            updatePlayerFocusNavigation()
+            view.showController()
+            nextEpisodeButton.requestFocus()
+        }
         fun startNextEpisodeCountdown() {
             if (!NextEpisodeAutoPlayPolicy.hasNextEpisode(nextEpisodeLabel) ||
                 nextEpisodeCountdownActive || nextEpisodeCountdownCancelled
             ) return
+            finishedWithoutNextEpisode = false
+            nextEpisodeButton.text = "Reproduzir agora"
+            cancelNextEpisodeButton.visibility = View.VISIBLE
             nextEpisodeCountdownActive = true
             countdownSecondsRemaining = NextEpisodeAutoPlayPolicy.COUNTDOWN_SECONDS
             nextEpisodeStatus.text =
@@ -604,6 +623,10 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
             handler.postDelayed(nextEpisodeCountdownTick, 1_000)
         }
         nextEpisodeButton.setOnClickListener {
+            if (finishedWithoutNextEpisode) {
+                dialog.dismiss()
+                return@setOnClickListener
+            }
             if (!nextEpisodeCountdownActive || nextEpisodeCountdownCancelled) return@setOnClickListener
             nextEpisodeCountdownActive = false
             autoNextRequested = true
@@ -644,7 +667,15 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_ENDED) {
                     playbackEnded = true
-                    startNextEpisodeCountdown()
+                    if (NextEpisodeAutoPlayPolicy.shouldShowCompletionExit(
+                            playbackEnded = true,
+                            hasNextEpisode = NextEpisodeAutoPlayPolicy.hasNextEpisode(nextEpisodeLabel),
+                        )
+                    ) {
+                        showPlaybackFinishedWithoutNextEpisode()
+                    } else {
+                        startNextEpisodeCountdown()
+                    }
                 }
             }
         })
