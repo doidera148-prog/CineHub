@@ -132,13 +132,17 @@ await press('Enter');
 if (await page.evaluate(() => window.__actionCount) !== 1) failures.push('[remote-navigation] Enter não ativou o botão exatamente uma vez');
 
 // Diálogos isolam o D-pad e não deixam o foco escapar para a tela de fundo.
+await page.locator('#action').focus();
 await page.locator('#test-dialog').evaluate((el) => el.showModal());
+await page.waitForFunction(() => document.activeElement?.id === 'dialog-first');
 await page.locator('#dialog-last').focus();
 await press('ArrowRight');
 await expectFocus('dialog-last', 'seta não pode escapar do limite do diálogo');
 await page.locator('#dialog-last').press('Tab');
 await expectFocus('dialog-first', 'Tab deve circular dentro do diálogo');
 await page.locator('#test-dialog').evaluate((el) => el.close());
+await page.waitForFunction(() => document.activeElement?.id === 'action');
+await expectFocus('action', 'fechar diálogo deve devolver o foco ao controle que o abriu');
 
 // Abrir detalhes por toque não pode ativar o modo remoto nem focar a busca.
 await page.evaluate(() => {
