@@ -90,6 +90,7 @@ async function checkWindowsPlayer() {
     ['MP3', 'https://stream.test/audio.mp3', 'audio/mpeg'],
     ['FLAC', 'https://stream.test/audio.flac', 'audio/flac'],
     ['HLS', 'https://stream.test/master.m3u8', 'application/x-mpegURL'],
+    ['DASH', 'https://stream.test/manifest.mpd', 'application/dash+xml'],
     ['sem extensão', 'https://stream.test/play?id=42', ''],
   ];
   for (const [label, url, mimeType] of formats) {
@@ -120,6 +121,10 @@ async function checkWindowsPlayer() {
     if (!result.geometry || result.geometry.width < 16 || result.geometry.height < 16) failures.push(`[windows-player] ${label}: geometria física do vídeo não foi enviada ao mpv`);
     if (!Array.isArray(result.geometry?.cutouts) || result.geometry.cutouts.length < 2) failures.push(`[windows-player] ${label}: controles HTML não foram recortados da superfície nativa`);
     if (!result.proxy) failures.push(`[windows-player] ${label}: fonte externa não passou pelo proxy de mídia`);
+    if (label === 'DASH') {
+      const proxyCall = await page.evaluate(() => window.__calls.find((call) => call.cmd === 'media_proxy_url'));
+      if (proxyCall?.args?.mimeType !== 'application/dash+xml') failures.push('[windows-player] DASH: MIME não foi informado ao proxy');
+    }
     if (result.htmlSource) failures.push(`[windows-player] ${label}: caiu indevidamente no player HTML5`);
     if (errors.length) failures.push(...errors.map((e) => `[windows-player:${label}] ${e}`));
     await page.close();
