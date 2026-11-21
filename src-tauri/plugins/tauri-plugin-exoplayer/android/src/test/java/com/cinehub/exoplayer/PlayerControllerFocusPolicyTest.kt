@@ -53,6 +53,28 @@ class PlayerControllerFocusPolicyTest {
     }
 
     @Test
+    fun finishedPlayerOffersAnExitOnlyWhenThereIsNoNextEpisode() {
+        assertEquals(
+            true,
+            NextEpisodeAutoPlayPolicy.shouldShowCompletionExit(
+                playbackEnded = true, hasNextEpisode = false,
+            ),
+        )
+        assertEquals(
+            false,
+            NextEpisodeAutoPlayPolicy.shouldShowCompletionExit(
+                playbackEnded = true, hasNextEpisode = true,
+            ),
+        )
+        assertEquals(
+            false,
+            NextEpisodeAutoPlayPolicy.shouldShowCompletionExit(
+                playbackEnded = false, hasNextEpisode = false,
+            ),
+        )
+    }
+
+    @Test
     fun focusedTrackSelectorDisablesControllerAutoHide() {
         assertEquals(0, PlayerControllerFocusPolicy.timeoutMs(overlayControlHasFocus = true))
     }
