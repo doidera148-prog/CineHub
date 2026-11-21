@@ -285,7 +285,7 @@ jobs:
         if: matrix.platform == 'windows-latest'
         shell: bash
         run: |
-          package=$(find src-tauri/target/debug/bundle -type f \\( -iname '*.msi' -o -iname '*.exe' \\) -print -quit)
+          package=$(find src-tauri/target/debug/bundle -type f \( -iname '*.msi' -o -iname '*.exe' \) -print -quit)
           test -n "$package" || { echo "Nenhum instalador Debug Windows foi gerado"; exit 1; }
           echo "Pacote Debug gerado: $package"
       - name: Publicar artefato Windows Debug de diagnóstico
