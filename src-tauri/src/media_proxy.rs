@@ -344,7 +344,12 @@ async fn proxy_request_inner(
         loop {
             let next = tokio::time::timeout(Duration::from_secs(45), upstream.chunk())
                 .await
-                .map_err(|_| (StatusCode::GATEWAY_TIMEOUT, "timeout lendo manifesto DASH".into()))?
+                .map_err(|_| {
+                    (
+                        StatusCode::GATEWAY_TIMEOUT,
+                        "timeout lendo manifesto DASH".into(),
+                    )
+                })?
                 .map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))?;
             let Some(chunk) = next else { break };
             if bytes.len() + chunk.len() > 4 * 1024 * 1024 {
@@ -357,8 +362,7 @@ async fn proxy_request_inner(
         }
         let manifest = String::from_utf8(bytes)
             .map_err(|_| (StatusCode::BAD_GATEWAY, "manifesto DASH não é UTF-8".into()))?;
-        let manifest_headers =
-            headers_for_origin(&target.headers, url.origin() == original_origin);
+        let manifest_headers = headers_for_origin(&target.headers, url.origin() == original_origin);
         let rewritten = rewrite_mpd(&state, &url, &manifest_headers, &manifest).await?;
         return builder
             .header(header::CONTENT_TYPE, "application/dash+xml")
@@ -529,7 +533,6 @@ async fn is_safe_proxy_url(state: &ProxyState, raw_url: &str) -> bool {
     let _ = state;
     crate::addon::is_safe_url(raw_url).await
 }
-
 
 #[derive(Clone)]
 struct MpdFrame {
@@ -709,7 +712,9 @@ async fn rewrite_mpd(
                 } else {
                     writer
                         .write_event(Event::Text(event.into_owned()))
-                        .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
+                        .map_err(|e| {
+                            dash_error(format!("não foi possível serializar DASH: {e}"))
+                        })?;
                 }
             }
             Ok(Event::GeneralRef(event)) => {
@@ -723,7 +728,9 @@ async fn rewrite_mpd(
                 } else {
                     writer
                         .write_event(Event::GeneralRef(event.into_owned()))
-                        .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
+                        .map_err(|e| {
+                            dash_error(format!("não foi possível serializar DASH: {e}"))
+                        })?;
                 }
             }
             Ok(Event::CData(event)) => {
@@ -739,7 +746,9 @@ async fn rewrite_mpd(
                 } else {
                     writer
                         .write_event(Event::CData(event.into_owned()))
-                        .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
+                        .map_err(|e| {
+                            dash_error(format!("não foi possível serializar DASH: {e}"))
+                        })?;
                 }
             }
             Ok(Event::End(event)) => {
@@ -750,7 +759,9 @@ async fn rewrite_mpd(
                             register_dash_path(state, &frame.base, reference, headers).await?;
                         writer
                             .write_event(Event::Text(BytesText::new(&local)))
-                            .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
+                            .map_err(|e| {
+                                dash_error(format!("não foi possível serializar DASH: {e}"))
+                            })?;
                         if let Some(parent) = frames.last_mut() {
                             parent.base = resolved;
                         }
@@ -793,7 +804,8 @@ async fn rewrite_mpd_attributes(
     let name = String::from_utf8_lossy(event.name().as_ref()).to_string();
     let mut output = BytesStart::new(name.as_str());
     for attribute in event.attributes() {
-        let attribute = attribute.map_err(|_| dash_error("atributo XML inválido no manifesto DASH"))?;
+        let attribute =
+            attribute.map_err(|_| dash_error("atributo XML inválido no manifesto DASH"))?;
         let key = String::from_utf8_lossy(attribute.key.as_ref()).to_string();
         let local_key = xml_local_name(key.as_bytes());
         let value = attribute
@@ -802,11 +814,13 @@ async fn rewrite_mpd_attributes(
             .into_owned();
         let is_template = element == "SegmentTemplate"
             && matches!(local_key.as_str(), "media" | "initialization" | "index");
-        let is_static = (element == "SegmentURL" && matches!(local_key.as_str(), "media" | "index"))
+        let is_static = (element == "SegmentURL"
+            && matches!(local_key.as_str(), "media" | "index"))
             || (matches!(element, "Initialization" | "RepresentationIndex")
                 && local_key == "sourceURL")
             || (element == "Period" && local_key == "href")
-            || (element == "UTCTiming" && local_key == "value"
+            || (element == "UTCTiming"
+                && local_key == "value"
                 && (value.starts_with("http://") || value.starts_with("https://")));
         let rewritten = if value.trim().is_empty() {
             value
@@ -1254,10 +1268,7 @@ mod tests {
             .route(
                 "/manifest.mpd",
                 axum::routing::get(|| async {
-                    (
-                        [(header::CONTENT_TYPE, "application/dash+xml")],
-                        MANIFEST,
-                    )
+                    ([(header::CONTENT_TYPE, "application/dash+xml")], MANIFEST)
                 }),
             )
             .route(
@@ -1270,18 +1281,13 @@ mod tests {
             );
         let origin_address = start_test_server(origin).await;
         let state = local_test_state();
-        let manifest_url =
-            Url::parse(&format!("http://{origin_address}/manifest.mpd")).unwrap();
+        let manifest_url = Url::parse(&format!("http://{origin_address}/manifest.mpd")).unwrap();
         let proxy = MediaProxy {
             address: "127.0.0.1:0".parse().unwrap(),
             state: state.clone(),
         };
         let local_manifest = proxy
-            .register(
-                manifest_url.as_str(),
-                None,
-                Some("application/dash+xml"),
-            )
+            .register(manifest_url.as_str(), None, Some("application/dash+xml"))
             .await
             .unwrap();
         assert!(local_manifest.ends_with("/manifest.mpd"));
@@ -1307,7 +1313,10 @@ mod tests {
         .unwrap();
         assert_eq!(manifest_response.status(), StatusCode::OK);
         assert_eq!(
-            manifest_response.headers().get(header::CONTENT_TYPE).unwrap(),
+            manifest_response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .unwrap(),
             "application/dash+xml"
         );
         let body = axum::body::to_bytes(manifest_response.into_body(), 1024 * 1024)
@@ -1326,13 +1335,8 @@ mod tests {
             .replace("$Number$", "1")
             .replace("&amp;", "&");
         let (segment_token, segment_path, segment_query) = dash_local_parts(&media_url);
-        let segment_response = request_test_child_resource(
-            &state,
-            segment_token,
-            segment_path,
-            segment_query,
-        )
-        .await;
+        let segment_response =
+            request_test_child_resource(&state, segment_token, segment_path, segment_query).await;
         assert_eq!(segment_response.status(), StatusCode::OK);
         assert_eq!(
             &axum::body::to_bytes(segment_response.into_body(), 1024)
@@ -1341,8 +1345,7 @@ mod tests {
             b"segment-one"
         );
 
-        let init_start =
-            rewritten.find("initialization=\"").unwrap() + "initialization=\"".len();
+        let init_start = rewritten.find("initialization=\"").unwrap() + "initialization=\"".len();
         let init_end = rewritten[init_start..].find('"').unwrap() + init_start;
         let (init_token, init_path, init_query) =
             dash_local_parts(&rewritten[init_start..init_end].replace("&amp;", "&"));
@@ -1362,7 +1365,10 @@ mod tests {
         let mut parts = parsed.path().trim_start_matches('/').splitn(3, '/');
         assert_eq!(parts.next(), Some("media"));
         let token = parts.next().expect("DASH proxy token missing").to_string();
-        let resource = parts.next().expect("DASH resource path missing").to_string();
+        let resource = parts
+            .next()
+            .expect("DASH resource path missing")
+            .to_string();
         (token, resource, parsed.query().map(str::to_owned))
     }
 
