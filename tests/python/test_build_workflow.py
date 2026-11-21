@@ -584,7 +584,310 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("sha256sum --check --status", ffmpeg)
 
         extension_workflow = (ROOT / ".github/workflows/ffmpeg-extension.yml").read_text(encoding="utf-8")
-        candidate_release = re.search(r'(?m)^  RELEASE_TAG: "([^"]+)"        self.assertIn('rm -f "$AAR"', ffmpeg)
+        candidate_release = re.search(r'(?m)^  RELEASE_TAG: "([^"]+)"
+
+    def test_windows_mpv_archive_is_hash_verified_and_cache_key_includes_digest(self):
+        desktop = job_block(self.workflow, "desktop")
+        expected_sha256 = "7c147cb7ceaba717414e782ef4398de728f679db6e86daaa8aeb175670cb7994"
+        self.assertIn(expected_sha256, desktop)
+        self.assertIn("Get-FileHash -Path $archive -Algorithm SHA256", desktop)
+        self.assertIn("libmpv-dev-x86_64-20261108-git-55d3feb45c-sha256-7c147cb7ceab", desktop)
+
+    def test_manual_libmpv_preparation_uses_the_same_pinned_checksum(self):
+        script = (ROOT / ".github/scripts/prepare-libmpv.ps1").read_text(encoding="utf-8")
+        self.assertIn("7c147cb7ceaba717414e782ef4398de728f679db6e86daaa8aeb175670cb7994", script)
+        self.assertIn("Get-FileHash -Path $archivePath -Algorithm SHA256", script)
+        self.assertIn("https://sourceforge.net/projects/mpv-player-windows/files/libmpv/", script)
+        self.assertNotIn("releases?per_page=10", script)
+
+    def test_ffmpeg_extension_workflow_pins_source_commits_and_never_overwrites_release_assets(self):
+        workflow = (ROOT / ".github/workflows/ffmpeg-extension.yml").read_text(encoding="utf-8")
+        self.assertIn('MEDIA3_COMMIT: "c35a9d62baec57118ea898e271ac66819399649b"', workflow)
+        self.assertIn('FFMPEG_COMMIT: "573f2b81ebd97da81def2ba762e81b0328547004"', workflow)
+        self.assertIn('git -C "$RUNNER_TEMP/ffmpeg" fetch --depth 1 origin "$FFMPEG_COMMIT"', workflow)
+        self.assertIn('sha256sum "$AAR"', workflow)
+        self.assertNotIn("--clobber", workflow)
+
+    def test_workflow_yaml_parses_and_has_no_duplicate_mapping_keys(self):
+        # Psych faz parte do Ruby disponível nos runners Ubuntu do GitHub Actions.
+        # A inspeção da AST evita o problema do YAML 1.1 converter a chave "on" em booleano.
+        ruby_check = r"""
+require "psych"
+root = Psych.parse_file(ARGV.fetch(0)).root
+abort "build.yml está vazio" unless root
+def inspect_node(node, path = "$")
+  return unless node
+  if node.is_a?(Psych::Nodes::Mapping)
+    seen = {}
+    node.children.each_slice(2) do |key, value|
+      if key.is_a?(Psych::Nodes::Scalar)
+        name = key.value
+        abort "Chave YAML duplicada em #{path}: #{name}" if seen.key?(name)
+        seen[name] = true
+      end
+      inspect_node(value, "#{path}.#{key.respond_to?(:value) ? key.value : "?"}")
+    end
+  elsif node.respond_to?(:children)
+    Array(node.children).each_with_index { |child, index| inspect_node(child, "#{path}[#{index}]") }
+  end
+end
+inspect_node(root)
+"""
+        result = subprocess.run(
+            ["ruby", "-e", ruby_check, str(WORKFLOW)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"YAML inválido ou com chaves duplicadas:\n{result.stderr}",
+        )
+
+    def test_job_dependencies_reference_existing_jobs_and_form_acyclic_graph(self):
+        declared = set(re.findall(r"(?m)^  ([a-zA-Z0-9_-]+):\\s*$", self.workflow))
+        dependencies = {}
+        for name in declared:
+            block = job_block(self.workflow, name)
+            match = re.search(r"(?m)^    needs:\\s*(?:\\[([^\\]]*)\\]|([a-zA-Z0-9_-]+))", block)
+            values = []
+            if match:
+                raw = match.group(1) if match.group(1) is not None else match.group(2)
+                values = re.findall(r"[a-zA-Z0-9_-]+", raw)
+            missing = set(values) - declared
+            self.assertFalse(missing, f"Job {name} depende de jobs inexistentes: {sorted(missing)}")
+            dependencies[name] = values
+
+        visiting = set()
+        visited = set()
+
+        def visit(name):
+            self.assertNotIn(name, visiting, f"Ciclo de dependências envolvendo o job {name}")
+            if name in visited:
+                return
+            visiting.add(name)
+            for dependency in dependencies[name]:
+                visit(dependency)
+            visiting.remove(name)
+            visited.add(name)
+
+        for name in declared:
+            visit(name)
+
+    def test_step_ids_are_unique_and_every_steps_reference_exists(self):
+        for name in re.findall(r"(?m)^  ([a-zA-Z0-9_-]+):\\s*$", self.workflow):
+            block = job_block(self.workflow, name)
+            ids = re.findall(r"(?m)^        id: ([a-zA-Z0-9_-]+)\\s*$", block)
+            self.assertEqual(len(ids), len(set(ids)), f"IDs de steps duplicados no job {name}")
+            referenced = set(re.findall(r"steps\\.([a-zA-Z0-9_-]+)\\.", block))
+            missing = referenced - set(ids)
+            self.assertFalse(
+                missing,
+                f"Job {name} referencia outputs de steps sem ID: {sorted(missing)}",
+            )
+
+    def test_github_expression_delimiters_are_balanced(self):
+        # Evita expressões truncadas que podem passar por verificações de substring.
+        self.assertEqual(
+            self.workflow.count("${{"),
+            self.workflow.count("}}"),
+            "Há expressão GitHub Actions sem delimitador de abertura/fechamento correspondente",
+        )
+
+    def test_each_job_has_steps_and_each_step_has_one_execution_or_action(self):
+        for name in re.findall(r"(?m)^  ([a-zA-Z0-9_-]+):\\s*$", self.workflow):
+            block = job_block(self.workflow, name)
+            self.assertRegex(block, r"(?m)^    steps:\\s*$", f"Job {name} não declara steps")
+            steps = re.findall(r"(?m)^      - (?:name:|uses:)", block)
+            self.assertTrue(steps, f"Job {name} não contém etapas executáveis")
+            self.assertEqual(
+                len(steps),
+                block.count("\\n      - "),
+                f"Há etapa sem name/uses no job {name}",
+            )
+
+
+    def test_vendored_wry_webview2_source_is_complete_and_keeps_windows_version_use(self):
+        wry_root = ROOT / "src-tauri/vendor/wry"
+        webview2 = (wry_root / "src/webview2/mod.rs").read_text(encoding="utf-8")
+        manifest = (wry_root / "Cargo.toml").read_text(encoding="utf-8")
+        self.assertGreater(
+            len(webview2.splitlines()),
+            1900,
+            "O módulo WebView2 do Wry parece truncado",
+        )
+        self.assertIn("fn is_windows_7()", webview2)
+        self.assertIn("windows_version::OsVersion::current()", webview2)
+        self.assertIn('windows-version = "0.1"', manifest)
+        self.assertTrue(webview2.rstrip().endswith("}"))
+
+
+if __name__ == "__main__":
+    unittest.main()
+, extension_workflow)
+        self.assertIsNotNone(candidate_release, "O workflow de extensão precisa declarar a tag candidata")
+        self.assertEqual(candidate_release.group(1), "ffmpeg-ext-1.4.1-r2")
+        self.assertNotEqual(
+            candidate_release.group(1),
+            approved_release.group(1),
+            "Um AAR candidato não pode ser consumido pelo Android antes da validação e promoção do SHA-256",
+        )
+        self.assertIn("só então atualize FFMPEG_RELEASE_TAG e EXPECTED_SHA256", extension_workflow)
+        self.assertIn('rm -f "$AAR"', ffmpeg)
+        self.assertIn("::error::SHA-256 do AAR FFmpeg", ffmpeg)
+        self.assertIn("::warning::Extensão FFmpeg não publicada/disponível", ffmpeg)
+        self.assertNotIn("continue-on-error: true", ffmpeg)
+
+    def test_windows_mpv_archive_is_hash_verified_and_cache_key_includes_digest(self):
+        desktop = job_block(self.workflow, "desktop")
+        expected_sha256 = "7c147cb7ceaba717414e782ef4398de728f679db6e86daaa8aeb175670cb7994"
+        self.assertIn(expected_sha256, desktop)
+        self.assertIn("Get-FileHash -Path $archive -Algorithm SHA256", desktop)
+        self.assertIn("libmpv-dev-x86_64-20261108-git-55d3feb45c-sha256-7c147cb7ceab", desktop)
+
+    def test_manual_libmpv_preparation_uses_the_same_pinned_checksum(self):
+        script = (ROOT / ".github/scripts/prepare-libmpv.ps1").read_text(encoding="utf-8")
+        self.assertIn("7c147cb7ceaba717414e782ef4398de728f679db6e86daaa8aeb175670cb7994", script)
+        self.assertIn("Get-FileHash -Path $archivePath -Algorithm SHA256", script)
+        self.assertIn("https://sourceforge.net/projects/mpv-player-windows/files/libmpv/", script)
+        self.assertNotIn("releases?per_page=10", script)
+
+    def test_ffmpeg_extension_workflow_pins_source_commits_and_never_overwrites_release_assets(self):
+        workflow = (ROOT / ".github/workflows/ffmpeg-extension.yml").read_text(encoding="utf-8")
+        self.assertIn('MEDIA3_COMMIT: "c35a9d62baec57118ea898e271ac66819399649b"', workflow)
+        self.assertIn('FFMPEG_COMMIT: "573f2b81ebd97da81def2ba762e81b0328547004"', workflow)
+        self.assertIn('git -C "$RUNNER_TEMP/ffmpeg" fetch --depth 1 origin "$FFMPEG_COMMIT"', workflow)
+        self.assertIn('sha256sum "$AAR"', workflow)
+        self.assertNotIn("--clobber", workflow)
+
+    def test_workflow_yaml_parses_and_has_no_duplicate_mapping_keys(self):
+        # Psych faz parte do Ruby disponível nos runners Ubuntu do GitHub Actions.
+        # A inspeção da AST evita o problema do YAML 1.1 converter a chave "on" em booleano.
+        ruby_check = r"""
+require "psych"
+root = Psych.parse_file(ARGV.fetch(0)).root
+abort "build.yml está vazio" unless root
+def inspect_node(node, path = "$")
+  return unless node
+  if node.is_a?(Psych::Nodes::Mapping)
+    seen = {}
+    node.children.each_slice(2) do |key, value|
+      if key.is_a?(Psych::Nodes::Scalar)
+        name = key.value
+        abort "Chave YAML duplicada em #{path}: #{name}" if seen.key?(name)
+        seen[name] = true
+      end
+      inspect_node(value, "#{path}.#{key.respond_to?(:value) ? key.value : "?"}")
+    end
+  elsif node.respond_to?(:children)
+    Array(node.children).each_with_index { |child, index| inspect_node(child, "#{path}[#{index}]") }
+  end
+end
+inspect_node(root)
+"""
+        result = subprocess.run(
+            ["ruby", "-e", ruby_check, str(WORKFLOW)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"YAML inválido ou com chaves duplicadas:\n{result.stderr}",
+        )
+
+    def test_job_dependencies_reference_existing_jobs_and_form_acyclic_graph(self):
+        declared = set(re.findall(r"(?m)^  ([a-zA-Z0-9_-]+):\\s*$", self.workflow))
+        dependencies = {}
+        for name in declared:
+            block = job_block(self.workflow, name)
+            match = re.search(r"(?m)^    needs:\\s*(?:\\[([^\\]]*)\\]|([a-zA-Z0-9_-]+))", block)
+            values = []
+            if match:
+                raw = match.group(1) if match.group(1) is not None else match.group(2)
+                values = re.findall(r"[a-zA-Z0-9_-]+", raw)
+            missing = set(values) - declared
+            self.assertFalse(missing, f"Job {name} depende de jobs inexistentes: {sorted(missing)}")
+            dependencies[name] = values
+
+        visiting = set()
+        visited = set()
+
+        def visit(name):
+            self.assertNotIn(name, visiting, f"Ciclo de dependências envolvendo o job {name}")
+            if name in visited:
+                return
+            visiting.add(name)
+            for dependency in dependencies[name]:
+                visit(dependency)
+            visiting.remove(name)
+            visited.add(name)
+
+        for name in declared:
+            visit(name)
+
+    def test_step_ids_are_unique_and_every_steps_reference_exists(self):
+        for name in re.findall(r"(?m)^  ([a-zA-Z0-9_-]+):\\s*$", self.workflow):
+            block = job_block(self.workflow, name)
+            ids = re.findall(r"(?m)^        id: ([a-zA-Z0-9_-]+)\\s*$", block)
+            self.assertEqual(len(ids), len(set(ids)), f"IDs de steps duplicados no job {name}")
+            referenced = set(re.findall(r"steps\\.([a-zA-Z0-9_-]+)\\.", block))
+            missing = referenced - set(ids)
+            self.assertFalse(
+                missing,
+                f"Job {name} referencia outputs de steps sem ID: {sorted(missing)}",
+            )
+
+    def test_github_expression_delimiters_are_balanced(self):
+        # Evita expressões truncadas que podem passar por verificações de substring.
+        self.assertEqual(
+            self.workflow.count("${{"),
+            self.workflow.count("}}"),
+            "Há expressão GitHub Actions sem delimitador de abertura/fechamento correspondente",
+        )
+
+    def test_each_job_has_steps_and_each_step_has_one_execution_or_action(self):
+        for name in re.findall(r"(?m)^  ([a-zA-Z0-9_-]+):\\s*$", self.workflow):
+            block = job_block(self.workflow, name)
+            self.assertRegex(block, r"(?m)^    steps:\\s*$", f"Job {name} não declara steps")
+            steps = re.findall(r"(?m)^      - (?:name:|uses:)", block)
+            self.assertTrue(steps, f"Job {name} não contém etapas executáveis")
+            self.assertEqual(
+                len(steps),
+                block.count("\\n      - "),
+                f"Há etapa sem name/uses no job {name}",
+            )
+
+
+    def test_vendored_wry_webview2_source_is_complete_and_keeps_windows_version_use(self):
+        wry_root = ROOT / "src-tauri/vendor/wry"
+        webview2 = (wry_root / "src/webview2/mod.rs").read_text(encoding="utf-8")
+        manifest = (wry_root / "Cargo.toml").read_text(encoding="utf-8")
+        self.assertGreater(
+            len(webview2.splitlines()),
+            1900,
+            "O módulo WebView2 do Wry parece truncado",
+        )
+        self.assertIn("fn is_windows_7()", webview2)
+        self.assertIn("windows_version::OsVersion::current()", webview2)
+        self.assertIn('windows-version = "0.1"', manifest)
+        self.assertTrue(webview2.rstrip().endswith("}"))
+
+
+if __name__ == "__main__":
+    unittest.main()
+, extension_workflow)
+        self.assertIsNotNone(candidate_release, "O workflow de extensão precisa declarar a tag candidata")
+        self.assertEqual(candidate_release.group(1), "ffmpeg-ext-1.4.1-r2")
+        self.assertNotEqual(
+            candidate_release.group(1),
+            approved_release.group(1),
+            "Um AAR candidato não pode ser consumido pelo Android antes da validação e promoção do SHA-256",
+        )
+        self.assertIn("só então atualize FFMPEG_RELEASE_TAG e EXPECTED_SHA256", extension_workflow)
+        self.assertIn('rm -f "$AAR"', ffmpeg)
         self.assertIn("::error::SHA-256 do AAR FFmpeg", ffmpeg)
         self.assertIn("::warning::Extensão FFmpeg não publicada/disponível", ffmpeg)
         self.assertNotIn("continue-on-error: true", ffmpeg)
