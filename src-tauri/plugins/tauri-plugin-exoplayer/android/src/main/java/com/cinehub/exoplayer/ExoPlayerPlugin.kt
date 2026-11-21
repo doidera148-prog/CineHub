@@ -93,37 +93,45 @@ internal object ExoPlayerUrlValidator {
 internal object PlayerControllerFocusPolicy {
     const val AUTO_HIDE_TIMEOUT_MS = 6_000
 
-    enum class FocusNode { PLAY_PAUSE, PROGRESS, AUDIO, SUBTITLES }
-    enum class FocusDirection { UP, DOWN, LEFT }
+    enum class FocusNode { PLAY_PAUSE, PROGRESS, AUDIO, SUBTITLES, SKIP }
+    enum class FocusDirection { UP, DOWN, LEFT, RIGHT }
 
     fun timeoutMs(overlayControlHasFocus: Boolean): Int =
         if (overlayControlHasFocus) 0 else AUTO_HIDE_TIMEOUT_MS
 
-    /** Caminho previsível do D-pad entre reprodução, seletores de faixa e progresso. */
+    /** Caminho previsível do D-pad entre reprodução, progresso e controles sobrepostos. */
     fun nextFocusTarget(
         current: FocusNode,
         direction: FocusDirection,
         hasAudioSelector: Boolean,
+        hasSkipButton: Boolean = false,
     ): FocusNode? = when (current) {
         FocusNode.PLAY_PAUSE -> when (direction) {
             FocusDirection.UP -> if (hasAudioSelector) FocusNode.AUDIO else FocusNode.SUBTITLES
             FocusDirection.DOWN -> FocusNode.PROGRESS
-            FocusDirection.LEFT -> null
+            FocusDirection.LEFT, FocusDirection.RIGHT -> null
         }
         FocusNode.PROGRESS -> when (direction) {
             FocusDirection.UP -> FocusNode.SUBTITLES
             FocusDirection.DOWN -> FocusNode.PLAY_PAUSE
-            FocusDirection.LEFT -> null
+            FocusDirection.LEFT, FocusDirection.RIGHT -> null
         }
         FocusNode.AUDIO -> when (direction) {
             FocusDirection.UP -> null
             FocusDirection.DOWN -> FocusNode.SUBTITLES
-            FocusDirection.LEFT -> FocusNode.PLAY_PAUSE
+            FocusDirection.LEFT -> if (hasSkipButton) FocusNode.SKIP else FocusNode.PLAY_PAUSE
+            FocusDirection.RIGHT -> null
         }
         FocusNode.SUBTITLES -> when (direction) {
             FocusDirection.UP -> if (hasAudioSelector) FocusNode.AUDIO else FocusNode.PLAY_PAUSE
             FocusDirection.DOWN -> FocusNode.PROGRESS
-            FocusDirection.LEFT -> FocusNode.PLAY_PAUSE
+            FocusDirection.LEFT -> if (hasSkipButton) FocusNode.SKIP else FocusNode.PLAY_PAUSE
+            FocusDirection.RIGHT -> null
+        }
+        FocusNode.SKIP -> when (direction) {
+            FocusDirection.UP, FocusDirection.LEFT -> null
+            FocusDirection.DOWN -> FocusNode.PLAY_PAUSE
+            FocusDirection.RIGHT -> if (hasAudioSelector) FocusNode.AUDIO else FocusNode.SUBTITLES
         }
     }
 }
@@ -316,13 +324,22 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
                 }
             }
         }
+        // O botão de pular trecho é criado antes do mapa de foco para participar
+        // da navegação D-pad assim que um segmento ficar ativo.
+        val skipButton = Button(act).apply {
+            id = View.generateViewId()
+            visibility = View.GONE
+            isAllCaps = false
+            isFocusable = true
+            isFocusableInTouchMode = true
+        }
         var hasMultipleAudioTracks = false
 
         // A barra de progresso do Media3 (DefaultTimeBar) já aceita LEFT/RIGHT para
         // avançar e retroceder; aqui conectamos o movimento vertical aos controles
         // externos para que o D-pad não dependa apenas da busca geométrica do Android.
         fun updatePlayerFocusNavigation() {
-            val focusViews = mapOf(
+            val focusViews = mutableMapOf<PlayerControllerFocusPolicy.FocusNode, View?>(
                 PlayerControllerFocusPolicy.FocusNode.PLAY_PAUSE to
                     view.findViewById<View>(androidx.media3.ui.R.id.exo_play_pause),
                 PlayerControllerFocusPolicy.FocusNode.PROGRESS to
@@ -330,13 +347,17 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
                 PlayerControllerFocusPolicy.FocusNode.AUDIO to audioButton,
                 PlayerControllerFocusPolicy.FocusNode.SUBTITLES to subtitleButton,
             )
+            val hasSkipButton = skipButton.visibility == View.VISIBLE
+            if (hasSkipButton) focusViews[PlayerControllerFocusPolicy.FocusNode.SKIP] = skipButton
+
             for ((node, source) in focusViews) {
                 if (source == null) continue
                 for (direction in PlayerControllerFocusPolicy.FocusDirection.values()) {
                     val targetNode = PlayerControllerFocusPolicy.nextFocusTarget(
                         node,
                         direction,
-                        hasAudioSelector = hasMultipleAudioTracks,
+                        hasAudioSelector = hasMultipleAudioTracks && audioButton.visibility == View.VISIBLE,
+                        hasSkipButton = hasSkipButton,
                     ) ?: continue
                     val target = focusViews[targetNode] ?: continue
                     if (target.id == View.NO_ID) continue
@@ -344,6 +365,7 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
                         PlayerControllerFocusPolicy.FocusDirection.UP -> source.nextFocusUpId = target.id
                         PlayerControllerFocusPolicy.FocusDirection.DOWN -> source.nextFocusDownId = target.id
                         PlayerControllerFocusPolicy.FocusDirection.LEFT -> source.nextFocusLeftId = target.id
+                        PlayerControllerFocusPolicy.FocusDirection.RIGHT -> source.nextFocusRightId = target.id
                     }
                 }
             }
@@ -351,8 +373,8 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
 
         fun updateTrackButtons(visible: Boolean) {
             // Não remova da hierarquia um seletor que ainda está focado pelo D-pad.
-            val keepFocusedTrackButton = audioButton.hasFocus() || subtitleButton.hasFocus()
-            val shouldShow = visible || keepFocusedTrackButton
+            val keepFocusedOverlayButton = audioButton.hasFocus() || subtitleButton.hasFocus() || skipButton.hasFocus()
+            val shouldShow = visible || keepFocusedOverlayButton
             audioButton.visibility = if (hasMultipleAudioTracks && shouldShow) View.VISIBLE else View.GONE
             // Botão fica disponível mesmo sem faixa para explicar que a fonte não oferece legenda.
             subtitleButton.visibility = if (shouldShow) View.VISIBLE else View.GONE
@@ -382,16 +404,16 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         // restaure os 6 segundos normais. Isso evita perder o foco em botões que
         // são ocultados junto com a barra de controles.
         fun updateTrackButtonFocusTimeout() {
-            val trackButtonHasFocus = audioButton.hasFocus() || subtitleButton.hasFocus()
-            view.setControllerShowTimeoutMs(PlayerControllerFocusPolicy.timeoutMs(trackButtonHasFocus))
-            if (trackButtonHasFocus) view.showController()
+            val overlayButtonHasFocus = audioButton.hasFocus() || subtitleButton.hasFocus() || skipButton.hasFocus()
+            view.setControllerShowTimeoutMs(PlayerControllerFocusPolicy.timeoutMs(overlayButtonHasFocus))
+            if (overlayButtonHasFocus) view.showController()
         }
-        listOf(audioButton, subtitleButton).forEach { button ->
+        listOf(audioButton, subtitleButton, skipButton).forEach { button ->
             button.setOnFocusChangeListener { _, _ -> updateTrackButtonFocusTimeout() }
         }
         view.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
-            val trackButtonHasFocus = audioButton.hasFocus() || subtitleButton.hasFocus()
-            if (visibility != View.VISIBLE && trackButtonHasFocus) view.showController()
+            val overlayButtonHasFocus = audioButton.hasFocus() || subtitleButton.hasFocus() || skipButton.hasFocus()
+            if (visibility != View.VISIBLE && overlayButtonHasFocus) view.showController()
             updateTrackButtons(visibility == View.VISIBLE)
         })
 
@@ -400,14 +422,14 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         val handler = Handler(Looper.getMainLooper())
         val density = act.resources.displayMetrics.density
         var shownEnd: Double? = null
-        val skipButton = Button(act)
-        skipButton.visibility = View.GONE
-        skipButton.isAllCaps = false
         skipButton.setOnClickListener {
             val end = skipButton.tag as? Double
             if (end != null) player.seekTo((end * 1000).toLong())
+            val returnFocus = skipButton.hasFocus()
             skipButton.visibility = View.GONE
             shownEnd = null
+            updatePlayerFocusNavigation()
+            if (returnFocus) view.findViewById<View>(androidx.media3.ui.R.id.exo_play_pause)?.requestFocus()
         }
         val skipTick = object : Runnable {
             override fun run() {
@@ -417,12 +439,17 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
                 if (end != shownEnd) {
                     shownEnd = end
                     if (seg == null) {
+                        val returnFocus = skipButton.hasFocus()
                         skipButton.visibility = View.GONE
+                        if (returnFocus) {
+                            view.findViewById<View>(androidx.media3.ui.R.id.exo_play_pause)?.requestFocus()
+                        }
                     } else {
                         skipButton.text = seg.label + " ▶"
                         skipButton.tag = seg.end
                         skipButton.visibility = View.VISIBLE
                     }
+                    updatePlayerFocusNavigation()
                 }
                 handler.postDelayed(this, 500)
             }
