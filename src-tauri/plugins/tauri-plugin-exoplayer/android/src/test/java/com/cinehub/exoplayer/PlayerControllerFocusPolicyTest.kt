@@ -117,6 +117,28 @@ class PlayerControllerFocusPolicyTest {
     }
 
     @Test
+    fun dpadCanReachNextEpisodeAndReturnToPlayback() {
+        assertEquals(
+            FocusNode.NEXT_EPISODE,
+            PlayerControllerFocusPolicy.nextFocusTarget(
+                FocusNode.SUBTITLES, FocusDirection.LEFT, false, hasNextEpisode = true,
+            ),
+        )
+        assertEquals(
+            FocusNode.PLAY_PAUSE,
+            PlayerControllerFocusPolicy.nextFocusTarget(
+                FocusNode.NEXT_EPISODE, FocusDirection.DOWN, false, hasNextEpisode = true,
+            ),
+        )
+        assertEquals(
+            FocusNode.PLAY_PAUSE,
+            PlayerControllerFocusPolicy.nextFocusTarget(
+                FocusNode.SUBTITLES, FocusDirection.LEFT, false, hasNextEpisode = false,
+            ),
+        )
+    }
+
+    @Test
     fun dpadReturnsFromTrackSelectorsAndSkipsUnavailableAudioSelector() {
         assertEquals(
             FocusNode.PLAY_PAUSE,
