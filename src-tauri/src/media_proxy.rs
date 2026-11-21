@@ -771,7 +771,9 @@ async fn rewrite_mpd(
                         let local = register_child(state, &frame.base, reference, headers).await?;
                         writer
                             .write_event(Event::Text(BytesText::new(&local)))
-                            .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
+                            .map_err(|e| {
+                                dash_error(format!("não foi possível serializar DASH: {e}"))
+                            })?;
                     }
                 }
                 writer
@@ -1147,7 +1149,6 @@ mod tests {
                         HeaderValue::from_static("session=integration-test-secret"),
                     ),
                 ],
-                force_hls: true,
                 expires: Instant::now() + SESSION_TTL,
             },
         );
