@@ -208,7 +208,7 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         val callback = object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 webView.evaluateJavascript("(window.__cinehubBack && window.__cinehubBack()) ? 1 : 0") { handled ->
-                    if (handled == "1") return@evaluateJavascript
+                    if (NativeBackNavigationPolicy.isHandledByWebView(handled)) return@evaluateJavascript
                     isEnabled = false
                     dispatcher.onBackPressed()
                     isEnabled = true
