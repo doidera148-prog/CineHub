@@ -275,6 +275,27 @@ jobs:
           path: |
             src-tauri/target/release/bundle/**
             !src-tauri/target/release/bundle/**/*.d
+      # O gatilho CINEHUB_DEBUG_SIMULATE_D3D11_DEVICE_LOSS só existe com debug_assertions.
+      # Gere um instalador de diagnóstico separado; o pacote Release acima não é alterado.
+      - name: Gerar pacote Windows Debug para diagnóstico de recuperação D3D11
+        if: matrix.platform == 'windows-latest'
+        working-directory: src-tauri
+        run: cargo tauri build --debug --config tauri.windows.conf.json --features mpv
+      - name: Verificar pacote Windows Debug de diagnóstico
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        run: |
+          package=$(find src-tauri/target/debug/bundle -type f \( -iname '*.msi' -o -iname '*.exe' \) -print -quit)
+          test -n "$package" || { echo "Nenhum instalador Debug Windows foi gerado"; exit 1; }
+          echo "Pacote Debug gerado: $package"
+      - name: Publicar artefato Windows Debug de diagnóstico
+        if: matrix.platform == 'windows-latest'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cinehub-windows-d3d11-diagnostic-debug
+          path: |
+            src-tauri/target/debug/bundle/**
+            !src-tauri/target/debug/bundle/**/*.d
 
   android:
     # Ubuntu 24.04 LTS oferece KVM para acelerar o emulador Google TV x86 (API 34).

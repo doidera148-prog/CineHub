@@ -107,6 +107,17 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
             "cargo test --features mpv --lib mpv_osc_script_options_are_valid",
             desktop,
         )
+        self.assertIn(
+            "cargo tauri build --debug --config tauri.windows.conf.json --features mpv",
+            desktop,
+        )
+        self.assertIn("cinehub-windows-d3d11-diagnostic-debug", desktop)
+        self.assertIn("src-tauri/target/debug/bundle/**", desktop)
+        self.assertLess(
+            desktop.index("cargo test --features mpv --lib mpv_osc_script_options_are_valid"),
+            desktop.index("cargo tauri build --debug --config tauri.windows.conf.json --features mpv"),
+            "A build de diagnóstico deve vir depois do smoke test Windows já existente",
+        )
         self.assertIn("actions/upload-artifact@", desktop)
         self.assertIn("cinehub-" + "$" + "{{ matrix.platform }}", desktop)
 
@@ -421,6 +432,11 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("is_device_loss_hresult", d3d11)
         self.assertIn("DeviceLost {", d3d11)
         self.assertIn("recreate_host_device", d3d11)
+        self.assertIn(
+            "frame_pending.store(true, Ordering::Release)",
+            d3d11,
+            "O contexto D3D11 recriado precisa solicitar o redesenho inicial do frame atual",
+        )
         self.assertIn("texture.as_raw()", d3d11)
         self.assertIn("abi_layout_is_valid", d3d11)
         for feature in (
@@ -550,6 +566,28 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("device_recovery_attempts == 0", player)
         self.assertIn("super::mpv_d3d11::recreate_host_device(parent)", player)
         self.assertIn("drop(render_context.take())", player)
+        for diagnostic in (
+            "CINEHUB_DEBUG_SIMULATE_D3D11_DEVICE_LOSS",
+            "should_simulate_d3d11_device_loss",
+            "cfg!(debug_assertions)",
+            "setting == Some(\"once\")",
+            "simulate_device_loss_once = false",
+            "RenderError::simulated_device_loss()",
+        ):
+            with self.subTest(d3d11_diagnostic=diagnostic):
+                self.assertIn(diagnostic, player)
+        self.assertIn("#[cfg(all(windows, debug_assertions))]", player)
+        self.assertIn("drop(renderer)", player)
+        self.assertIn("recovered_renderer", player)
+        self.assertIn("novo dispositivo D3D11", player)
+        recovery_smoke = player.split(
+            "// Exercise recovery without reloading media:", 1
+        )[1].split("let mut recovered_frame", 1)[0]
+        self.assertNotIn(
+            'command("loadfile"',
+            recovery_smoke,
+            "O smoke test de recuperação deve redesenhar o frame atual sem recarregar o vídeo",
+        )
         self.assertIn('init.set_option("vo", "libmpv")?', player)
         self.assertIn('command("loadfile", &[frame_path_string.as_str(), "replace"])', player)
         self.assertIn('.render_to_smoke_swap_chain(&swap_chain)', player)

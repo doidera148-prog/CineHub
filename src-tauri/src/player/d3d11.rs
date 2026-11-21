@@ -98,6 +98,7 @@ pub(super) struct D3d11RenderContext<'a> {
     context: NonNull<MpvRenderContextOpaque>,
     device: ID3D11Device,
     frame_pending: Arc<AtomicBool>,
+    initial_frame_pending: AtomicBool,
     _mpv: PhantomData<&'a Mpv>,
 }
 
@@ -109,6 +110,18 @@ pub(super) enum RenderError {
         removal_reason: i32,
     },
     Other(String),
+}
+
+#[cfg(debug_assertions)]
+impl RenderError {
+    pub(super) fn simulated_device_loss() -> Self {
+        const DXGI_ERROR_DEVICE_REMOVED: i32 = 0x887A0005_u32 as i32;
+        Self::DeviceLost {
+            operation: "diagnóstico controlado",
+            hresult: DXGI_ERROR_DEVICE_REMOVED,
+            removal_reason: DXGI_ERROR_DEVICE_REMOVED,
+        }
+    }
 }
 
 impl fmt::Display for RenderError {
@@ -198,10 +211,15 @@ impl<'a> D3d11RenderContext<'a> {
                 Arc::as_ptr(&frame_pending) as *mut c_void,
             );
         }
+        // A replacement render context must redraw the frame already loaded by mpv.
+        // Device recovery intentionally does not reload the media, so queue an
+        // initial update check instead of waiting only for the next decoded frame.
+        frame_pending.store(true, Ordering::Release);
         Ok(Self {
             context,
             device: device.clone(),
             frame_pending,
+            initial_frame_pending: AtomicBool::new(true),
             _mpv: PhantomData,
         })
     }
@@ -278,7 +296,9 @@ impl<'a> D3d11RenderContext<'a> {
         if !self.frame_pending.swap(false, Ordering::AcqRel) {
             return false;
         }
-        self.update() & MPV_RENDER_UPDATE_FRAME != 0
+        let update_flags = self.update();
+        let initial_frame = self.initial_frame_pending.swap(false, Ordering::AcqRel);
+        update_flags & MPV_RENDER_UPDATE_FRAME != 0 || initial_frame
     }
 }
 

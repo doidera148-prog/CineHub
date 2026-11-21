@@ -237,3 +237,20 @@ O caminho Windows agora reconhece a remoção/reset do dispositivo gráfico e te
 O teste Windows existente `mpv_osc_script_options_are_valid` agora também verifica os HRESULTs classificados como device loss; a suíte Python existente verifica o contrato entre a mensagem Win32, o host Wry e o loop do player. O `.github/workflows/build.yml` continua sendo o único workflow e o teste de integração Windows continua executando uma única vez.
 
 **Limite da validação:** o CI compila a rotina de recuperação, testa a classificação dos HRESULTs e executa o smoke test nativo de renderização/`Present`. Ele não simula uma remoção real do adaptador durante reprodução nem valida visualmente a troca da árvore DirectComposition em uma GPU física. Esse cenário precisa de aceitação em Windows real; a tentativa única e o encerramento controlado permanecem como proteção contra loop/inconsistência caso o driver continue falhando.
+
+
+
+## Diagnóstico controlado de recuperação D3D11 — somente debug
+
+Para exercitar a recuperação completa do host WebView2/DirectComposition sem remover o dispositivo físico, há uma injeção sintética de falha disponível somente em builds de desenvolvimento (com `debug_assertions`):
+
+1. Antes de iniciar uma compilação debug do CineHub para Windows com a feature `mpv`, defina `CINEHUB_DEBUG_SIMULATE_D3D11_DEVICE_LOSS=once`.
+2. Abra um vídeo normalmente. Quando o primeiro frame estiver pronto, o player injeta um `DXGI_ERROR_DEVICE_REMOVED` sintético no caminho de renderização.
+3. O player deve liberar o render context antigo, reconstruir o dispositivo/swap chain/árvore DirectComposition no thread da janela, criar um novo render context libmpv e continuar a reprodução.
+4. O gatilho é consumido uma única vez por reprodução. Ao iniciar outro vídeo, a configuração `once` pode provocar uma nova simulação.
+
+A variável não é lida para builds release e a simulação fica desativada por padrão. Para voltar ao comportamento normal, remova a variável do ambiente antes de iniciar o aplicativo.
+
+O smoke test Windows existente também foi ampliado: após renderizar o frame local, ele libera o render context e o dispositivo anteriores, cria um novo dispositivo/swap chain e verifica uma segunda renderização com um novo contexto libmpv. O teste continua no mesmo step do `.github/workflows/build.yml`, sem workflow ou execução duplicada.
+
+**Limite:** a injeção valida o fluxo de recuperação e a reconstrução dos recursos D3D11/DirectComposition, mas não provoca uma remoção real do adaptador nem reproduz todos os estados de erro de um driver físico. A validação final de imagem, transparência, input e recuperação após uma falha real continua exigindo Windows físico.
