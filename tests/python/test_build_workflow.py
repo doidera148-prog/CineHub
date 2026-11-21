@@ -406,6 +406,11 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("is_device_loss_hresult", d3d11)
         self.assertIn("DeviceLost {", d3d11)
         self.assertIn("recreate_host_device", d3d11)
+        self.assertIn(
+            "frame_pending.store(true, Ordering::Release)",
+            d3d11,
+            "O contexto D3D11 recriado precisa solicitar o redesenho inicial do frame atual",
+        )
         self.assertIn("texture.as_raw()", d3d11)
         self.assertIn("abi_layout_is_valid", d3d11)
         for feature in (
