@@ -85,6 +85,14 @@ fn parse_track_id(value: Option<f64>, description: &str) -> Result<i64, String> 
     Ok(id as i64)
 }
 
+#[cfg(any(test, all(windows, debug_assertions)))]
+const D3D11_DEVICE_LOSS_DIAGNOSTIC_ENV: &str = "CINEHUB_DEBUG_SIMULATE_D3D11_DEVICE_LOSS";
+
+#[cfg(any(test, all(windows, debug_assertions)))]
+fn should_simulate_d3d11_device_loss(composition_mode: bool, setting: Option<&str>) -> bool {
+    cfg!(debug_assertions) && composition_mode && setting == Some("once")
+}
+
 #[cfg(any(all(windows, feature = "mpv"), test))]
 /// Limites e recortes da região Win32 em coordenadas locais da janela filha.
 /// SetWindowRgn interpreta (0, 0) como o canto superior esquerdo da própria janela,
@@ -506,6 +514,16 @@ mod imp {
             None
         };
 
+        // This fault injection exists only in debug builds and is disabled unless
+        // explicitly requested before playback. It exercises the real host rebuild path.
+        #[cfg(all(windows, debug_assertions))]
+        let mut simulate_device_loss_once = super::should_simulate_d3d11_device_loss(
+            composition_mode,
+            std::env::var(super::D3D11_DEVICE_LOSS_DIAGNOSTIC_ENV)
+                .ok()
+                .as_deref(),
+        );
+
         // Controles de teclado explícitos, além do OSC clicável exibido pelo mpv.
         let _ = mpv.command("keybind", &["SPACE", "cycle pause"]);
         let _ = mpv.command("keybind", &["LEFT", "seek -10"]);
@@ -595,7 +613,19 @@ mod imp {
             {
                 let render_result = match (wid, render_context.as_ref()) {
                     (Some(parent), Some(renderer)) if renderer.frame_is_pending() => {
-                        Some((parent, super::mpv_d3d11::render_to_host(parent, renderer)))
+                        #[cfg(debug_assertions)]
+                        let result = if simulate_device_loss_once {
+                            simulate_device_loss_once = false;
+                            eprintln!(
+                                "diagnóstico D3D11: injetando uma falha sintética antes do primeiro frame"
+                            );
+                            Err(super::mpv_d3d11::RenderError::simulated_device_loss())
+                        } else {
+                            super::mpv_d3d11::render_to_host(parent, renderer)
+                        };
+                        #[cfg(not(debug_assertions))]
+                        let result = super::mpv_d3d11::render_to_host(parent, renderer);
+                        Some((parent, result))
                     }
                     _ => None,
                 };
@@ -1203,6 +1233,15 @@ mod tests {
         assert!(super::parse_player_control("select-subtitle", Some(-1.0)).is_err());
         assert!(super::parse_player_control("select-audio", None).is_err());
         assert!(super::parse_player_control("unknown", None).is_err());
+
+        assert_eq!(
+            super::should_simulate_d3d11_device_loss(true, Some("once")),
+            cfg!(debug_assertions),
+            "a simulação só pode ser ativada em builds debug",
+        );
+        assert!(!super::should_simulate_d3d11_device_loss(false, Some("once")));
+        assert!(!super::should_simulate_d3d11_device_loss(true, Some("true")));
+        assert!(!super::should_simulate_d3d11_device_loss(true, None));
     }
 
     #[cfg(feature = "mpv")]
@@ -1240,6 +1279,17 @@ mod tests {
             assert!(!super::mpv_d3d11::is_device_loss_hresult(0));
             assert!(!super::mpv_d3d11::is_device_loss_hresult(
                 0x887A0001_u32 as i32
+            ));
+
+            #[cfg(debug_assertions)]
+            assert!(matches!(
+                super::mpv_d3d11::RenderError::simulated_device_loss(),
+                super::mpv_d3d11::RenderError::DeviceLost {
+                    hresult,
+                    removal_reason,
+                    ..
+                } if hresult == removal_reason
+                    && super::mpv_d3d11::is_device_loss_hresult(hresult)
             ));
 
             // Runtime smoke test: initialize libmpv's D3D11 render backend, decode
@@ -1289,12 +1339,50 @@ mod tests {
                     break;
                 }
             }
-            let _ = std::fs::remove_file(&frame_path);
             assert!(
                 rendered_frame,
                 "libmpv não sinalizou nem renderizou o quadro de teste pelo backend D3D11"
             );
             eprintln!("D3D11 runtime smoke test aprovado usando driver {driver}");
+
+            // Exercise the recovery lifecycle: free the old render context first,
+            // then bind a fresh libmpv context to a newly created D3D11 device.
+            drop(renderer);
+            drop(swap_chain);
+            drop(device);
+
+            let (recovered_device, recovered_swap_chain, recovered_driver) =
+                super::mpv_d3d11::create_smoke_swap_chain()
+                    .expect("a recuperação precisa criar um novo dispositivo e swap chain D3D11");
+            let recovered_renderer =
+                super::mpv_d3d11::D3d11RenderContext::new(&d3d_mpv, &recovered_device)
+                    .expect("libmpv precisa recriar o render context em um novo dispositivo D3D11");
+            d3d_mpv
+                .command("loadfile", &[frame_path_string.as_str(), "replace"])
+                .expect("libmpv precisa reabrir o quadro após a recriação do render context");
+
+            let mut recovered_frame = false;
+            for _ in 0..100 {
+                let _ = d3d_mpv.wait_event(0.05);
+                if recovered_renderer.frame_is_pending() {
+                    recovered_renderer
+                        .render_to_smoke_swap_chain(&recovered_swap_chain)
+                        .expect("o novo render context precisa renderizar e apresentar um frame");
+                    recovered_frame = true;
+                    break;
+                }
+            }
+            assert!(
+                recovered_frame,
+                "libmpv não renderizou um frame após trocar o dispositivo D3D11"
+            );
+            eprintln!(
+                "D3D11 render-context recovery smoke test aprovado ({driver} -> {recovered_driver})"
+            );
+            drop(recovered_renderer);
+            drop(recovered_swap_chain);
+            drop(recovered_device);
+            let _ = std::fs::remove_file(&frame_path);
 
             for message in [
                 0x0200, // WM_MOUSEMOVE
