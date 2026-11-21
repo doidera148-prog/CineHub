@@ -85,7 +85,7 @@ fn parse_track_id(value: Option<f64>, description: &str) -> Result<i64, String> 
     Ok(id as i64)
 }
 
-#[cfg(any(test, all(windows, debug_assertions)))]
+#[cfg(all(windows, debug_assertions))]
 const D3D11_DEVICE_LOSS_DIAGNOSTIC_ENV: &str = "CINEHUB_DEBUG_SIMULATE_D3D11_DEVICE_LOSS";
 
 #[cfg(any(test, all(windows, debug_assertions)))]
