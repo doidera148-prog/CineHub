@@ -132,12 +132,22 @@ impl MediaProxy {
                 expires: Instant::now() + SESSION_TTL,
             },
         );
-        Ok(format!(
-            "http://{}:{}/media/{}",
-            self.address.ip(),
-            self.address.port(),
-            token
-        ))
+        let route = if force_dash {
+            format!(
+                "http://{}:{}/media/{}/manifest.mpd",
+                self.address.ip(),
+                self.address.port(),
+                token
+            )
+        } else {
+            format!(
+                "http://{}:{}/media/{}",
+                self.address.ip(),
+                self.address.port(),
+                token
+            )
+        };
+        Ok(route)
     }
 }
 
@@ -234,20 +244,24 @@ async fn proxy_request_inner(
 
     let has_resource = resource.is_some();
     let mut url = if let Some(resource) = resource {
-        if !target.allow_suffix || !valid_proxy_resource_path(&resource) {
-            return Err((StatusCode::BAD_REQUEST, "recurso DASH inválido".into()));
+        if target.force_dash && resource == "manifest.mpd" {
+            target.url.clone()
+        } else {
+            if !target.allow_suffix || !valid_proxy_resource_path(&resource) {
+                return Err((StatusCode::BAD_REQUEST, "recurso DASH inválido".into()));
+            }
+            let base = target.url.clone();
+            let resolved = base
+                .join(&resource)
+                .map_err(|_| (StatusCode::BAD_REQUEST, "caminho DASH inválido".into()))?;
+            if resolved.origin() != base.origin()
+                || !resolved.username().is_empty()
+                || resolved.password().is_some()
+            {
+                return Err((StatusCode::FORBIDDEN, "destino DASH bloqueado".into()));
+            }
+            resolved
         }
-        let base = target.url.clone();
-        let resolved = base
-            .join(&resource)
-            .map_err(|_| (StatusCode::BAD_REQUEST, "caminho DASH inválido".into()))?;
-        if resolved.origin() != base.origin()
-            || !resolved.username().is_empty()
-            || resolved.password().is_some()
-        {
-            return Err((StatusCode::FORBIDDEN, "destino DASH bloqueado".into()));
-        }
-        resolved
     } else {
         target.url.clone()
     };
@@ -485,13 +499,20 @@ async fn proxy_request_inner(
 }
 
 fn valid_proxy_resource_path(resource: &str) -> bool {
+    let lower = resource.to_ascii_lowercase();
     !resource.is_empty()
         && !resource.starts_with('/')
         && !resource.contains('\\')
         && !resource.chars().any(char::is_control)
-        && resource
-            .split('/')
-            .all(|part| !part.is_empty() && part != "." && part != "..")
+        && !lower.contains("%2f")
+        && !lower.contains("%5c")
+        && resource.split('/').all(|part| {
+            !part.is_empty()
+                && !matches!(
+                    part.to_ascii_lowercase().as_str(),
+                    "." | ".." | "%2e" | "%2e%2e" | ".%2e" | "%2e."
+                )
+        })
 }
 
 /// Uses the production DNS/IP policy; tests may opt into literal loopback-only targets.
@@ -653,7 +674,6 @@ async fn rewrite_mpd(
                     headers,
                     &name,
                     &event,
-                    reader.decoder(),
                 )
                 .await?;
                 writer
@@ -703,6 +723,15 @@ async fn rewrite_mpd(
                         .write_event(Event::Text(event.into_owned()))
                         .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
                 }
+            }
+            Ok(Event::GeneralRef(_event))
+                if frames.last().is_some_and(|frame| {
+                    frame.is_base_url || frame.name == "Location" || frame.name == "PatchLocation"
+                }) =>
+            {
+                return Err(dash_error(
+                    "referência de entidade em URL DASH não é suportada",
+                ));
             }
             Ok(Event::End(event)) => {
                 if let Some(frame) = frames.pop() {
@@ -771,7 +800,7 @@ async fn rewrite_mpd_attributes(
         let key = String::from_utf8_lossy(attribute.key.as_ref()).to_string();
         let local_key = xml_local_name(key.as_bytes());
         let value = attribute
-            .normalized_value()
+            .normalized_value(quick_xml::XmlVersion::Implicit1_0)
             .map_err(|_| dash_error("valor de atributo XML inválido no manifesto DASH"))?
             .into_owned();
         let is_template = element == "SegmentTemplate"
@@ -791,9 +820,10 @@ async fn rewrite_mpd_attributes(
         } else {
             value
         };
-        output.push_attribute((key.as_str(), rewritten.as_str()));
+        let escaped = quick_xml::escape::escape(&rewritten);
+        output.push_attribute((key.as_str(), escaped.as_ref()));
     }
-    Ok(output)
+    Ok(output.into_owned())
 }
 
 /// Preserva cabeçalhos sensíveis somente quando o recurso continua na origem inicial.
