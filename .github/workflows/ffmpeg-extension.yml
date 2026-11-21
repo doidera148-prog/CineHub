@@ -21,7 +21,7 @@ env:
   CMAKE_VERSION: "3.22.1"
   # Nível da API do build nativo: igual ao alvo do CMake do Media3 (21). Usar outro nível quebra o link.
   NATIVE_API_LEVEL: "21"
-  RELEASE_TAG: "ffmpeg-ext-1.4.1"
+  RELEASE_TAG: "ffmpeg-ext-1.4.1-r2"
 
 jobs:
   build:
