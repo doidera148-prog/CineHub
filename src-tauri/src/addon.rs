@@ -627,18 +627,33 @@ async fn read_body(resp: &mut reqwest::Response, max: usize) -> Result<Vec<u8>, 
     if !status.is_success() {
         return Err(format!("HTTP {status}"));
     }
-    let mut body = Vec::new();
+    if resp.content_length().is_some_and(|length| length > max as u64) {
+        return Err("resposta grande demais".into());
+    }
+    let capacity = resp
+        .content_length()
+        .unwrap_or(0)
+        .min(max as u64) as usize;
+    let mut body = Vec::with_capacity(capacity);
     while let Some(chunk) = resp
         .chunk()
         .await
         .map_err(|e| format!("falha ao ler resposta: {e}"))?
     {
-        if body.len() + chunk.len() > max {
+        if body.len().saturating_add(chunk.len()) > max {
             return Err("resposta grande demais".into());
         }
         body.extend_from_slice(&chunk);
     }
     Ok(body)
+}
+
+/// Lê uma resposta já recebida sem permitir que seu corpo ultrapasse o limite.
+pub async fn read_response_capped(
+    resp: &mut reqwest::Response,
+    max: usize,
+) -> Result<Vec<u8>, String> {
+    read_body(resp, max).await
 }
 
 /// Codifica um segmento de URL, mantendo ":" (usado em ids como "tt123:1:2").
@@ -663,6 +678,42 @@ mod tests {
             transport_url: "https://addon.example/manifest.json".into(),
             manifest: serde_json::from_str(json).unwrap(),
         }
+    }
+
+    #[tokio::test]
+    async fn response_reader_rejects_chunked_body_over_limit() {
+        use axum::{
+            body::{Body, Bytes},
+            http::Response,
+            routing::get,
+            Router,
+        };
+
+        let app = Router::new().route("/", get(|| async {
+            let chunks = futures::stream::iter(vec![
+                Ok::<_, std::io::Error>(Bytes::from_static(b"1234")),
+                Ok::<_, std::io::Error>(Bytes::from_static(b"5678")),
+            ]);
+            Response::new(Body::from_stream(chunks))
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        let mut response = client
+            .get(format!("http://{address}/"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.content_length(), None);
+        assert!(read_body(&mut response, 6).await.is_err());
+
+        server.abort();
     }
 
     #[test]
