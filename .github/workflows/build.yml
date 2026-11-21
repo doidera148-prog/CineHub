@@ -307,10 +307,13 @@ jobs:
           EXT=src-tauri/plugins/tauri-plugin-exoplayer/android
           AAR_NAME=media3-decoder-ffmpeg-1.4.1.aar
           AAR="$EXT/libs/$AAR_NAME"
+          # Use somente o release já publicado e aprovado por SHA-256.
+          # O candidato r2 só deve substituir esta versão após publicação e validação do novo digest.
+          FFMPEG_RELEASE_TAG='ffmpeg-ext-1.4.1'
           EXPECTED_SHA256='8d7cc27e1fbae9673437909032d955cb16fd8993bc9b9e52b54a2ec34900b4cf'
           mkdir -p "$EXT/libs"
           rm -f "$AAR"
-          if gh release download ffmpeg-ext-1.4.1 --pattern "$AAR_NAME" --dir "$EXT/libs"; then
+          if gh release download "$FFMPEG_RELEASE_TAG" --pattern "$AAR_NAME" --dir "$EXT/libs"; then
             printf '%s  %s\n' "$EXPECTED_SHA256" "$AAR" | sha256sum --check --status || {
               echo "::error::SHA-256 do AAR FFmpeg não corresponde ao artefato aprovado."
               exit 1
