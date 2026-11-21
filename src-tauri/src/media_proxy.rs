@@ -1,7 +1,7 @@
 //! Proxy HTTP local autenticado para fontes de vídeo.
 //!
-//! HTTP progressivo mantém streaming em blocos e Range; playlists HLS e todos os recursos
-//! filhos são reescritos para URLs locais autenticadas. DASH permanece desabilitado.
+//! HTTP progressivo mantém streaming em blocos e Range; playlists HLS e manifestos DASH
+//! reescrevem playlists, templates e recursos filhos para URLs locais autenticadas.
 use std::{
     collections::HashMap,
     net::SocketAddr,
@@ -20,7 +20,8 @@ use axum::{
 use futures::stream;
 use quick_xml::{
     events::{BytesStart, BytesText, Event},
-    Reader, Writer,
+    reader::Reader,
+    writer::Writer,
 };
 use reqwest::{Client, Url};
 use serde_json::Value;
@@ -624,7 +625,6 @@ async fn rewrite_mpd(
                     headers,
                     &name,
                     &event,
-                    reader.decoder(),
                 )
                 .await?;
                 frames.push(MpdFrame {
@@ -763,7 +763,6 @@ async fn rewrite_mpd_attributes(
     headers: &[(header::HeaderName, HeaderValue)],
     element: &str,
     event: &BytesStart<'_>,
-    decoder: quick_xml::encoding::Decoder,
 ) -> Result<BytesStart<'static>, (StatusCode, String)> {
     let name = String::from_utf8_lossy(event.name().as_ref()).to_string();
     let mut output = BytesStart::new(name.as_str());
@@ -772,7 +771,7 @@ async fn rewrite_mpd_attributes(
         let key = String::from_utf8_lossy(attribute.key.as_ref()).to_string();
         let local_key = xml_local_name(key.as_bytes());
         let value = attribute
-            .decode_and_unescape_value(decoder)
+            .normalized_value()
             .map_err(|_| dash_error("valor de atributo XML inválido no manifesto DASH"))?
             .into_owned();
         let is_template = element == "SegmentTemplate"
