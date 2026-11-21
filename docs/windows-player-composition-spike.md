@@ -4,6 +4,20 @@
 
 Replace the embedded libmpv child HWND (wid) with libmpv's render API so video pixels can be composed with the CineHub WebView2 UI. This is a Windows-only stability fix for the native mpv window/input conflict. Android/Google TV (ExoPlayer), Linux and macOS playback must remain unchanged.
 
+## Current implementation status — 2026-11-21
+
+The chronological notes below record how the Windows composition work evolved. Some earlier checkpoints describe composition as opt-in or the standard HWND path as the default; those statements were accurate at the time but are superseded by the current code on `main`.
+
+- Windows builds compiled with the `mpv` feature enable `CINEHUB_WEBVIEW2_COMPOSITION_POC` before Tauri creates the window. Set `CINEHUB_DISABLE_WEBVIEW2_COMPOSITION=1` to force the conventional HWND host for diagnosis/rollback.
+- The vendored Wry host creates a WebView2 composition controller and a DirectComposition tree with the WebView above a video swap-chain visual. The host shares its D3D11 device/backbuffer with libmpv's D3D11 render API.
+- The HTML player controls expose pause/play, seek, volume, mute, fullscreen, audio-track selection and subtitle selection/disable. Track-language preferences are persisted and restored.
+- The player has a bounded D3D11 device-loss recovery path: it releases the old libmpv render context before rebuilding host resources on the window thread, then creates a new render context. Only one automatic attempt is made per playback.
+- The existing Windows CI job runs the native libmpv/D3D11 smoke test. That test covers render-context creation, rendering to a composition swap chain, `Present`, and a controlled device/context recreation.
+- **Still pending:** physical Windows acceptance of the full visual tree and recovery path, including alpha/transparency and z-order, real GPU device loss, DPI/resize/fullscreen, pointer/touch behavior and repeated open/close cycles. CI success alone does not establish these behaviors.
+
+Android/Google TV remains on ExoPlayer; Linux/macOS and Windows builds without `mpv` retain the WebView player path. No Android ABI or platform player behavior is changed by this Windows integration.
+
+
 ## Verified constraints
 
 - libmpv exposes a Direct3D 11 render backend: create a render context with MPV_RENDER_API_TYPE_D3D11, then render into an application-owned ID3D11Texture2D render target.
