@@ -17,6 +17,8 @@
   let remoteMode = false;
   let lastMainFocus = null;
   let focusBeforeModal = null;
+  let pendingRouteFocus = false;
+  let routeFocusOrigin = null;
   let lastBackAt = 0;
 
   const directionOf = (event) => DIRECTIONS[event.key] || KEYCODE_DIRECTIONS[event.keyCode] || null;
@@ -196,6 +198,27 @@
     }
   }
 
+  // Recupera o foco assim que uma rota aberta pelo D-pad termina de renderizar.
+  function restorePendingRouteFocus() {
+    if (!pendingRouteFocus || !remoteMode || activeModal()) return;
+
+    const current = document.activeElement;
+    if (current && current !== document.body && current.isConnected && isVisible(current)) {
+      // Aguarda o router remover o controle da tela anterior. Se o usuário já moveu
+      // o foco para outro lugar, respeita essa escolha em vez de roubá-lo.
+      if (current === routeFocusOrigin) return;
+      pendingRouteFocus = false;
+      routeFocusOrigin = null;
+      return;
+    }
+
+    const first = focusables(document.querySelector('#view'))[0];
+    if (first && focusElement(first)) {
+      pendingRouteFocus = false;
+      routeFocusOrigin = null;
+    }
+  }
+
   // Modais prendem o foco e devolvem-no ao elemento que os abriu.
   const observer = new MutationObserver(() => {
     const modal = activeModal();
@@ -211,6 +234,8 @@
       const previous = focusBeforeModal;
       focusBeforeModal = null;
       requestAnimationFrame(() => focusElement(previous));
+    } else {
+      restorePendingRouteFocus();
     }
   });
   observer.observe(document.body, { subtree: true, childList: true, attributes: true,
@@ -320,17 +345,22 @@
     // focusin também ocorre após toques. O modo remoto é ativado somente
     // por uma navegação explícita via D-pad/teclado em handleDirection.
   });
-  document.addEventListener('pointerdown', () => { remoteMode = false; }, true);
+  document.addEventListener('pointerdown', () => {
+    remoteMode = false;
+    pendingRouteFocus = false;
+    routeFocusOrigin = null;
+  }, true);
   window.addEventListener('hashchange', () => {
-    if (!remoteMode) return;
-    requestAnimationFrame(() => {
-      if (document.activeElement && document.activeElement !== document.body &&
-          document.activeElement.isConnected && isVisible(document.activeElement)) return;
-      // Durante a troca de rota o conteúdo pode estar temporariamente vazio.
-      // Não use a busca do topo como fallback: isso rouba o foco ao abrir detalhes.
-      const content = document.querySelector('#view');
-      const first = focusables(content)[0];
-      if (first) focusElement(first);
-    });
+    if (!remoteMode) {
+      pendingRouteFocus = false;
+      routeFocusOrigin = null;
+      return;
+    }
+    const current = document.activeElement;
+    routeFocusOrigin = current?.closest?.('#view') ? current : null;
+    pendingRouteFocus = true;
+    // A tela pode exibir um estado de carregamento antes de montar seus botões.
+    // A tentativa imediata cobre rotas síncronas; o observer cobre as assíncronas.
+    requestAnimationFrame(restorePendingRouteFocus);
   });
 })();
