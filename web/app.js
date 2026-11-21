@@ -2019,6 +2019,7 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
   try {
     const command = IS_ANDROID ? 'plugin:exoplayer|play' : 'player_play';
     const args = { url: stream.url, startMs };
+    if (IS_ANDROID && stream.mimeType) args.mimeType = stream.mimeType;
     // Android recebe todas as faixas para seleção no ExoPlayer; desktop usa a preferida.
     if (IS_ANDROID) {
       args.subtitles = await subtitlePayload(stream, subs);
@@ -2096,13 +2097,16 @@ async function play(stream, label, id, meta, subs) {
   if (window.CineHubLib.shouldUseMediaProxy(stream)) {
     try {
       const originalUrl = stream.url;
+      const mediaMimeType = stream.mimeType || (/\.mpd(\?|$)/i.test(originalUrl)
+        ? 'application/dash+xml'
+        : (/\.m3u8(\?|$)/i.test(originalUrl) ? 'application/x-mpegURL' : ''));
       stream = {
         ...stream,
-        mimeType: stream.mimeType || (/\.m3u8(\?|$)/i.test(originalUrl) ? 'application/x-mpegURL' : ''),
+        mimeType: mediaMimeType,
         url: await call('media_proxy_url', {
           url: originalUrl,
           behaviorHints: stream.behaviorHints || null,
-          mimeType: stream.mimeType || null,
+          mimeType: mediaMimeType || null,
         }),
       };
     } catch (e) {
