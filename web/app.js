@@ -2428,7 +2428,14 @@ vjsPlayer.on('pause', () => saveProgress(true));
 // Terminou: marca como assistido (sai de "Continuar assistindo" e vira o selo nos cartazes)
 // e oferece o próximo episódio, quando há.
 vjsPlayer.on('ended', () => {
-  markWatched(current?.id);
+  if (current) {
+    const finalProgress = window.CineHubLib.completedPlaybackProgress(
+      vjsPlayer.currentTime(),
+      vjsPlayer.duration(),
+    );
+    saveProgress(true, finalProgress);
+    markWatched(current.id);
+  }
   offerNext();
 });
 

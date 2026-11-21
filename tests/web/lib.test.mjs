@@ -100,6 +100,20 @@ test('progresso fica entre 0 e 100 e aceita duração desconhecida', () => {
   assert.equal(L.progressPercent(null), 0);
 });
 
+test('conclusão salva a duração final e usa o tempo atual quando não há duração', () => {
+  const knownDuration = L.completedPlaybackProgress(598.4, 600);
+  assert.equal(knownDuration.t, 600);
+  assert.equal(knownDuration.duration, 600);
+
+  const unknownDuration = L.completedPlaybackProgress(598.4, 0);
+  assert.equal(unknownDuration.t, 598.4);
+  assert.equal(unknownDuration.duration, 0);
+
+  const invalidValues = L.completedPlaybackProgress(-3, NaN);
+  assert.equal(invalidValues.t, 0);
+  assert.equal(invalidValues.duration, 0);
+});
+
 test('cleanProgress preserva o marcador de assistido e descarta lixo', () => {
   const p = L.cleanProgress({ t: '12', duration: 'x', watched: true });
   assert.equal(p.t, 12);

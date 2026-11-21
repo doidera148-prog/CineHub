@@ -139,6 +139,16 @@
     };
   }
 
+  // Ao terminar, usa a duração conhecida como posição final; sem duração, preserva o tempo atual.
+  function completedPlaybackProgress(currentTime, duration) {
+    const safeDuration = Math.max(0, num(duration));
+    const safeCurrentTime = Math.max(0, num(currentTime));
+    return {
+      t: safeDuration > 0 ? safeDuration : safeCurrentTime,
+      duration: safeDuration,
+    };
+  }
+
   // Percentual assistido (0 a 100) para a barra sobre o cartaz.
   function progressPercent(p) {
     if (!p || !(p.duration > 0)) return 0;
@@ -347,6 +357,7 @@
     mergeBackupData,
     createBackupData,
     cleanProgress,
+    completedPlaybackProgress,
     progressPercent,
     sortStreams,
     streamContainer,
