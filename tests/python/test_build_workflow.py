@@ -582,9 +582,21 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn('gh release download "$FFMPEG_RELEASE_TAG"', ffmpeg)
         self.assertIn("8d7cc27e1fbae9673437909032d955cb16fd8993bc9b9e52b54a2ec34900b4cf", ffmpeg)
         self.assertIn("sha256sum --check --status", ffmpeg)
+        self.assertIn('rm -f "$AAR"', ffmpeg)
+        self.assertIn("::error::SHA-256 do AAR FFmpeg", ffmpeg)
+        self.assertIn("::warning::Extensão FFmpeg não publicada/disponível", ffmpeg)
+        self.assertNotIn("continue-on-error: true", ffmpeg)
 
         extension_workflow = (ROOT / ".github/workflows/ffmpeg-extension.yml").read_text(encoding="utf-8")
-        candidate_release = re.search(r'(?m)^  RELEASE_TAG: "([^"]+)"
+        candidate_release = re.search(r'(?m)^  RELEASE_TAG: "([^"]+)"$', extension_workflow)
+        self.assertIsNotNone(candidate_release, "O workflow de extensão precisa declarar a tag candidata")
+        self.assertEqual(candidate_release.group(1), "ffmpeg-ext-1.4.1-r2")
+        self.assertNotEqual(
+            candidate_release.group(1),
+            approved_release.group(1),
+            "Um AAR candidato não pode ser consumido pelo Android antes da validação e promoção do SHA-256",
+        )
+        self.assertIn("só então atualize FFMPEG_RELEASE_TAG e EXPECTED_SHA256", extension_workflow)
 
     def test_windows_mpv_archive_is_hash_verified_and_cache_key_includes_digest(self):
         desktop = job_block(self.workflow, "desktop")
