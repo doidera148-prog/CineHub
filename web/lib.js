@@ -149,6 +149,17 @@
     };
   }
 
+  // Retoma somente progresso parcial; nunca procura retomar itens assistidos ou já no fim.
+  // A duração atual do player prevalece sobre a duração salva quando estiver disponível.
+  function resumePosition(progress, duration = 0) {
+    if (!progress || typeof progress !== 'object' || progress.watched === true) return 0;
+    const position = Math.max(0, num(progress.t));
+    if (position <= 5) return 0;
+    const total = Math.max(0, num(duration)) || Math.max(0, num(progress.duration));
+    if (total > 0 && position >= total - 15) return 0;
+    return position;
+  }
+
   // Percentual assistido (0 a 100) para a barra sobre o cartaz.
   function progressPercent(p) {
     if (!p || !(p.duration > 0)) return 0;
@@ -358,6 +369,7 @@
     createBackupData,
     cleanProgress,
     completedPlaybackProgress,
+    resumePosition,
     progressPercent,
     sortStreams,
     streamContainer,
