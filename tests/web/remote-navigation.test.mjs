@@ -230,6 +230,64 @@ if (!(await page.locator('#toast').innerText()).includes('Pressione Voltar de no
 const secondHomeBack = await page.evaluate(() => window.__cinehubBack());
 if (secondHomeBack !== false) failures.push('[remote-navigation] segunda pressão rápida deve permitir sair');
 
+// Revalida os movimentos essenciais em resoluções reais de sala de estar.
+const tvViewports = [
+  { width: 1280, height: 720, label: 'Google TV 720p' },
+  { width: 1920, height: 1080, label: 'Google TV 1080p' },
+  { width: 3840, height: 2160, label: 'Google TV 4K' },
+];
+
+for (const viewport of tvViewports) {
+  const tvPage = await browser.newPage({ viewport: { width: viewport.width, height: viewport.height } });
+  tvPage.on('pageerror', (error) => failures.push(`[${viewport.label}] erro JS: ${error.message}`));
+  await tvPage.setContent(`<!doctype html><html><head><style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 20px sans-serif; }
+    .sidebar { position: absolute; left: 0; top: 0; width: 180px; height: 100vh; }
+    #nav-main { display: flex; flex-direction: column; gap: 12px; }
+    #main-content { position: absolute; left: 200px; top: 0; width: calc(100vw - 220px); min-height: 100vh; }
+    #view { padding-top: 24px; }
+    .strip { display: flex; gap: 16px; width: max-content; height: 96px; margin-bottom: 72px; }
+    .strip a, #nav-main a { display: inline-flex; align-items: center; justify-content: center; width: 120px; height: 72px; }
+  </style></head><body>
+    <aside class="sidebar"><nav id="nav-main">
+      <a id="nav-home" href="#home" class="active" aria-current="page">Início</a>
+      <a id="nav-movies" href="#movies">Filmes</a>
+    </nav></aside>
+    <main id="main-content"><section id="view">
+      <div class="strip"><a id="card-1" href="#one">Filme 1</a><a id="card-2" href="#two">Filme 2</a><a id="card-3" href="#three">Filme 3</a></div>
+      <div class="strip"><a id="card-4" href="#four">Filme 4</a><a id="card-5" href="#five">Filme 5</a><a id="card-6" href="#six">Filme 6</a></div>
+    </section></main>
+    <div id="toast" class="hidden"></div>
+  </body></html>`);
+  await tvPage.addScriptTag({ url: `${base}/remote-navigation.js` });
+
+  const expectTvFocus = async (id, movement) => {
+    const actual = await tvPage.evaluate(() => document.activeElement?.id);
+    if (actual !== id) {
+      failures.push(`[${viewport.label}] ${movement}: esperado ${id}, recebido ${actual}`);
+    }
+  };
+
+  await tvPage.locator('#card-2').focus();
+  await tvPage.keyboard.press('ArrowRight');
+  await expectTvFocus('card-3', 'D-pad direita no trilho');
+  await tvPage.keyboard.press('ArrowDown');
+  await expectTvFocus('card-6', 'D-pad baixo entre trilhos');
+  await tvPage.keyboard.press('ArrowUp');
+  await expectTvFocus('card-3', 'D-pad cima entre trilhos');
+
+  await tvPage.locator('#card-4').focus();
+  await tvPage.keyboard.press('ArrowLeft');
+  await expectTvFocus('nav-home', 'D-pad esquerda na primeira coluna');
+  await tvPage.keyboard.press('ArrowDown');
+  await expectTvFocus('nav-movies', 'D-pad baixo no menu');
+  await tvPage.keyboard.press('ArrowRight');
+  await expectTvFocus('card-4', 'D-pad direita restaura o último foco no conteúdo');
+
+  await tvPage.close();
+}
+
 if (errors.length) failures.push(...errors.map((error) => `[remote-navigation] erro JS: ${error}`));
 await browser.close();
 server.close();
