@@ -152,7 +152,8 @@ await page.waitForTimeout(50);
 await expectFocus('', 'toque ao abrir detalhes não deve selecionar a busca');
 
 // Mesmo com navegação por D-pad, uma tela de carregamento vazia não deve
-// direcionar o foco para a barra de pesquisa do topo.
+// direcionar o foco para a barra de pesquisa do topo; quando o conteúdo chegar,
+ // o primeiro controle útil da nova tela deve receber o foco.
 await page.evaluate(() => {
   const card = document.createElement('a');
   card.id = 'keyboard-card';
@@ -168,6 +169,19 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(50);
 await expectFocus('', 'carregamento de detalhes via D-pad não deve focar a busca');
+await page.evaluate(() => {
+  setTimeout(() => {
+    const primary = document.createElement('button');
+    primary.id = 'detail-primary';
+    primary.textContent = 'Reproduzir';
+    document.querySelector('#view').append(primary);
+  }, 120);
+});
+await page.waitForFunction(() => document.activeElement?.id === 'detail-primary');
+await expectFocus('detail-primary', 'foco deve ser restaurado quando os controles da tela carregarem');
+if (await page.evaluate(() => document.activeElement?.id === 'q')) {
+  failures.push('[remote-navigation] foco de rota assíncrona foi desviado para a busca');
+}
 
 if (errors.length) failures.push(...errors.map((error) => `[remote-navigation] erro JS: ${error}`));
 await browser.close();
