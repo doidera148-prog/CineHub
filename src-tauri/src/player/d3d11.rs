@@ -98,6 +98,7 @@ pub(super) struct D3d11RenderContext<'a> {
     context: NonNull<MpvRenderContextOpaque>,
     device: ID3D11Device,
     frame_pending: Arc<AtomicBool>,
+    initial_frame_pending: AtomicBool,
     _mpv: PhantomData<&'a Mpv>,
 }
 
@@ -218,6 +219,7 @@ impl<'a> D3d11RenderContext<'a> {
             context,
             device: device.clone(),
             frame_pending,
+            initial_frame_pending: AtomicBool::new(true),
             _mpv: PhantomData,
         })
     }
@@ -294,7 +296,9 @@ impl<'a> D3d11RenderContext<'a> {
         if !self.frame_pending.swap(false, Ordering::AcqRel) {
             return false;
         }
-        self.update() & MPV_RENDER_UPDATE_FRAME != 0
+        let update_flags = self.update();
+        let initial_frame = self.initial_frame_pending.swap(false, Ordering::AcqRel);
+        update_flags & MPV_RENDER_UPDATE_FRAME != 0 || initial_frame
     }
 }
 
