@@ -117,11 +117,35 @@ class PlayerControllerFocusPolicyTest {
     }
 
     @Test
-    fun dpadCanReachNextEpisodeAndReturnToPlayback() {
+    fun dpadCanReachNextEpisodeActionsAndReturnToPlayback() {
         assertEquals(
             FocusNode.NEXT_EPISODE,
             PlayerControllerFocusPolicy.nextFocusTarget(
                 FocusNode.SUBTITLES, FocusDirection.LEFT, false, hasNextEpisode = true,
+            ),
+        )
+        assertEquals(
+            FocusNode.NEXT_CANCEL,
+            PlayerControllerFocusPolicy.nextFocusTarget(
+                FocusNode.NEXT_EPISODE, FocusDirection.RIGHT, false, hasNextEpisode = true,
+            ),
+        )
+        assertEquals(
+            FocusNode.NEXT_EPISODE,
+            PlayerControllerFocusPolicy.nextFocusTarget(
+                FocusNode.NEXT_CANCEL, FocusDirection.LEFT, false, hasNextEpisode = true,
+            ),
+        )
+        assertEquals(
+            FocusNode.SUBTITLES,
+            PlayerControllerFocusPolicy.nextFocusTarget(
+                FocusNode.NEXT_CANCEL, FocusDirection.UP, false, hasNextEpisode = true,
+            ),
+        )
+        assertEquals(
+            FocusNode.PLAY_PAUSE,
+            PlayerControllerFocusPolicy.nextFocusTarget(
+                FocusNode.NEXT_CANCEL, FocusDirection.DOWN, false, hasNextEpisode = true,
             ),
         )
         assertEquals(
