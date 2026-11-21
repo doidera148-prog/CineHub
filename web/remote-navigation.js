@@ -341,6 +341,14 @@
   };
 
   document.addEventListener('focusin', (event) => {
+    const modal = activeModal();
+    const previous = event.relatedTarget;
+    // showModal() pode mover o foco automaticamente antes do MutationObserver
+    // executar; relatedTarget preserva o controle que abriu o diálogo.
+    if (modal?.contains(event.target) && previous && previous !== document.body
+      && !modal.contains(previous) && previous.isConnected) {
+      focusBeforeModal = previous;
+    }
     if (event.target?.closest?.('#main-content') && !event.target.closest('.hidden')) lastMainFocus = event.target;
     // focusin também ocorre após toques. O modo remoto é ativado somente
     // por uma navegação explícita via D-pad/teclado em handleDirection.
