@@ -111,6 +111,18 @@ pub(super) enum RenderError {
     Other(String),
 }
 
+#[cfg(debug_assertions)]
+impl RenderError {
+    pub(super) fn simulated_device_loss() -> Self {
+        const DXGI_ERROR_DEVICE_REMOVED: i32 = 0x887A0005_u32 as i32;
+        Self::DeviceLost {
+            operation: "diagnóstico controlado",
+            hresult: DXGI_ERROR_DEVICE_REMOVED,
+            removal_reason: DXGI_ERROR_DEVICE_REMOVED,
+        }
+    }
+}
+
 impl fmt::Display for RenderError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
