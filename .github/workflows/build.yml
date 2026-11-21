@@ -67,7 +67,7 @@ jobs:
             -not -path 'web/vendor/*' -print0 \
             | xargs -0 -r -n1 node --check
       - name: Detectar variáveis e imports JavaScript não utilizados
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "24"
       - name: Executar ESLint 10 para detectar variáveis e imports não utilizados
@@ -108,7 +108,7 @@ jobs:
       - name: Clippy (avisos viram erro)
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
       - name: Segurança, avisos, licenças e fontes das dependências (cargo-deny)
-        uses: EmbarkStudios/cargo-deny-action@v2
+        uses: EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd # v2
         with:
           manifest-path: src-tauri/Cargo.toml
           command: check advisories bans licenses sources
@@ -117,7 +117,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "24"
       - name: Instalar dependências do teste
@@ -179,7 +179,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/mpv-dev
-          key: libmpv-dev-x86_64-20261108-git-55d3feb45c
+          key: libmpv-dev-x86_64-20261108-git-55d3feb45c-sha256-7c147cb7ceab
       - name: Instalar 7-Zip
         if: matrix.platform == 'windows-latest' && steps.mpv-cache.outputs.cache-hit != 'true'
         run: choco install 7zip.install --no-progress -y
@@ -193,6 +193,11 @@ jobs:
           curl.exe --location --fail --retry 3 --output $archive $url
           if ($LASTEXITCODE -ne 0) { throw 'Download do pacote libmpv falhou.' }
           if ((Get-Item $archive).Length -lt 1000000) { throw 'O servidor retornou uma página de erro em vez do pacote libmpv.' }
+          $expectedSha256 = '7c147cb7ceaba717414e782ef4398de728f679db6e86daaa8aeb175670cb7994'
+          $actualSha256 = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) {
+            throw "SHA-256 inválido para libmpv: esperado $expectedSha256; obtido $actualSha256."
+          }
           $dest = Join-Path $env:RUNNER_TEMP 'mpv-dev'
           & 'C:\Program Files\7-Zip\7z.exe' x $archive "-o$dest" -y
           if ($LASTEXITCODE -ne 0) { throw 'Falha ao extrair o pacote libmpv.' }
@@ -202,7 +207,7 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/mpv-dev
-          key: libmpv-dev-x86_64-20261108-git-55d3feb45c
+          key: libmpv-dev-x86_64-20261108-git-55d3feb45c-sha256-7c147cb7ceab
       - name: Preparar DLLs e variáveis do libmpv
         if: matrix.platform == 'windows-latest'
         shell: pwsh
@@ -218,7 +223,7 @@ jobs:
           "MPV_DLL=$($dll.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Criar import library MSVC do libmpv
         if: matrix.platform == 'windows-latest'
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
         with:
           arch: x64
       - name: Gerar mpv.lib
@@ -282,7 +287,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6
         with:
           distribution: temurin
           java-version: "17"
@@ -295,18 +300,24 @@ jobs:
           echo "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
           test -x "$ANDROID_HOME/platform-tools/adb"
           echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
-      - name: Extensão FFmpeg do Media3 (opcional, do release ffmpeg-ext-1.4.1)
-        continue-on-error: true
+      - name: Extensão FFmpeg do Media3 (opcional, artefato SHA-256 fixado)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p src-tauri/plugins/tauri-plugin-exoplayer/android/libs
-          gh release download ffmpeg-ext-1.4.1 --pattern 'media3-decoder-ffmpeg-1.4.1.aar' \
-            --dir src-tauri/plugins/tauri-plugin-exoplayer/android/libs \
-            || echo "Extensão FFmpeg ainda não publicada: o APK sai sem ela."
-          # Desempacota o AAR: classes.jar (Java/Kotlin) em libs/ e bibliotecas nativas em jniLibs/.
           EXT=src-tauri/plugins/tauri-plugin-exoplayer/android
-          AAR="$EXT/libs/media3-decoder-ffmpeg-1.4.1.aar"
+          AAR_NAME=media3-decoder-ffmpeg-1.4.1.aar
+          AAR="$EXT/libs/$AAR_NAME"
+          EXPECTED_SHA256='8d7cc27e1fbae9673437909032d955cb16fd8993bc9b9e52b54a2ec34900b4cf'
+          mkdir -p "$EXT/libs"
+          if gh release download ffmpeg-ext-1.4.1 --pattern "$AAR_NAME" --dir "$EXT/libs"; then
+            printf '%s  %s\n' "$EXPECTED_SHA256" "$AAR" | sha256sum --check --status || {
+              echo "::error::SHA-256 do AAR FFmpeg não corresponde ao artefato aprovado."
+              exit 1
+            }
+          else
+            echo "::warning::Extensão FFmpeg não publicada/disponível; o APK será gerado sem ela."
+          fi
+          # Desempacota somente o AAR já validado: classes.jar e bibliotecas nativas.
           if [ -f "$AAR" ]; then
             unzip -o -q "$AAR" classes.jar 'jni/*' -d "$RUNNER_TEMP/ffmpeg-aar"
             mv "$RUNNER_TEMP/ffmpeg-aar/classes.jar" "$EXT/libs/media3-decoder-ffmpeg-1.4.1-classes.jar"
@@ -577,13 +588,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           path: artifacts
       - name: Listar arquivos
         run: find artifacts -type f | sort
       - name: Publicar binários no GitHub Releases
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: build-${{ github.run_number }}
           name: CineHub build ${{ github.run_number }}
