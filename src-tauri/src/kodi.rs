@@ -74,7 +74,7 @@ async fn rpc(
     if let Some(user) = username.filter(|u| !u.is_empty()) {
         request = request.basic_auth(user, password);
     }
-    let response = request
+    let mut response = request
         .send()
         .await
         .map_err(|e| format!("Falha ao conectar ao Kodi: {e}"))?;
