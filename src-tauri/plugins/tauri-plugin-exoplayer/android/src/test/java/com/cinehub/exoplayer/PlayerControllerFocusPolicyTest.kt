@@ -25,6 +25,34 @@ class PlayerControllerFocusPolicyTest {
     }
 
     @Test
+    fun backDismissesOnlyAVisibleActiveNextEpisodeCountdown() {
+        assertEquals(
+            true,
+            NextEpisodeAutoPlayPolicy.shouldDismissCountdownOnBack(
+                panelVisible = true, countdownActive = true,
+            ),
+        )
+        assertEquals(
+            false,
+            NextEpisodeAutoPlayPolicy.shouldDismissCountdownOnBack(
+                panelVisible = false, countdownActive = true,
+            ),
+        )
+        assertEquals(
+            false,
+            NextEpisodeAutoPlayPolicy.shouldDismissCountdownOnBack(
+                panelVisible = true, countdownActive = false,
+            ),
+        )
+        assertEquals(
+            false,
+            NextEpisodeAutoPlayPolicy.shouldDismissCountdownOnBack(
+                panelVisible = false, countdownActive = false,
+            ),
+        )
+    }
+
+    @Test
     fun focusedTrackSelectorDisablesControllerAutoHide() {
         assertEquals(0, PlayerControllerFocusPolicy.timeoutMs(overlayControlHasFocus = true))
     }
