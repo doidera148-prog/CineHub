@@ -223,7 +223,6 @@ body.tv-mode {
 .tv-mode #view :where(input, select, button, .stream, .addon) { min-width: 0; max-width: 100%; }
 @media (max-width: 1100px) {
   .tv-mode .grid { grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); }
-  .tv-mode .card { flex-basis: auto; }
 }
 
 /* Escala 4K: alvos maiores e mais espaço para leitura a distância.
@@ -290,9 +289,20 @@ body.tv-mode {
   box-shadow: 0 0 0 10px rgba(229,9,20,.68), 0 18px 42px rgba(0,0,0,.55);
 }
 @media (max-height: 1000px) {
-  .tv-4k.tv-mode .sidebar { padding-block: 18px; gap: 18px; }
-  .tv-4k.tv-mode #nav-main { gap: 5px; }
-  .tv-4k.tv-mode #nav-main a { min-height: 68px; font-size: 14px; }
-  .tv-4k.tv-mode #nav-main .ico { font-size: 27px; }
+  /* Em TVs 4K com densidade alta, a área lógica pode ter apenas 540–900px de altura.
+     Compacta o menu pela altura CSS disponível, sem perder os sete destinos. */
+  .tv-4k.tv-mode .sidebar {
+    padding-block: clamp(10px, 2vh, 18px);
+    gap: clamp(8px, 2vh, 18px);
+  }
+  .tv-4k.tv-mode .logo { font-size: clamp(1.35rem, 4vh, 2rem); }
+  .tv-4k.tv-mode #nav-main { gap: clamp(2px, .9vh, 5px); }
+  .tv-4k.tv-mode #nav-main a {
+    min-height: clamp(46px, 9vh, 68px);
+    gap: 3px;
+    padding: 5px 4px;
+    font-size: clamp(11px, 2.1vh, 14px);
+  }
+  .tv-4k.tv-mode #nav-main .ico { font-size: clamp(20px, 4vh, 27px); }
 }
 
