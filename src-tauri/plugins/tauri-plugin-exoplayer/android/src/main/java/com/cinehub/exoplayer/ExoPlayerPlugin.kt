@@ -93,8 +93,39 @@ internal object ExoPlayerUrlValidator {
 internal object PlayerControllerFocusPolicy {
     const val AUTO_HIDE_TIMEOUT_MS = 6_000
 
+    enum class FocusNode { PLAY_PAUSE, PROGRESS, AUDIO, SUBTITLES }
+    enum class FocusDirection { UP, DOWN, LEFT }
+
     fun timeoutMs(overlayControlHasFocus: Boolean): Int =
         if (overlayControlHasFocus) 0 else AUTO_HIDE_TIMEOUT_MS
+
+    /** Caminho previsível do D-pad entre reprodução, seletores de faixa e progresso. */
+    fun nextFocusTarget(
+        current: FocusNode,
+        direction: FocusDirection,
+        hasAudioSelector: Boolean,
+    ): FocusNode? = when (current) {
+        FocusNode.PLAY_PAUSE -> when (direction) {
+            FocusDirection.UP -> if (hasAudioSelector) FocusNode.AUDIO else FocusNode.SUBTITLES
+            FocusDirection.DOWN -> FocusNode.PROGRESS
+            FocusDirection.LEFT -> null
+        }
+        FocusNode.PROGRESS -> when (direction) {
+            FocusDirection.UP -> FocusNode.SUBTITLES
+            FocusDirection.DOWN -> FocusNode.PLAY_PAUSE
+            FocusDirection.LEFT -> null
+        }
+        FocusNode.AUDIO -> when (direction) {
+            FocusDirection.UP -> null
+            FocusDirection.DOWN -> FocusNode.SUBTITLES
+            FocusDirection.LEFT -> FocusNode.PLAY_PAUSE
+        }
+        FocusNode.SUBTITLES -> when (direction) {
+            FocusDirection.UP -> if (hasAudioSelector) FocusNode.AUDIO else FocusNode.PLAY_PAUSE
+            FocusDirection.DOWN -> FocusNode.PROGRESS
+            FocusDirection.LEFT -> FocusNode.PLAY_PAUSE
+        }
+    }
 }
 
 /** Trecho a pular (abertura, recapitulação, créditos), em segundos. */
@@ -194,6 +225,7 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         var availableAudioTracks: List<Pair<Tracks.Group, Int>> = emptyList()
         lateinit var audioButton: Button
         audioButton = Button(act).apply {
+            id = View.generateViewId()
             text = "Áudio"
             isAllCaps = false
             visibility = View.GONE
@@ -233,6 +265,7 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         var availableSubtitleTracks: List<Pair<Tracks.Group, Int>> = emptyList()
         lateinit var subtitleButton: Button
         subtitleButton = Button(act).apply {
+            id = View.generateViewId()
             text = "Legendas ▾"
             isAllCaps = false
             visibility = View.GONE
@@ -284,6 +317,38 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
             }
         }
         var hasMultipleAudioTracks = false
+
+        // A barra de progresso do Media3 (DefaultTimeBar) já aceita LEFT/RIGHT para
+        // avançar e retroceder; aqui conectamos o movimento vertical aos controles
+        // externos para que o D-pad não dependa apenas da busca geométrica do Android.
+        fun updatePlayerFocusNavigation() {
+            val focusViews = mapOf(
+                PlayerControllerFocusPolicy.FocusNode.PLAY_PAUSE to
+                    view.findViewById<View>(androidx.media3.ui.R.id.exo_play_pause),
+                PlayerControllerFocusPolicy.FocusNode.PROGRESS to
+                    view.findViewById<View>(androidx.media3.ui.R.id.exo_progress),
+                PlayerControllerFocusPolicy.FocusNode.AUDIO to audioButton,
+                PlayerControllerFocusPolicy.FocusNode.SUBTITLES to subtitleButton,
+            )
+            for ((node, source) in focusViews) {
+                if (source == null) continue
+                for (direction in PlayerControllerFocusPolicy.FocusDirection.values()) {
+                    val targetNode = PlayerControllerFocusPolicy.nextFocusTarget(
+                        node,
+                        direction,
+                        hasAudioSelector = hasMultipleAudioTracks,
+                    ) ?: continue
+                    val target = focusViews[targetNode] ?: continue
+                    if (target.id == View.NO_ID) continue
+                    when (direction) {
+                        PlayerControllerFocusPolicy.FocusDirection.UP -> source.nextFocusUpId = target.id
+                        PlayerControllerFocusPolicy.FocusDirection.DOWN -> source.nextFocusDownId = target.id
+                        PlayerControllerFocusPolicy.FocusDirection.LEFT -> source.nextFocusLeftId = target.id
+                    }
+                }
+            }
+        }
+
         fun updateTrackButtons(visible: Boolean) {
             // Não remova da hierarquia um seletor que ainda está focado pelo D-pad.
             val keepFocusedTrackButton = audioButton.hasFocus() || subtitleButton.hasFocus()
@@ -291,6 +356,7 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
             audioButton.visibility = if (hasMultipleAudioTracks && shouldShow) View.VISIBLE else View.GONE
             // Botão fica disponível mesmo sem faixa para explicar que a fonte não oferece legenda.
             subtitleButton.visibility = if (shouldShow) View.VISIBLE else View.GONE
+            updatePlayerFocusNavigation()
         }
         player.addListener(object : Player.Listener {
             override fun onTracksChanged(tracks: Tracks) {
