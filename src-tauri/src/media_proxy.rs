@@ -721,7 +721,11 @@ mod tests {
                 .unwrap()[..],
             b"segment"
         );
-        assert_eq!(*seen.lock().unwrap(), vec![false, false]);
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![false, false],
+            "cross-origin redirects must not forward credentials or origin context"
+        );
     }
 
     #[tokio::test]
