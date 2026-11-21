@@ -1,7 +1,7 @@
 //! Proxy HTTP local autenticado para fontes de vídeo.
 //!
-//! HTTP progressivo mantém streaming em blocos e Range; playlists HLS e todos os recursos
-//! filhos são reescritos para URLs locais autenticadas. DASH permanece desabilitado.
+//! HTTP progressivo mantém streaming em blocos e Range; playlists HLS e manifestos DASH
+//! reescrevem playlists, templates e recursos filhos para URLs locais autenticadas.
 use std::{
     collections::HashMap,
     net::SocketAddr,
@@ -12,12 +12,17 @@ use std::{
 use axum::{
     body::{Body, Bytes},
     extract::{Path, State},
-    http::{header, HeaderMap, HeaderValue, Method, StatusCode},
+    http::{header, HeaderMap, HeaderValue, Method, StatusCode, Uri},
     response::Response,
     routing::any,
     Router,
 };
 use futures::stream;
+use quick_xml::{
+    events::{BytesRef, BytesStart, BytesText, Event},
+    reader::Reader,
+    writer::Writer,
+};
 use reqwest::{Client, Url};
 use serde_json::Value;
 use tokio::{net::TcpListener, sync::RwLock};
@@ -31,6 +36,9 @@ struct Target {
     url: Url,
     headers: Vec<(header::HeaderName, HeaderValue)>,
     force_hls: bool,
+    force_dash: bool,
+    allow_suffix: bool,
+    default_query: Option<String>,
     expires: Instant,
 }
 
@@ -70,6 +78,7 @@ impl MediaProxy {
         };
         let app = Router::new()
             .route("/media/{token}", any(proxy_request))
+            .route("/media/{token}/{*resource}", any(proxy_child_request))
             .with_state(state.clone());
         tauri::async_runtime::spawn(async move {
             if let Err(e) = axum::serve(listener, app).await {
@@ -97,9 +106,6 @@ impl MediaProxy {
                     .into(),
             );
         }
-        if url.path().to_ascii_lowercase().ends_with(".mpd") {
-            return Err("DASH ainda não está habilitado no proxy".into());
-        }
         if !is_safe_proxy_url(&self.state, url.as_str()).await {
             return Err("fonte bloqueada: o proxy só aceita destinos públicos".into());
         }
@@ -112,21 +118,36 @@ impl MediaProxy {
         }
         let force_hls = mime_type.is_some_and(|m| m.to_ascii_lowercase().contains("mpegurl"))
             || url.path().to_ascii_lowercase().ends_with(".m3u8");
+        let force_dash = mime_type.is_some_and(|m| m.to_ascii_lowercase().contains("dash+xml"))
+            || url.path().to_ascii_lowercase().ends_with(".mpd");
         sessions.insert(
             token.clone(),
             Target {
                 url,
                 headers,
                 force_hls,
+                force_dash,
+                allow_suffix: false,
+                default_query: None,
                 expires: Instant::now() + SESSION_TTL,
             },
         );
-        Ok(format!(
-            "http://{}:{}/media/{}",
-            self.address.ip(),
-            self.address.port(),
-            token
-        ))
+        let route = if force_dash {
+            format!(
+                "http://{}:{}/media/{}/manifest.mpd",
+                self.address.ip(),
+                self.address.port(),
+                token
+            )
+        } else {
+            format!(
+                "http://{}:{}/media/{}",
+                self.address.ip(),
+                self.address.port(),
+                token
+            )
+        };
+        Ok(route)
     }
 }
 
@@ -167,6 +188,35 @@ async fn proxy_request(
     method: Method,
     incoming: HeaderMap,
 ) -> Result<Response, (StatusCode, String)> {
+    proxy_request_inner(state, token, None, None, method, incoming).await
+}
+
+async fn proxy_child_request(
+    State(state): State<ProxyState>,
+    Path((token, resource)): Path<(String, String)>,
+    method: Method,
+    incoming: HeaderMap,
+    uri: Uri,
+) -> Result<Response, (StatusCode, String)> {
+    proxy_request_inner(
+        state,
+        token,
+        Some(resource),
+        uri.query().map(str::to_owned),
+        method,
+        incoming,
+    )
+    .await
+}
+
+async fn proxy_request_inner(
+    state: ProxyState,
+    token: String,
+    resource: Option<String>,
+    child_query: Option<String>,
+    method: Method,
+    incoming: HeaderMap,
+) -> Result<Response, (StatusCode, String)> {
     if token.len() != 32 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err((StatusCode::NOT_FOUND, "não encontrado".into()));
     }
@@ -192,8 +242,36 @@ async fn proxy_request(
     }
     .ok_or((StatusCode::NOT_FOUND, "sessão expirada".into()))?;
 
+    let has_resource = resource.is_some();
+    let mut url = if let Some(resource) = resource {
+        if target.force_dash && resource == "manifest.mpd" {
+            target.url.clone()
+        } else {
+            if !target.allow_suffix || !valid_proxy_resource_path(&resource) {
+                return Err((StatusCode::BAD_REQUEST, "recurso DASH inválido".into()));
+            }
+            let base = target.url.clone();
+            let resolved = base
+                .join(&resource)
+                .map_err(|_| (StatusCode::BAD_REQUEST, "caminho DASH inválido".into()))?;
+            if resolved.origin() != base.origin()
+                || !resolved.username().is_empty()
+                || resolved.password().is_some()
+            {
+                return Err((StatusCode::FORBIDDEN, "destino DASH bloqueado".into()));
+            }
+            resolved
+        }
+    } else {
+        target.url.clone()
+    };
+    if has_resource {
+        if let Some(query) = child_query.as_deref().or(target.default_query.as_deref()) {
+            url.set_query(Some(query));
+        }
+    }
+
     let original_origin = target.url.origin();
-    let mut url = target.url;
     let mut response = None;
     for _ in 0..=MAX_REDIRECTS {
         if !url.username().is_empty()
@@ -245,18 +323,72 @@ async fn proxy_request(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_ascii_lowercase();
+    let declared_dash = target.force_dash
+        || content_type.contains("application/dash+xml")
+        || url.path().to_ascii_lowercase().ends_with(".mpd");
+    let mut upstream = upstream;
+    let mut builder = Response::builder().status(status);
+
+    if declared_dash && status.is_success() {
+        if method == Method::HEAD {
+            return builder
+                .header(header::CONTENT_TYPE, "application/dash+xml")
+                .header(header::CACHE_CONTROL, "no-store")
+                .header("access-control-allow-origin", "*")
+                .header("access-control-allow-methods", "GET, HEAD, OPTIONS")
+                .header("access-control-allow-headers", "Range, If-Range")
+                .body(Body::empty())
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
+        }
+        let mut bytes = Vec::new();
+        loop {
+            let next = tokio::time::timeout(Duration::from_secs(45), upstream.chunk())
+                .await
+                .map_err(|_| {
+                    (
+                        StatusCode::GATEWAY_TIMEOUT,
+                        "timeout lendo manifesto DASH".into(),
+                    )
+                })?
+                .map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))?;
+            let Some(chunk) = next else { break };
+            if bytes.len() + chunk.len() > 4 * 1024 * 1024 {
+                return Err((
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "manifesto DASH excede 4 MiB".into(),
+                ));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let manifest = String::from_utf8(bytes)
+            .map_err(|_| (StatusCode::BAD_GATEWAY, "manifesto DASH não é UTF-8".into()))?;
+        let manifest_headers = headers_for_origin(&target.headers, url.origin() == original_origin);
+        let rewritten = rewrite_mpd(&state, &url, &manifest_headers, &manifest).await?;
+        return builder
+            .header(header::CONTENT_TYPE, "application/dash+xml")
+            .header(header::CACHE_CONTROL, "no-store")
+            .header("access-control-allow-origin", "*")
+            .header("access-control-allow-methods", "GET, HEAD, OPTIONS")
+            .header("access-control-allow-headers", "Range, If-Range")
+            .header(
+                "access-control-expose-headers",
+                "Content-Length, Content-Range, Accept-Ranges",
+            )
+            .body(Body::from(rewritten))
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
+    }
+
     if content_type.contains("application/dash+xml")
         || url.path().to_ascii_lowercase().ends_with(".mpd")
     {
         return Err((
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            "manifestos DASH ainda não são suportados pelo proxy seguro".into(),
+            "resposta DASH inválida".into(),
         ));
     }
     let declared_hls = target.force_hls
         || content_type.contains("mpegurl")
         || url.path().to_ascii_lowercase().ends_with(".m3u8");
-    let mut upstream = upstream;
     // Inspeciona um prefixo pequeno para detectar playlists HLS servidas sem extensão/MIME.
     // O prefixo é preservado e reenviado intacto quando o recurso é mídia binária.
     let mut prefix = Vec::new();
@@ -273,10 +405,7 @@ async fn proxy_request(
     let is_hls = declared_hls
         || prefix.starts_with(b"#EXTM3U")
         || prefix.starts_with(b"\xef\xbb\xbf#EXTM3U");
-    let mut builder = Response::builder().status(status);
     if is_hls && status.is_success() && method != Method::HEAD {
-        // Limita durante a leitura: não usar bytes() aqui, pois poderia alocar uma resposta
-        // ilimitada antes de verificar o tamanho.
         let mut bytes = prefix;
         if bytes.len() > 4 * 1024 * 1024 {
             return Err((
@@ -305,8 +434,6 @@ async fn proxy_request(
         }
         let playlist = String::from_utf8(bytes)
             .map_err(|_| (StatusCode::BAD_GATEWAY, "playlist HLS não é UTF-8".into()))?;
-        // Uma playlist alcançada por redirect cross-origin não pode herdar Authorization/Cookie
-        // da origem inicial ao registrar segmentos e playlists filhas.
         let playlist_headers = headers_for_origin(&target.headers, url.origin() == original_origin);
         let rewritten = rewrite_playlist(&state, &url, &playlist_headers, &playlist).await?;
         builder = builder.header(header::CONTENT_TYPE, "application/vnd.apple.mpegurl");
@@ -335,7 +462,6 @@ async fn proxy_request(
             builder = builder.header(name, value);
         }
     }
-    // O token é uma credencial local; não há cookies de sessão e o CORS não permite credenciais.
     builder = builder
         .header("access-control-allow-origin", "*")
         .header("access-control-allow-methods", "GET, HEAD, OPTIONS")
@@ -376,6 +502,23 @@ async fn proxy_request(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
 
+fn valid_proxy_resource_path(resource: &str) -> bool {
+    let lower = resource.to_ascii_lowercase();
+    !resource.is_empty()
+        && !resource.starts_with('/')
+        && !resource.contains('\\')
+        && !resource.chars().any(char::is_control)
+        && !lower.contains("%2f")
+        && !lower.contains("%5c")
+        && resource.split('/').all(|part| {
+            !part.is_empty()
+                && !matches!(
+                    part.to_ascii_lowercase().as_str(),
+                    "." | ".." | "%2e" | "%2e%2e" | ".%2e" | "%2e."
+                )
+        })
+}
+
 /// Uses the production DNS/IP policy; tests may opt into literal loopback-only targets.
 async fn is_safe_proxy_url(state: &ProxyState, raw_url: &str) -> bool {
     #[cfg(test)]
@@ -389,6 +532,311 @@ async fn is_safe_proxy_url(state: &ProxyState, raw_url: &str) -> bool {
     #[cfg(not(test))]
     let _ = state;
     crate::addon::is_safe_url(raw_url).await
+}
+
+#[derive(Clone)]
+struct MpdFrame {
+    name: String,
+    base: Url,
+    is_base_url: bool,
+    base_url_seen: bool,
+    text: String,
+}
+
+fn xml_local_name(name: &[u8]) -> String {
+    String::from_utf8_lossy(name)
+        .rsplit(':')
+        .next()
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn dash_error(message: impl Into<String>) -> (StatusCode, String) {
+    (StatusCode::BAD_GATEWAY, message.into())
+}
+
+fn is_mpd_url_text(frame: &MpdFrame) -> bool {
+    frame.is_base_url || frame.name == "Location" || frame.name == "PatchLocation"
+}
+
+fn resolve_mpd_general_ref(reference: &BytesRef<'_>) -> Result<String, (StatusCode, String)> {
+    if let Some(character) = reference
+        .resolve_char_ref()
+        .map_err(|_| dash_error("referência de caractere inválida no manifesto DASH"))?
+    {
+        return Ok(character.to_string());
+    }
+    let name = reference
+        .decode()
+        .map_err(|_| dash_error("referência XML inválida no manifesto DASH"))?;
+    match name.as_ref() {
+        "amp" => Ok("&".into()),
+        "lt" => Ok("<".into()),
+        "gt" => Ok(">".into()),
+        "apos" => Ok("'".into()),
+        "quot" => Ok("\"".into()),
+        _ => Err(dash_error(
+            "entidade XML personalizada em URL DASH não é suportada",
+        )),
+    }
+}
+
+/// Registra um caminho dinâmico DASH sob uma origem fixa. O caminho recebido posteriormente
+/// é resolvido dentro dessa origem e validado novamente antes de cada requisição.
+async fn register_dash_path(
+    state: &ProxyState,
+    base: &Url,
+    reference: &str,
+    headers: &[(header::HeaderName, HeaderValue)],
+) -> Result<(String, Url), (StatusCode, String)> {
+    let resolved = resolve_playlist_reference(base, reference)
+        .map_err(|_| dash_error("referência DASH inválida"))?;
+    if !is_safe_proxy_url(state, resolved.as_str()).await {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "manifesto DASH referencia destino não permitido".into(),
+        ));
+    }
+    let mut origin_root = resolved.clone();
+    origin_root.set_path("/");
+    origin_root.set_query(None);
+    origin_root.set_fragment(None);
+    let token = Uuid::new_v4().simple().to_string();
+    let mut sessions = state.sessions.write().await;
+    sessions.retain(|_, v| v.expires > Instant::now());
+    if sessions.len() >= 4096 {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            "limite de recursos DASH atingido".into(),
+        ));
+    }
+    let child_headers = headers_for_origin(headers, resolved.origin() == base.origin());
+    sessions.insert(
+        token.clone(),
+        Target {
+            url: origin_root,
+            headers: child_headers,
+            force_hls: false,
+            force_dash: false,
+            allow_suffix: true,
+            default_query: resolved.query().map(str::to_owned),
+            expires: Instant::now() + SESSION_TTL,
+        },
+    );
+    let path = resolved.path().trim_start_matches('/');
+    let mut local = format!("/media/{token}/{path}");
+    if let Some(query) = resolved.query() {
+        local.push('?');
+        local.push_str(query);
+    }
+    Ok((local, resolved))
+}
+
+async fn rewrite_mpd(
+    state: &ProxyState,
+    manifest_url: &Url,
+    headers: &[(header::HeaderName, HeaderValue)],
+    manifest: &str,
+) -> Result<String, (StatusCode, String)> {
+    let mut reader = Reader::from_str(manifest);
+    reader.config_mut().trim_text(false);
+    let mut writer = Writer::new(Vec::new());
+    let mut frames: Vec<MpdFrame> = Vec::new();
+    let mut saw_mpd_root = false;
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Eof) => break,
+            Ok(Event::Start(event)) => {
+                let full_name = String::from_utf8_lossy(event.name().as_ref()).to_string();
+                let name = xml_local_name(full_name.as_bytes());
+                if frames.is_empty() {
+                    if name != "MPD" {
+                        return Err(dash_error("raiz do manifesto DASH inválida"));
+                    }
+                    saw_mpd_root = true;
+                }
+                if name == "BaseURL" {
+                    if let Some(parent) = frames.last_mut() {
+                        if parent.base_url_seen {
+                            return Err(dash_error(
+                                "manifesto DASH com múltiplas BaseURL no mesmo nível não suportado",
+                            ));
+                        }
+                        parent.base_url_seen = true;
+                    }
+                }
+                let base = frames
+                    .last()
+                    .map(|frame| frame.base.clone())
+                    .unwrap_or_else(|| manifest_url.clone());
+                let rewritten =
+                    rewrite_mpd_attributes(state, &base, headers, &name, &event).await?;
+                frames.push(MpdFrame {
+                    name: name.clone(),
+                    base,
+                    is_base_url: name == "BaseURL",
+                    base_url_seen: false,
+                    text: String::new(),
+                });
+                writer
+                    .write_event(Event::Start(rewritten))
+                    .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
+            }
+            Ok(Event::Empty(event)) => {
+                let full_name = String::from_utf8_lossy(event.name().as_ref()).to_string();
+                let name = xml_local_name(full_name.as_bytes());
+                if frames.is_empty() && name == "MPD" {
+                    saw_mpd_root = true;
+                }
+                let base = frames
+                    .last()
+                    .map(|frame| frame.base.clone())
+                    .unwrap_or_else(|| manifest_url.clone());
+                let rewritten =
+                    rewrite_mpd_attributes(state, &base, headers, &name, &event).await?;
+                writer
+                    .write_event(Event::Empty(rewritten))
+                    .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
+            }
+            Ok(Event::Text(event)) => {
+                if frames.last().is_some_and(is_mpd_url_text) {
+                    let decoded = event
+                        .decode()
+                        .map_err(|e| dash_error(format!("texto DASH inválido: {e}")))?;
+                    frames
+                        .last_mut()
+                        .expect("URL text frame missing")
+                        .text
+                        .push_str(&decoded);
+                } else {
+                    writer
+                        .write_event(Event::Text(event.into_owned()))
+                        .map_err(|e| {
+                            dash_error(format!("não foi possível serializar DASH: {e}"))
+                        })?;
+                }
+            }
+            Ok(Event::GeneralRef(event)) => {
+                if frames.last().is_some_and(is_mpd_url_text) {
+                    let resolved = resolve_mpd_general_ref(&event)?;
+                    frames
+                        .last_mut()
+                        .expect("URL text frame missing")
+                        .text
+                        .push_str(&resolved);
+                } else {
+                    writer
+                        .write_event(Event::GeneralRef(event.into_owned()))
+                        .map_err(|e| {
+                            dash_error(format!("não foi possível serializar DASH: {e}"))
+                        })?;
+                }
+            }
+            Ok(Event::CData(event)) => {
+                if frames.last().is_some_and(is_mpd_url_text) {
+                    let decoded = event
+                        .decode()
+                        .map_err(|e| dash_error(format!("CDATA DASH inválido: {e}")))?;
+                    frames
+                        .last_mut()
+                        .expect("URL text frame missing")
+                        .text
+                        .push_str(&decoded);
+                } else {
+                    writer
+                        .write_event(Event::CData(event.into_owned()))
+                        .map_err(|e| {
+                            dash_error(format!("não foi possível serializar DASH: {e}"))
+                        })?;
+                }
+            }
+            Ok(Event::End(event)) => {
+                if let Some(frame) = frames.pop() {
+                    let reference = frame.text.trim();
+                    if !reference.is_empty() && frame.is_base_url {
+                        let (local, resolved) =
+                            register_dash_path(state, &frame.base, reference, headers).await?;
+                        writer
+                            .write_event(Event::Text(BytesText::new(&local)))
+                            .map_err(|e| {
+                                dash_error(format!("não foi possível serializar DASH: {e}"))
+                            })?;
+                        if let Some(parent) = frames.last_mut() {
+                            parent.base = resolved;
+                        }
+                    } else if !reference.is_empty()
+                        && (frame.name == "Location" || frame.name == "PatchLocation")
+                    {
+                        let local = register_child(state, &frame.base, reference, headers).await?;
+                        writer
+                            .write_event(Event::Text(BytesText::new(&local)))
+                            .map_err(|e| {
+                                dash_error(format!("não foi possível serializar DASH: {e}"))
+                            })?;
+                    }
+                }
+                writer
+                    .write_event(Event::End(event.into_owned()))
+                    .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
+            }
+            Ok(event) => {
+                writer
+                    .write_event(event.into_owned())
+                    .map_err(|e| dash_error(format!("não foi possível serializar DASH: {e}")))?;
+            }
+            Err(error) => return Err(dash_error(format!("manifesto DASH malformado: {error}"))),
+        }
+    }
+
+    if !saw_mpd_root || !frames.is_empty() {
+        return Err(dash_error("manifesto DASH incompleto"));
+    }
+    String::from_utf8(writer.into_inner())
+        .map_err(|_| dash_error("manifesto DASH serializado não é UTF-8"))
+}
+
+async fn rewrite_mpd_attributes(
+    state: &ProxyState,
+    base: &Url,
+    headers: &[(header::HeaderName, HeaderValue)],
+    element: &str,
+    event: &BytesStart<'_>,
+) -> Result<BytesStart<'static>, (StatusCode, String)> {
+    let name = String::from_utf8_lossy(event.name().as_ref()).to_string();
+    let mut output = BytesStart::new(name.as_str());
+    for attribute in event.attributes() {
+        let attribute =
+            attribute.map_err(|_| dash_error("atributo XML inválido no manifesto DASH"))?;
+        let key = String::from_utf8_lossy(attribute.key.as_ref()).to_string();
+        let local_key = xml_local_name(key.as_bytes());
+        let value = attribute
+            .normalized_value(quick_xml::XmlVersion::Implicit1_0)
+            .map_err(|_| dash_error("valor de atributo XML inválido no manifesto DASH"))?
+            .into_owned();
+        let is_template = element == "SegmentTemplate"
+            && matches!(local_key.as_str(), "media" | "initialization" | "index");
+        let is_static = (element == "SegmentURL"
+            && matches!(local_key.as_str(), "media" | "index"))
+            || (matches!(element, "Initialization" | "RepresentationIndex")
+                && local_key == "sourceURL")
+            || (element == "Period" && local_key == "href")
+            || (element == "UTCTiming"
+                && local_key == "value"
+                && (value.starts_with("http://") || value.starts_with("https://")));
+        let rewritten = if value.trim().is_empty() {
+            value
+        } else if is_template {
+            register_dash_path(state, base, &value, headers).await?.0
+        } else if is_static {
+            register_child(state, base, &value, headers).await?
+        } else {
+            value
+        };
+        let escaped = quick_xml::escape::escape(&rewritten);
+        output.push_attribute((key.as_str(), escaped.as_ref()));
+    }
+    Ok(output.into_owned())
 }
 
 /// Preserva cabeçalhos sensíveis somente quando o recurso continua na origem inicial.
@@ -462,13 +910,13 @@ async fn rewrite_playlist(
 fn resolve_playlist_reference(base: &Url, reference: &str) -> Result<Url, String> {
     let url = base
         .join(reference)
-        .map_err(|_| "referência HLS inválida".to_string())?;
+        .map_err(|_| "referência de mídia inválida".to_string())?;
     if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none()
         || !url.username().is_empty()
         || url.password().is_some()
     {
-        return Err("referência HLS não permitida".into());
+        return Err("referência de mídia não permitida".into());
     }
     Ok(url)
 }
@@ -482,13 +930,13 @@ async fn register_child(
     let url = resolve_playlist_reference(base, reference).map_err(|_| {
         (
             StatusCode::BAD_GATEWAY,
-            "URI filha inválida na playlist".into(),
+            "URI filha inválida no manifesto ou playlist".into(),
         )
     })?;
     if !is_safe_proxy_url(state, url.as_str()).await {
         return Err((
             StatusCode::FORBIDDEN,
-            "playlist referencia destino não permitido".into(),
+            "manifesto ou playlist referencia destino não permitido".into(),
         ));
     }
     let token = Uuid::new_v4().simple().to_string();
@@ -497,10 +945,11 @@ async fn register_child(
     if sessions.len() >= 4096 {
         return Err((
             StatusCode::TOO_MANY_REQUESTS,
-            "limite de recursos HLS atingido".into(),
+            "limite de recursos de mídia atingido".into(),
         ));
     }
     let force_hls = url.path().to_ascii_lowercase().ends_with(".m3u8");
+    let force_dash = url.path().to_ascii_lowercase().ends_with(".mpd");
     let child_headers = if url.origin() == base.origin() {
         headers.to_vec()
     } else {
@@ -516,10 +965,17 @@ async fn register_child(
             url,
             headers: child_headers,
             force_hls,
+            force_dash,
+            allow_suffix: false,
+            default_query: None,
             expires: Instant::now() + SESSION_TTL,
         },
     );
-    Ok(format!("/media/{token}"))
+    if force_dash {
+        Ok(format!("/media/{token}/manifest.mpd"))
+    } else {
+        Ok(format!("/media/{token}"))
+    }
 }
 
 #[cfg(test)]
@@ -554,6 +1010,9 @@ mod tests {
                 url,
                 headers: Vec::new(),
                 force_hls,
+                force_dash: false,
+                allow_suffix: false,
+                default_query: None,
                 expires: Instant::now() + SESSION_TTL,
             },
         );
@@ -568,6 +1027,24 @@ mod tests {
         proxy_request(State(state.clone()), Path(token), Method::GET, headers)
             .await
             .unwrap()
+    }
+
+    async fn request_test_child_resource(
+        state: &ProxyState,
+        token: String,
+        resource: String,
+        query: Option<String>,
+    ) -> Response {
+        proxy_request_inner(
+            state.clone(),
+            token,
+            Some(resource),
+            query,
+            Method::GET,
+            HeaderMap::new(),
+        )
+        .await
+        .unwrap()
     }
 
     fn rewritten_token(text: &str) -> String {
@@ -658,6 +1135,10 @@ mod tests {
             token.clone(),
             Target {
                 url: Url::parse(&format!("http://{redirect_address}/start.m3u8")).unwrap(),
+                force_hls: true,
+                force_dash: false,
+                allow_suffix: false,
+                default_query: None,
                 headers: vec![
                     (
                         header::AUTHORIZATION,
@@ -668,7 +1149,6 @@ mod tests {
                         HeaderValue::from_static("session=integration-test-secret"),
                     ),
                 ],
-                force_hls: true,
                 expires: Instant::now() + SESSION_TTL,
             },
         );
@@ -768,6 +1248,146 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(&segment_body[..], b"bcd");
+    }
+
+    #[tokio::test]
+    async fn dash_proxy_rewrites_base_url_and_dynamic_segment_templates() {
+        const MANIFEST: &str = r#"<?xml version="1.0"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static">
+  <Period>
+    <BaseURL>video/?token=base&amp;quality=hd</BaseURL>
+    <AdaptationSet>
+      <Representation id="v1">
+        <SegmentTemplate timescale="1" initialization="init.mp4?key=init&amp;quality=hd" media="chunk-$Number$.m4s?token=alpha&amp;quality=hd" startNumber="1">
+          <SegmentTimeline><S t="0" d="4" r="1"/></SegmentTimeline>
+        </SegmentTemplate>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>"#;
+        let origin = Router::new()
+            .route(
+                "/manifest.mpd",
+                axum::routing::get(|| async {
+                    ([(header::CONTENT_TYPE, "application/dash+xml")], MANIFEST)
+                }),
+            )
+            .route(
+                "/video/chunk-1.m4s",
+                axum::routing::get(|| async { "segment-one" }),
+            )
+            .route(
+                "/video/init.mp4",
+                axum::routing::get(|| async { "initialization" }),
+            );
+        let origin_address = start_test_server(origin).await;
+        let state = local_test_state();
+        let manifest_url = Url::parse(&format!("http://{origin_address}/manifest.mpd")).unwrap();
+        let proxy = MediaProxy {
+            address: "127.0.0.1:0".parse().unwrap(),
+            state: state.clone(),
+        };
+        let local_manifest = proxy
+            .register(manifest_url.as_str(), None, Some("application/dash+xml"))
+            .await
+            .unwrap();
+        assert!(local_manifest.ends_with("/manifest.mpd"));
+        let local_url = Url::parse(&local_manifest).unwrap();
+        let manifest_token = local_url
+            .path_segments()
+            .unwrap()
+            .nth(1)
+            .unwrap()
+            .to_string();
+
+        // Players can identify DASH by the local .mpd suffix; the alias resolves to
+        // the original manifest while segment paths use separate scoped tokens.
+        let manifest_response = proxy_request_inner(
+            state.clone(),
+            manifest_token.clone(),
+            Some("manifest.mpd".into()),
+            None,
+            Method::GET,
+            HeaderMap::new(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(manifest_response.status(), StatusCode::OK);
+        assert_eq!(
+            manifest_response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .unwrap(),
+            "application/dash+xml"
+        );
+        let body = axum::body::to_bytes(manifest_response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let rewritten = String::from_utf8(body.to_vec()).unwrap();
+        assert!(rewritten.contains("<BaseURL>/media/"));
+        assert!(rewritten.contains("token=base&amp;quality=hd"));
+        assert!(rewritten.contains("token=alpha&amp;quality=hd"));
+        assert!(rewritten.contains("$Number$"));
+
+        let media_start = rewritten.find("media=\"").unwrap() + "media=\"".len();
+        let media_end = rewritten[media_start..].find('"').unwrap() + media_start;
+        let media_template = &rewritten[media_start..media_end];
+        let media_url = media_template
+            .replace("$Number$", "1")
+            .replace("&amp;", "&");
+        let (segment_token, segment_path, segment_query) = dash_local_parts(&media_url);
+        let segment_response =
+            request_test_child_resource(&state, segment_token, segment_path, segment_query).await;
+        assert_eq!(segment_response.status(), StatusCode::OK);
+        assert_eq!(
+            &axum::body::to_bytes(segment_response.into_body(), 1024)
+                .await
+                .unwrap()[..],
+            b"segment-one"
+        );
+
+        let init_start = rewritten.find("initialization=\"").unwrap() + "initialization=\"".len();
+        let init_end = rewritten[init_start..].find('"').unwrap() + init_start;
+        let (init_token, init_path, init_query) =
+            dash_local_parts(&rewritten[init_start..init_end].replace("&amp;", "&"));
+        let init_response =
+            request_test_child_resource(&state, init_token, init_path, init_query).await;
+        assert_eq!(init_response.status(), StatusCode::OK);
+        assert_eq!(
+            &axum::body::to_bytes(init_response.into_body(), 1024)
+                .await
+                .unwrap()[..],
+            b"initialization"
+        );
+    }
+
+    fn dash_local_parts(local: &str) -> (String, String, Option<String>) {
+        let parsed = Url::parse(&format!("http://proxy.invalid{local}")).unwrap();
+        let mut parts = parsed.path().trim_start_matches('/').splitn(3, '/');
+        assert_eq!(parts.next(), Some("media"));
+        let token = parts.next().expect("DASH proxy token missing").to_string();
+        let resource = parts
+            .next()
+            .expect("DASH resource path missing")
+            .to_string();
+        (token, resource, parsed.query().map(str::to_owned))
+    }
+
+    #[test]
+    fn dash_child_paths_reject_encoded_separators_and_traversal() {
+        for path in [
+            "../private",
+            "%2e%2e/private",
+            "%2E./private",
+            "video%2f..%2fprivate",
+            "video%5cprivate",
+        ] {
+            assert!(
+                !valid_proxy_resource_path(path),
+                "caminho DASH deveria ser recusado: {path}"
+            );
+        }
+        assert!(valid_proxy_resource_path("video/chunk-$Number$.m4s"));
     }
 
     #[test]

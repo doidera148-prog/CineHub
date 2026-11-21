@@ -105,7 +105,7 @@ docs/
 - Redirecionamentos de addons e proxy são limitados e revalidados.
 - O proxy de mídia escuta somente em `127.0.0.1`, usa tokens aleatórios e limita o tempo de vida e a quantidade de sessões.
 - O proxy encaminha somente cabeçalhos selecionados de `proxyHeaders.request`: `authorization`, `cookie`, `origin`, `referer` e `user-agent`.
-- O proxy suporta HTTP progressivo e HLS. **DASH (.mpd) não está habilitado.**
+- O proxy suporta HTTP progressivo, HLS e DASH (.mpd), reescrevendo manifestos e referências aos segmentos antes de entregá-los ao player.
 - O acesso a endereços privados é uma exceção separada e explícita na integração Kodi, que exige o endereço/IP informado pelo usuário e não faz descoberta da rede.
 - Respostas de addons têm limite de 8 MiB; legendas têm limite de 2 MiB. O cache de catálogo/metadados/fontes tem TTL de 10 minutos e limites de entradas/tamanho.
 - O armazenamento local de addons preserva dados corrompidos para diagnóstico em vez de sobrescrevê-los silenciosamente.
