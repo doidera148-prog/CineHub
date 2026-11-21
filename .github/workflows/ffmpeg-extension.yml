@@ -2,8 +2,9 @@
 # e publica o AAR num release. O build Android do CineHub baixa esse AAR se ele existir.
 #
 # Rodar: Actions → "ffmpeg-extension" → Run workflow (ou alterar as versões abaixo).
-# Versões fixadas: Media3 1.4.1 (mesma do app), FFmpeg release/6.0. O NDK tem de ser o mesmo que o
-# Gradle usa para linkar (o AGP padrão deste projeto é o 25.1.8937393), e a API nativa igual à do CMake (21).
+# Fontes fixadas por commit: Media3 1.4.1 (mesma do app) e FFmpeg release/6.0.
+# O NDK tem de ser o mesmo que o Gradle usa para linkar (AGP 25.1.8937393), e a API nativa igual à do CMake (21).
+# Para publicar uma nova compilação, incremente RELEASE_TAG e atualize o SHA esperado em build.yml.
 name: ffmpeg-extension
 
 on:
@@ -14,7 +15,8 @@ permissions:
 
 env:
   MEDIA3_TAG: "1.4.1"
-  FFMPEG_BRANCH: "release/6.0"
+  MEDIA3_COMMIT: "c35a9d62baec57118ea898e271ac66819399649b"
+  FFMPEG_COMMIT: "573f2b81ebd97da81def2ba762e81b0328547004"
   NDK_VERSION: "25.1.8937393"
   CMAKE_VERSION: "3.22.1"
   # Nível da API do build nativo: igual ao alvo do CMake do Media3 (21). Usar outro nível quebra o link.
@@ -28,7 +30,7 @@ jobs:
     permissions:
       contents: write # para publicar o release com o AAR
     steps:
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6
         with:
           distribution: temurin
           java-version: "17"
@@ -41,8 +43,22 @@ jobs:
           echo "NDK_PATH=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
       - name: Código do Media3 e do FFmpeg
         run: |
+          set -euo pipefail
           git clone --depth 1 --branch "$MEDIA3_TAG" https://github.com/androidx/media "$RUNNER_TEMP/media3"
-          git clone --depth 1 --branch "$FFMPEG_BRANCH" https://github.com/FFmpeg/FFmpeg "$RUNNER_TEMP/ffmpeg"
+          actual_media3="$(git -C "$RUNNER_TEMP/media3" rev-parse HEAD)"
+          test "$actual_media3" = "$MEDIA3_COMMIT" || {
+            echo "::error::O tag Media3 $MEDIA3_TAG não aponta para o commit fixado $MEDIA3_COMMIT (obtido: $actual_media3)."
+            exit 1
+          }
+          git init "$RUNNER_TEMP/ffmpeg"
+          git -C "$RUNNER_TEMP/ffmpeg" remote add origin https://github.com/FFmpeg/FFmpeg
+          git -C "$RUNNER_TEMP/ffmpeg" fetch --depth 1 origin "$FFMPEG_COMMIT"
+          git -C "$RUNNER_TEMP/ffmpeg" checkout --detach FETCH_HEAD
+          actual_ffmpeg="$(git -C "$RUNNER_TEMP/ffmpeg" rev-parse HEAD)"
+          test "$actual_ffmpeg" = "$FFMPEG_COMMIT" || {
+            echo "::error::Checkout FFmpeg não corresponde ao commit fixado."
+            exit 1
+          }
           ln -s "$RUNNER_TEMP/ffmpeg" "$RUNNER_TEMP/media3/libraries/decoder_ffmpeg/src/main/jni/ffmpeg"
       - name: Compilar o FFmpeg (bibliotecas nativas)
         working-directory: ${{ runner.temp }}/media3/libraries/decoder_ffmpeg/src/main/jni
@@ -70,10 +86,13 @@ jobs:
           NOTE="$RUNNER_TEMP/LICENSE-ffmpeg-extension.txt"
           printf '%s\n' \
             "Extensão FFmpeg do AndroidX Media3 $MEDIA3_TAG (Apache-2.0)," \
-            "com FFmpeg $FFMPEG_BRANCH compilado sem --enable-gpl (LGPL-2.1+)." \
+            "Media3 commit: $MEDIA3_COMMIT.", \
+            "FFmpeg commit: $FFMPEG_COMMIT (sem --enable-gpl; LGPL-2.1+).", \
             "Código: https://github.com/androidx/media e https://github.com/FFmpeg/FFmpeg" > "$NOTE"
           gh release view "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
             gh release create "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --title "Extensão FFmpeg $MEDIA3_TAG" \
-              --notes "AAR da extensão FFmpeg do Media3 para o ExoPlayer do CineHub. Gerado pelo workflow ffmpeg-extension." \
+              --notes "AAR da extensão FFmpeg do Media3 para o ExoPlayer do CineHub. Fontes fixadas por commit no workflow ffmpeg-extension." \
               --prerelease
-          gh release upload "$RELEASE_TAG" "$AAR" "$NOTE" -R "$GITHUB_REPOSITORY" --clobber
+          sha256sum "$AAR" > "$AAR.sha256"
+          # Não sobrescreve artefatos já publicados: para reconstruir, use um RELEASE_TAG novo.
+          gh release upload "$RELEASE_TAG" "$AAR" "$NOTE" "$AAR.sha256" -R "$GITHUB_REPOSITORY"
