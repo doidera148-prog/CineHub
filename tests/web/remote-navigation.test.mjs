@@ -52,7 +52,8 @@ await page.setContent(`<!doctype html><html><head><style>
       <button id="action">Ação</button>
     </section>
   </main>
-  <dialog id="test-dialog"><button id="dialog-first">Primeiro</button><button id="dialog-last">Último</button></dialog>
+  <dialog id="test-dialog"><button id="dialog-first" value="cancel">Primeiro</button><button id="dialog-last">Último</button></dialog>
+  <div id="player" class="hidden"><button id="close-player">Fechar player</button></div>
   <div id="toast" class="hidden"></div>
 </body></html>`);
 await page.addScriptTag({ url: `${base}/remote-navigation.js` });
@@ -183,6 +184,52 @@ if (await page.evaluate(() => document.activeElement?.id === 'q')) {
   failures.push('[remote-navigation] foco de rota assíncrona foi desviado para a busca');
 }
 
+
+// O callback nativo Voltar deve dispensar o campo de texto antes de navegar.
+await page.locator('#search').focus();
+const textBackHandled = await page.evaluate(() => window.__cinehubBack());
+if (textBackHandled !== true) failures.push('[remote-navigation] Voltar nativo não tratou o campo de texto');
+await expectFocus('', 'Voltar nativo deve retirar o foco do campo de texto');
+
+// Voltar fecha um diálogo usando a ação de cancelar, sem navegar por trás dele.
+await page.locator('#test-dialog').evaluate((el) => el.showModal());
+await page.locator('#dialog-first').evaluate((button) => {
+  button.addEventListener('click', () => button.closest('dialog').close());
+});
+const dialogBackHandled = await page.evaluate(() => window.__cinehubBack());
+if (dialogBackHandled !== true) failures.push('[remote-navigation] Voltar nativo não tratou o diálogo');
+if (await page.locator('#test-dialog').evaluate((el) => el.open)) {
+  failures.push('[remote-navigation] Voltar nativo não fechou o diálogo');
+}
+
+// Voltar fecha o player pela ação de fechamento já existente.
+await page.locator('#close-player').evaluate((button) => {
+  button.addEventListener('click', () => document.querySelector('#player').classList.add('hidden'));
+});
+await page.locator('#player').evaluate((el) => el.classList.remove('hidden'));
+const playerBackHandled = await page.evaluate(() => window.__cinehubBack());
+if (playerBackHandled !== true) failures.push('[remote-navigation] Voltar nativo não tratou o player');
+if (!(await page.locator('#player').evaluate((el) => el.classList.contains('hidden')))) {
+  failures.push('[remote-navigation] Voltar nativo não fechou o player');
+}
+
+// Fora de overlays e campos, Voltar retorna à rota anterior.
+const routeBeforeBack = await page.evaluate(() => location.hash);
+const routeBackHandled = await page.evaluate(() => window.__cinehubBack());
+if (routeBackHandled !== true) failures.push('[remote-navigation] Voltar nativo não tratou a rota');
+await page.waitForFunction((previous) => location.hash !== previous, routeBeforeBack);
+
+// Na tela inicial, a primeira pressão avisa e a segunda libera a saída do app.
+await page.evaluate(() => { location.hash = '#/'; });
+await page.waitForFunction(() => location.hash === '#/');
+const firstHomeBack = await page.evaluate(() => window.__cinehubBack());
+if (firstHomeBack !== true) failures.push('[remote-navigation] primeira pressão de Voltar na tela inicial deve ser consumida');
+if (!(await page.locator('#toast').innerText()).includes('Pressione Voltar de novo para sair')) {
+  failures.push('[remote-navigation] aviso de saída não foi exibido na tela inicial');
+}
+const secondHomeBack = await page.evaluate(() => window.__cinehubBack());
+if (secondHomeBack !== false) failures.push('[remote-navigation] segunda pressão rápida deve permitir sair');
+
 if (errors.length) failures.push(...errors.map((error) => `[remote-navigation] erro JS: ${error}`));
 await browser.close();
 server.close();
@@ -190,4 +237,4 @@ if (failures.length) {
   console.error('Falhas nos testes de controle remoto:\\n- ' + failures.join('\\n- '));
   process.exit(1);
 }
-console.log('Remote navigation tests passed: D-pad, trilhos, colunas, menu, campos, OK e diálogos.');
+console.log('Remote navigation tests passed: D-pad, rotas, Voltar nativo, trilhos, menu, campos, OK e overlays.');
