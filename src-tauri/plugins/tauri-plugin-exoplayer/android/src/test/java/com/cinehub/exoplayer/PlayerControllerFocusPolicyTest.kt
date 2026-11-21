@@ -1,5 +1,7 @@
 package com.cinehub.exoplayer
 
+import com.cinehub.exoplayer.PlayerControllerFocusPolicy.FocusDirection
+import com.cinehub.exoplayer.PlayerControllerFocusPolicy.FocusNode
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -21,12 +23,9 @@ class PlayerControllerFocusPolicyTest {
     @Test
     fun dpadConnectsPlaybackProgressAndAvailableTrackSelectors() {
         val policy = PlayerControllerFocusPolicy
-        val node = PlayerControllerFocusPolicy.FocusNode
-        val direction = PlayerControllerFocusPolicy.FocusDirection
-
-        assertEquals(node.AUDIO, policy.nextFocusTarget(node.PLAY_PAUSE, direction.UP, true))
-        assertEquals(node.SUBTITLES, policy.nextFocusTarget(node.PLAY_PAUSE, direction.UP, false))
-        assertEquals(node.PROGRESS, policy.nextFocusTarget(node.PLAY_PAUSE, direction.DOWN, true))
+        assertEquals(FocusNode.AUDIO, policy.nextFocusTarget(FocusNode.PLAY_PAUSE, FocusDirection.UP, true))
+        assertEquals(FocusNode.SUBTITLES, policy.nextFocusTarget(node.PLAY_PAUSE, direction.UP, false))
+        assertEquals(FocusNode.PROGRESS, policy.nextFocusTarget(node.PLAY_PAUSE, FocusDirection.DOWN, true))
         assertEquals(node.SUBTITLES, policy.nextFocusTarget(node.AUDIO, direction.DOWN, true))
         assertEquals(node.PROGRESS, policy.nextFocusTarget(node.SUBTITLES, direction.DOWN, true))
         assertEquals(node.SUBTITLES, policy.nextFocusTarget(node.PROGRESS, direction.UP, true))
@@ -41,7 +40,7 @@ class PlayerControllerFocusPolicyTest {
 
         assertEquals(node.PLAY_PAUSE, policy.nextFocusTarget(node.SUBTITLES, direction.UP, false))
         assertEquals(node.AUDIO, policy.nextFocusTarget(node.SUBTITLES, direction.UP, true))
-        assertEquals(node.PLAY_PAUSE, policy.nextFocusTarget(node.AUDIO, direction.LEFT, true))
+        assertEquals(node.PLAY_PAUSE, policy.nextFocusTarget(node.AUDIO, FocusDirection.LEFT, true))
         assertEquals(node.PLAY_PAUSE, policy.nextFocusTarget(node.SUBTITLES, direction.LEFT, true))
     }
 }
