@@ -207,7 +207,10 @@ async fn proxy_request(
             _ => state.client.get(url.clone()),
         };
         for (name, value) in &target.headers {
-            let sensitive = *name == header::AUTHORIZATION || *name == header::COOKIE;
+            let sensitive = *name == header::AUTHORIZATION
+                || *name == header::COOKIE
+                || *name == header::ORIGIN
+                || *name == header::REFERER;
             if !sensitive || url.origin() == original_origin {
                 request = request.header(name, value);
             }
