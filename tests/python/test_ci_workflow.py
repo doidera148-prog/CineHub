@@ -5,6 +5,7 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "build.yml"
+WORKFLOW_DIR = ROOT / ".github" / "workflows"
 CHECKOUT_V4_SHA = "fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09"
 
 
@@ -14,6 +15,45 @@ class CiWorkflowTests(unittest.TestCase):
         checkout_refs = re.findall(r"uses:\s*actions/checkout@([0-9a-f]+)", workflow)
         self.assertGreater(len(checkout_refs), 0)
         self.assertEqual(checkout_refs, [CHECKOUT_V4_SHA] * len(checkout_refs))
+
+    def test_every_external_github_action_is_pinned_to_a_full_commit_sha(self):
+        action_refs = []
+        for path in sorted(WORKFLOW_DIR.glob("*.yml")):
+            workflow = path.read_text(encoding="utf-8")
+            matches = re.findall(
+                r"(?m)^\s*(?:-\s*)?uses:\s*([^@\s]+)@([^\s#]+)",
+                workflow,
+            )
+            for action, ref in matches:
+                if action.startswith("./"):
+                    continue
+                action_refs.append((path.name, action, ref))
+                self.assertRegex(
+                    ref,
+                    r"^[0-9a-f]{40}$",
+                    f"{path.name} usa {action}@{ref}; fixe a Action por SHA completo",
+                )
+        self.assertGreater(len(action_refs), 0, "Nenhuma GitHub Action foi encontrada")
+
+    def test_security_advisory_ignores_are_explicit_and_have_reasons(self):
+        deny = (ROOT / "src-tauri/deny.toml").read_text(encoding="utf-8")
+        ignores = re.findall(
+            r'\{ id = "([^"]+)", reason = "([^"]+)" \}', deny
+        )
+        self.assertEqual(len(ignores), 5)
+        self.assertEqual(len({advisory for advisory, _ in ignores}), 5)
+        self.assertTrue(all(reason.strip() for _, reason in ignores))
+        self.assertNotIn('ignore = ["*"]', deny)
+
+    def test_readme_matches_blocking_security_checks_and_release_gate(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("essas verificações são bloqueantes", readme)
+        self.assertIn(
+            "todos os builds desktop (Linux, Windows e macOS) e Android passam",
+            readme,
+        )
+        self.assertNotIn("etapas não bloqueantes", readme)
+        self.assertNotIn("pelo menos um build de plataforma passam", readme)
 
     def test_web_smoke_uses_node24(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
