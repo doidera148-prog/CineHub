@@ -42,6 +42,7 @@ import androidx.activity.OnBackPressedCallback
 @InvokeArg
 class PlayArgs {
     lateinit var url: String
+    var mimeType: String? = null
     var startMs: Long = 0
     /** Lista JSON de legendas VTT em base64, com idioma, rótulo e preferência inicial. */
     var subtitles: String? = null
@@ -389,6 +390,7 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         handler.post(skipTick)
 
         val item = MediaItem.Builder().setUri(args.url)
+        args.mimeType?.takeIf { it.isNotBlank() }?.let { item.setMimeType(it) }
         val subtitleConfigurations = mutableListOf<MediaItem.SubtitleConfiguration>()
         try {
             val subtitleArray = args.subtitles?.let { JSONArray(it) } ?: JSONArray()
