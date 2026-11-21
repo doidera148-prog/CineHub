@@ -212,6 +212,13 @@ impl<'a> D3d11RenderContext<'a> {
         unsafe { mpv_render_context_update(self.context.as_ptr()) }
     }
 
+    fn device_removed_reason(&self) -> i32 {
+        // The windows crate exposes this HRESULT as Result<(), Error>.
+        unsafe { self.device.GetDeviceRemovedReason() }
+            .err()
+            .map_or(0, |error| error.code().0)
+    }
+
     fn render_failure(
         &self,
         operation: &'static str,
@@ -219,7 +226,7 @@ impl<'a> D3d11RenderContext<'a> {
         message: String,
     ) -> RenderError {
         // Capture the native removal reason before the old device is released.
-        let removal_reason = unsafe { self.device.GetDeviceRemovedReason().0 };
+        let removal_reason = self.device_removed_reason();
         if is_device_loss_hresult(hresult) || is_device_loss_hresult(removal_reason) {
             RenderError::DeviceLost {
                 operation,
@@ -501,7 +508,7 @@ impl D3d11RenderContext<'_> {
         let present_result =
             unsafe { swap_chain.Present(0, windows::Win32::Graphics::Dxgi::DXGI_PRESENT(0)) };
         if present_result.0 < 0 {
-            let reason = unsafe { self.device.GetDeviceRemovedReason().0 };
+            let reason = self.device_removed_reason();
             if is_device_loss_hresult(present_result.0) || is_device_loss_hresult(reason) {
                 return Err(format!(
                     "DXGI Present indicou perda do dispositivo (HRESULT 0x{:08X}; motivo 0x{:08X})",
