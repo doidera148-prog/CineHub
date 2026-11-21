@@ -579,6 +579,7 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("gh release download ffmpeg-ext-1.4.1", ffmpeg)
         self.assertIn("8d7cc27e1fbae9673437909032d955cb16fd8993bc9b9e52b54a2ec34900b4cf", ffmpeg)
         self.assertIn("sha256sum --check --status", ffmpeg)
+        self.assertIn('rm -f "$AAR"', ffmpeg)
         self.assertIn("::error::SHA-256 do AAR FFmpeg", ffmpeg)
         self.assertIn("::warning::Extensão FFmpeg não publicada/disponível", ffmpeg)
         self.assertNotIn("continue-on-error: true", ffmpeg)
