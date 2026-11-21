@@ -283,7 +283,7 @@ for (const viewport of tvViewports) {
   await tvPage.keyboard.press('ArrowDown');
   await expectTvFocus('nav-movies', 'D-pad baixo no menu');
   await tvPage.keyboard.press('ArrowRight');
-  await expectTvFocus('card-1', 'D-pad direita retorna ao conteúdo');
+  await expectTvFocus('card-4', 'D-pad direita restaura o último foco no conteúdo');
 
   await tvPage.close();
 }
