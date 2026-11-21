@@ -894,13 +894,13 @@ async fn rewrite_playlist(
 fn resolve_playlist_reference(base: &Url, reference: &str) -> Result<Url, String> {
     let url = base
         .join(reference)
-        .map_err(|_| "referência HLS inválida".to_string())?;
+        .map_err(|_| "referência de mídia inválida".to_string())?;
     if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none()
         || !url.username().is_empty()
         || url.password().is_some()
     {
-        return Err("referência HLS não permitida".into());
+        return Err("referência de mídia não permitida".into());
     }
     Ok(url)
 }
@@ -914,13 +914,13 @@ async fn register_child(
     let url = resolve_playlist_reference(base, reference).map_err(|_| {
         (
             StatusCode::BAD_GATEWAY,
-            "URI filha inválida na playlist".into(),
+            "URI filha inválida no manifesto ou playlist".into(),
         )
     })?;
     if !is_safe_proxy_url(state, url.as_str()).await {
         return Err((
             StatusCode::FORBIDDEN,
-            "playlist referencia destino não permitido".into(),
+            "manifesto ou playlist referencia destino não permitido".into(),
         ));
     }
     let token = Uuid::new_v4().simple().to_string();
@@ -929,10 +929,11 @@ async fn register_child(
     if sessions.len() >= 4096 {
         return Err((
             StatusCode::TOO_MANY_REQUESTS,
-            "limite de recursos HLS atingido".into(),
+            "limite de recursos de mídia atingido".into(),
         ));
     }
     let force_hls = url.path().to_ascii_lowercase().ends_with(".m3u8");
+    let force_dash = url.path().to_ascii_lowercase().ends_with(".mpd");
     let child_headers = if url.origin() == base.origin() {
         headers.to_vec()
     } else {
@@ -948,13 +949,17 @@ async fn register_child(
             url,
             headers: child_headers,
             force_hls,
-            force_dash: false,
+            force_dash,
             allow_suffix: false,
             default_query: None,
             expires: Instant::now() + SESSION_TTL,
         },
     );
-    Ok(format!("/media/{token}"))
+    if force_dash {
+        Ok(format!("/media/{token}/manifest.mpd"))
+    } else {
+        Ok(format!("/media/{token}"))
+    }
 }
 
 #[cfg(test)]
@@ -1310,6 +1315,8 @@ mod tests {
             .unwrap();
         let rewritten = String::from_utf8(body.to_vec()).unwrap();
         assert!(rewritten.contains("<BaseURL>/media/"));
+        assert!(rewritten.contains("token=base&amp;quality=hd"));
+        assert!(rewritten.contains("token=alpha&amp;quality=hd"));
         assert!(rewritten.contains("$Number$"));
 
         let media_start = rewritten.find("media=\"").unwrap() + "media=\"".len();
