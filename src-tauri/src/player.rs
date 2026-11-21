@@ -1239,8 +1239,14 @@ mod tests {
             cfg!(debug_assertions),
             "a simulação só pode ser ativada em builds debug",
         );
-        assert!(!super::should_simulate_d3d11_device_loss(false, Some("once")));
-        assert!(!super::should_simulate_d3d11_device_loss(true, Some("true")));
+        assert!(!super::should_simulate_d3d11_device_loss(
+            false,
+            Some("once")
+        ));
+        assert!(!super::should_simulate_d3d11_device_loss(
+            true,
+            Some("true")
+        ));
         assert!(!super::should_simulate_d3d11_device_loss(true, None));
     }
 
