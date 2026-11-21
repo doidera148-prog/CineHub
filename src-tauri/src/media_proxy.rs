@@ -1235,10 +1235,10 @@ mod tests {
         const MANIFEST: &str = r#"<?xml version="1.0"?>
 <MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static">
   <Period>
-    <BaseURL>video/</BaseURL>
+    <BaseURL>video/?token=base&amp;quality=hd</BaseURL>
     <AdaptationSet>
       <Representation id="v1">
-        <SegmentTemplate timescale="1" initialization="init.mp4" media="chunk-$Number$.m4s" startNumber="1">
+        <SegmentTemplate timescale="1" initialization="init.mp4?key=init&amp;quality=hd" media="chunk-$Number$.m4s?token=alpha&amp;quality=hd" startNumber="1">
           <SegmentTimeline><S t="0" d="4" r="1"/></SegmentTimeline>
         </SegmentTemplate>
       </Representation>
@@ -1267,10 +1267,39 @@ mod tests {
         let state = local_test_state();
         let manifest_url =
             Url::parse(&format!("http://{origin_address}/manifest.mpd")).unwrap();
-        let manifest_token = add_test_target(&state, manifest_url, false).await;
+        let proxy = MediaProxy {
+            address: "127.0.0.1:0".parse().unwrap(),
+            state: state.clone(),
+        };
+        let local_manifest = proxy
+            .register(
+                manifest_url.as_str(),
+                None,
+                Some("application/dash+xml"),
+            )
+            .await
+            .unwrap();
+        assert!(local_manifest.ends_with("/manifest.mpd"));
+        let local_url = Url::parse(&local_manifest).unwrap();
+        let manifest_token = local_url
+            .path_segments()
+            .unwrap()
+            .nth(1)
+            .unwrap()
+            .to_string();
 
-        let manifest_response =
-            request_test_resource(&state, manifest_token, HeaderMap::new()).await;
+        // Players can identify DASH by the local .mpd suffix; the alias resolves to
+        // the original manifest while segment paths use separate scoped tokens.
+        let manifest_response = proxy_request_inner(
+            state.clone(),
+            manifest_token.clone(),
+            Some("manifest.mpd".into()),
+            None,
+            Method::GET,
+            HeaderMap::new(),
+        )
+        .await
+        .unwrap();
         assert_eq!(manifest_response.status(), StatusCode::OK);
         assert_eq!(
             manifest_response.headers().get(header::CONTENT_TYPE).unwrap(),
@@ -1286,7 +1315,9 @@ mod tests {
         let media_start = rewritten.find("media=\"").unwrap() + "media=\"".len();
         let media_end = rewritten[media_start..].find('"').unwrap() + media_start;
         let media_template = &rewritten[media_start..media_end];
-        let media_url = media_template.replace("$Number$", "1");
+        let media_url = media_template
+            .replace("$Number$", "1")
+            .replace("&amp;", "&");
         let (segment_token, segment_path, segment_query) = dash_local_parts(&media_url);
         let segment_response = request_test_child_resource(
             &state,
@@ -1307,7 +1338,7 @@ mod tests {
             rewritten.find("initialization=\"").unwrap() + "initialization=\"".len();
         let init_end = rewritten[init_start..].find('"').unwrap() + init_start;
         let (init_token, init_path, init_query) =
-            dash_local_parts(&rewritten[init_start..init_end]);
+            dash_local_parts(&rewritten[init_start..init_end].replace("&amp;", "&"));
         let init_response =
             request_test_child_resource(&state, init_token, init_path, init_query).await;
         assert_eq!(init_response.status(), StatusCode::OK);
@@ -1326,6 +1357,23 @@ mod tests {
         let token = parts.next().expect("DASH proxy token missing").to_string();
         let resource = parts.next().expect("DASH resource path missing").to_string();
         (token, resource, parsed.query().map(str::to_owned))
+    }
+
+    #[test]
+    fn dash_child_paths_reject_encoded_separators_and_traversal() {
+        for path in [
+            "../private",
+            "%2e%2e/private",
+            "%2E./private",
+            "video%2f..%2fprivate",
+            "video%5cprivate",
+        ] {
+            assert!(
+                !valid_proxy_resource_path(path),
+                "caminho DASH deveria ser recusado: {path}"
+            );
+        }
+        assert!(valid_proxy_resource_path("video/chunk-$Number$.m4s"));
     }
 
     #[test]
