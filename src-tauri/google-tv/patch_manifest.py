@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ajusta o AndroidManifest gerado por \`cargo tauri android init\` para também funcionar no Google TV.
+"""Ajusta o AndroidManifest gerado por `cargo tauri android init` para também funcionar no Google TV.
 
 - Declara recursos de TV (leanback) e torna o toque opcional.
 - Adiciona o LEANBACK_LAUNCHER, que faz o app aparecer na tela inicial da TV.
