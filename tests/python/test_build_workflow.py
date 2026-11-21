@@ -140,6 +140,32 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
             with self.subTest(required=required):
                 self.assertIn(required, android)
 
+        signing_secrets = (
+            "ANDROID_KEYSTORE_BASE64",
+            "ANDROID_KEYSTORE_PASSWORD",
+            "ANDROID_KEY_ALIAS",
+            "ANDROID_KEY_PASSWORD",
+        )
+        for secret in signing_secrets:
+            with self.subTest(secret=secret):
+                self.assertIn(f"secrets.{secret}", android)
+                self.assertIn(
+                    f"github.event_name != 'pull_request' && secrets.{secret} || ''",
+                    android,
+                )
+        for required in (
+            'if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then',
+            "for secret in KEYSTORE_B64 KEYSTORE_PASS KEY_ALIAS KEY_PASS; do",
+            'if [ -z "${!secret}" ]; then',
+            "base64 -d > release.p12",
+            "test -s release.p12",
+            'keytool -list -keystore release.p12 -storetype PKCS12 -storepass "$KEYSTORE_PASS" -alias "$KEY_ALIAS" > /dev/null',
+            'echo "::error::Secret obrigatório ausente ou vazio: $secret"',
+        ):
+            with self.subTest(signing_guard=required):
+                self.assertIn(required, android)
+        self.assertNotIn('if [ -n "$KEYSTORE_B64" ]; then', android)
+
     def test_release_is_gated_by_all_build_jobs_and_publishes_all_formats(self):
         release = job_block(self.workflow, "release")
         for dependency in ("test", "lint", "web-smoke", "desktop", "android"):
