@@ -53,6 +53,52 @@ class PlayerControllerFocusPolicyTest {
     }
 
     @Test
+    fun dpadCanReachSkipButtonOnlyWhileASegmentIsActive() {
+        assertEquals(
+            FocusNode.SKIP,
+            PlayerControllerFocusPolicy.nextFocusTarget(
+                FocusNode.AUDIO, FocusDirection.LEFT, true, hasSkipButton = true,
+            ),
+        )
+        assertEquals(
+            FocusNode.SKIP,
+            PlayerControllerFocusPolicy.nextFocusTarget(
+                FocusNode.SUBTITLES, FocusDirection.LEFT, false, hasSkipButton = true,
+            ),
+        )
+        assertEquals(
+            FocusNode.PLAY_PAUSE,
+            PlayerControllerFocusPolicy.nextFocusTarget(
+                FocusNode.AUDIO, FocusDirection.LEFT, true, hasSkipButton = false,
+            ),
+        )
+        assertEquals(
+            FocusNode.PLAY_PAUSE,
+            PlayerControllerFocusPolicy.nextFocusTarget(
+                FocusNode.SUBTITLES, FocusDirection.LEFT, false, hasSkipButton = false,
+            ),
+        )
+        assertEquals(
+            FocusNode.AUDIO,
+            PlayerControllerFocusPolicy.nextFocusTarget(
+                FocusNode.SKIP, FocusDirection.RIGHT, true, hasSkipButton = true,
+            ),
+        )
+        assertEquals(
+            FocusNode.SUBTITLES,
+            PlayerControllerFocusPolicy.nextFocusTarget(
+                FocusNode.SKIP, FocusDirection.RIGHT, false, hasSkipButton = true,
+            ),
+        )
+        assertEquals(
+            FocusNode.PLAY_PAUSE,
+            PlayerControllerFocusPolicy.nextFocusTarget(
+                FocusNode.SKIP, FocusDirection.DOWN, false, hasSkipButton = true,
+            ),
+        )
+    }
+
+    @Test
     fun dpadReturnsFromTrackSelectorsAndSkipsUnavailableAudioSelector() {
         assertEquals(
             FocusNode.PLAY_PAUSE,
