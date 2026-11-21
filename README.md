@@ -7,7 +7,7 @@ Aplicativo de mídia multiplataforma, escrito em Rust + Tauri 2, com interface e
 ## Plataformas
 
 - **Android e Google TV:** APK único, com player nativo Media3/ExoPlayer. A interface detecta TVs Android de tela grande e ativa layout próprio para controle remoto.
-- **Windows:** o build de release do CI inclui libmpv/FFmpeg e incorpora a superfície de vídeo à janela do CineHub. A superfície nativa é recortada para deixar elementos HTML da interface visíveis e clicáveis; os controles de transporte usam o OSC do mpv. Builds locais sem a feature `mpv` usam o player do WebView.
+- **Windows:** o build de release inclui libmpv/FFmpeg e usa WebView2 com DirectComposition para compor a interface e a superfície de vídeo na mesma janela. O build com a feature `mpv` ativa esse caminho por padrão; `CINEHUB_DISABLE_WEBVIEW2_COMPOSITION=1` força o host HWND convencional para diagnóstico. Builds locais sem a feature `mpv` usam o player do WebView.
 - **Linux e macOS:** pacotes desktop Tauri; reprodução pelo player disponível no WebView quando o player nativo não está habilitado.
 - **iOS:** não é alvo de build nem de teste.
 
@@ -23,7 +23,7 @@ Aplicativo de mídia multiplataforma, escrito em Rust + Tauri 2, com interface e
 
 ### Reprodução
 - **Android/Google TV:** player nativo baseado em AndroidX Media3/ExoPlayer, com seleção manual de áudio, seleção e desativação de legendas, preferência por português, controle por D-pad e ações para pular segmentos quando disponíveis.
-- **Windows:** player nativo libmpv, usando os codecs e contêineres suportados pelo mpv/FFmpeg, sem limitar a escolha pela extensão do arquivo. A janela de vídeo usa regiões Win32 para preservar os elementos HTML do CineHub sobre a superfície nativa.
+- **Windows:** player nativo libmpv/FFmpeg, sem limitar a escolha pela extensão do arquivo. O renderizador D3D11 apresenta o vídeo em uma swap chain compartilhada com a árvore DirectComposition do WebView2; os controles HTML do CineHub incluem pausa, busca, volume, mudo, tela cheia e seleção de faixas de áudio/legenda. A recuperação automática após perda do dispositivo D3D11 faz uma única tentativa por reprodução.
 - **Linux e macOS:** player baseado em Video.js/WebView; o player nativo só é usado se estiver habilitado em uma compilação específica.
 - Proxy HTTP local para streams HTTP/HTTPS, com suporte a respostas em blocos, solicitações Range e reescrita de playlists HLS e seus recursos filhos.
 - A interface oferece recuperação para buscas de fontes sem resultado, incluindo tentar novamente, atualizar e limpar filtros quando essas ações estão disponíveis.
