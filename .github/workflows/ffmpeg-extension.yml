@@ -1,10 +1,13 @@
 # Compila a extensão FFmpeg do Media3 (áudio AC3/E-AC3/DTS/TrueHD/Opus etc. para o ExoPlayer)
-# e publica o AAR num release. O build Android do CineHub baixa esse AAR se ele existir.
+# e publica um AAR candidato versionado. O build Android só consome releases aprovados
+# explicitamente por tag e SHA-256 no workflow build.yml.
 #
 # Rodar: Actions → "ffmpeg-extension" → Run workflow (ou alterar as versões abaixo).
 # Fontes fixadas por commit: Media3 1.4.1 (mesma do app) e FFmpeg release/6.0.
 # O NDK tem de ser o mesmo que o Gradle usa para linkar (AGP 25.1.8937393), e a API nativa igual à do CMake (21).
-# Para publicar uma nova compilação, incremente RELEASE_TAG e atualize o SHA esperado em build.yml.
+# Para publicar um candidato, incremente RELEASE_TAG. Depois de publicar, valide o AAR e seu
+# SHA-256; só então atualize FFMPEG_RELEASE_TAG e EXPECTED_SHA256 em build.yml. Até lá, o
+# Android continua usando o último release aprovado, sem depender de um candidato não verificado.
 name: ffmpeg-extension
 
 on:
