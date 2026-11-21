@@ -627,13 +627,13 @@ async fn read_body(resp: &mut reqwest::Response, max: usize) -> Result<Vec<u8>, 
     if !status.is_success() {
         return Err(format!("HTTP {status}"));
     }
-    if resp.content_length().is_some_and(|length| length > max as u64) {
+    if resp
+        .content_length()
+        .is_some_and(|length| length > max as u64)
+    {
         return Err("resposta grande demais".into());
     }
-    let capacity = resp
-        .content_length()
-        .unwrap_or(0)
-        .min(max as u64) as usize;
+    let capacity = resp.content_length().unwrap_or(0).min(max as u64) as usize;
     let mut body = Vec::with_capacity(capacity);
     while let Some(chunk) = resp
         .chunk()
@@ -699,9 +699,7 @@ mod tests {
                 Response::new(Body::from_stream(chunks))
             }),
         );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
