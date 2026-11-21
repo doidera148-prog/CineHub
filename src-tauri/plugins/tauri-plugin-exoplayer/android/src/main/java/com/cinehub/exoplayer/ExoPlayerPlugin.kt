@@ -399,17 +399,16 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
                 updateTrackButtons(view.isControllerFullyVisible)
             }
         })
-        // Um seletor externo do PlayerView não faz parte do cronômetro de foco do
-        // Media3. Enquanto o D-pad estiver nele, desative o auto-hide; ao sair,
-        // restaure os 6 segundos normais. Isso evita perder o foco em botões que
-        // são ocultados junto com a barra de controles.
-        fun updateTrackButtonFocusTimeout() {
+        // Os botões sobrepostos não fazem parte do cronômetro de foco do Media3.
+        // Enquanto Áudio, Legendas ou Pular estiver focado, mantenha os controles
+        // visíveis; ao sair, restaure os 6 segundos normais de auto-ocultação.
+        fun updateOverlayButtonFocusTimeout() {
             val overlayButtonHasFocus = audioButton.hasFocus() || subtitleButton.hasFocus() || skipButton.hasFocus()
             view.setControllerShowTimeoutMs(PlayerControllerFocusPolicy.timeoutMs(overlayButtonHasFocus))
             if (overlayButtonHasFocus) view.showController()
         }
         listOf(audioButton, subtitleButton, skipButton).forEach { button ->
-            button.setOnFocusChangeListener { _, _ -> updateTrackButtonFocusTimeout() }
+            button.setOnFocusChangeListener { _, _ -> updateOverlayButtonFocusTimeout() }
         }
         view.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
             val overlayButtonHasFocus = audioButton.hasFocus() || subtitleButton.hasFocus() || skipButton.hasFocus()
