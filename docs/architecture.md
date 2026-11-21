@@ -108,6 +108,6 @@ O CI não substitui testes em dispositivos físicos. Especialmente em Google TV,
 
 - O CineHub não hospeda catálogo ou vídeo próprio.
 - O catálogo comunitário não é garantia de funcionamento ou confiabilidade de addons.
-- O proxy de mídia não oferece DASH.
+- O proxy DASH cobre manifestos MPD HTTP/HTTPS com `BaseURL`, `SegmentTemplate`, `SegmentList`/`SegmentURL` e referências de inicialização. Por segurança, ainda não aceita múltiplas `BaseURL` alternativas no mesmo nível do manifesto nem entidades DTD personalizadas dentro de URLs; extensões de perfil como content steering não fazem parte deste primeiro escopo.
 - Addons e proxy não podem acessar destinos privados/locais; Kodi e o servidor de torrent têm fluxos separados.
 - Formatos e codecs disponíveis dependem do player e do dispositivo.
