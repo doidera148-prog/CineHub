@@ -554,6 +554,14 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("drop(renderer)", player)
         self.assertIn("recovered_renderer", player)
         self.assertIn("novo dispositivo D3D11", player)
+        recovery_smoke = player.split(
+            "// Exercise recovery without reloading media:", 1
+        )[1].split("let mut recovered_frame", 1)[0]
+        self.assertNotIn(
+            'command("loadfile"',
+            recovery_smoke,
+            "O smoke test de recuperação deve redesenhar o frame atual sem recarregar o vídeo",
+        )
         self.assertIn('init.set_option("vo", "libmpv")?', player)
         self.assertIn('command("loadfile", &[frame_path_string.as_str(), "replace"])', player)
         self.assertIn('.render_to_smoke_swap_chain(&swap_chain)', player)
