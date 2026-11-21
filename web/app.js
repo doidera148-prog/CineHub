@@ -177,7 +177,7 @@ function askConfirm(msg, okLabel) {
 }
 
 // Funções puras (URLs seguras, ordenação de fontes, próximo episódio) vêm de lib.js, testadas com node.
-const { isWebUrl, cssUrl, str, num, mergeBackupData, createBackupData, writeStorageBatch, progressPercent, sortStreams, nextEpisode, torrentLanguage, isSeriesLike, typeLabel, qualityLabel, filterStreams, sortStreamsBy, activeSegment } = window.CineHubLib;
+const { isWebUrl, cssUrl, str, num, mergeBackupData, createBackupData, writeStorageBatch, progressPercent, sortStreams, nextEpisode, torrentLanguage, isSeriesLike, typeLabel, qualityLabel, filterStreams, sortStreamsBy, activeSegment, resumePosition } = window.CineHubLib;
 
 const STREAM_LANG = { pt: 'Português', en: 'Inglês', other: 'Outros' };
 const STREAM_SORTS = [
@@ -1992,7 +1992,7 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
   const torrentToken = stream?.torrentToken || null;
   let completed = false;
   const saved = store.get('progress', {})[id];
-  const startMs = saved && saved.t > 5 && !saved.watched ? saved.t * 1000 : 0;
+  const startMs = resumePosition(saved) * 1000;
   const compositionMode = IS_WINDOWS
     ? await call('player_composition_enabled').catch(() => false)
     : false;
@@ -2059,6 +2059,8 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
     const res = await playback;
     completed = true;
     saveProgress(true, { t: (res?.positionMs || 0) / 1000, duration: (res?.durationMs || 0) / 1000 });
+    // Ao rever um título concluído e sair antes do fim, ele volta a ser retomável.
+    if (res?.ended !== true) setWatched(id, false);
     return { ended: res?.ended === true, autoNext: res?.autoNext === true };
   } catch (e) {
     console.warn('player nativo indisponível, usando o do navegador:', e);
@@ -2159,7 +2161,8 @@ async function play(stream, label, id, meta, subs) {
   if (resumeHandler) vjsPlayer.off('loadedmetadata', resumeHandler);
   resumeHandler = () => {
     if (seq !== playSeq) return;
-    if (saved && !saved.watched && saved.t > 5 && saved.t < vjsPlayer.duration() - 15) vjsPlayer.currentTime(saved.t);
+    const resumeAt = resumePosition(saved, vjsPlayer.duration());
+    if (resumeAt > 0) vjsPlayer.currentTime(resumeAt);
   };
   vjsPlayer.one('loadedmetadata', resumeHandler);
 
@@ -2420,6 +2423,9 @@ function saveProgress(force, pos) {
   store.set('progress', Object.fromEntries(kept));
 }
 
+vjsPlayer.on('playing', () => {
+  if (current) setWatched(current.id, false);
+});
 vjsPlayer.on('timeupdate', () => {
   saveProgress(false);
   updateSkip();
@@ -2497,7 +2503,10 @@ function markWatched(id) {
 function setWatched(id, on) {
   if (!id) return;
   const all = store.get('progress', {});
-  all[id] = { ...(all[id] || { t: 0, duration: 0, label: '', seriesId: id, type: '', name: '', poster: '' }), watched: on === true, updated: Date.now() };
+  const previous = all[id];
+  // Desmarcar só altera um registro que já estava assistido; não cria progresso vazio.
+  if (on !== true && (!previous || previous.watched !== true)) return;
+  all[id] = { ...(previous || { t: 0, duration: 0, label: '', seriesId: id, type: '', name: '', poster: '' }), watched: on === true, updated: Date.now() };
   const kept = Object.entries(all)
     .sort((a, b) => num(b[1]?.updated) - num(a[1]?.updated))
     .slice(0, MAX_PROGRESS);
