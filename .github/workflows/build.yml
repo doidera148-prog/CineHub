@@ -392,23 +392,40 @@ jobs:
           done
       - name: Assinar APK
         env:
-          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          # Pull requests nunca recebem a chave de release; usam apenas uma chave efêmera para o smoke test.
+          KEYSTORE_B64: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEYSTORE_BASE64 || '' }}
+          KEYSTORE_PASS: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEYSTORE_PASSWORD || '' }}
+          KEY_ALIAS: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEY_ALIAS || '' }}
+          KEY_PASS: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEY_PASSWORD || '' }}
         run: |
           set -euo pipefail
           BT="$ANDROID_HOME/build-tools/34.0.0"
-          if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > release.jks
-            KS=release.jks; PASS="$KEYSTORE_PASS"; ALIAS="$KEY_ALIAS"; KPASS="$KEY_PASS"
-          else
-            # Sem segredos configurados: chave temporária do build. Instala, mas cada build
-            # tem assinatura diferente, então é preciso desinstalar a versão anterior.
-            echo "::warning::Segredos ANDROID_KEYSTORE_* não configurados; APK assinado com chave temporária."
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            # PRs usam uma chave descartável para validar a instalação no emulador.
             keytool -genkeypair -keystore release.jks -storepass android -keypass android \
-              -alias cinehub -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=CineHub"
+              -alias cinehub -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=CineHub PR"
             KS=release.jks; PASS=android; ALIAS=cinehub; KPASS=android
+          else
+            # Builds publicáveis nunca podem recorrer silenciosamente a uma assinatura temporária.
+            for secret in KEYSTORE_B64 KEYSTORE_PASS KEY_ALIAS KEY_PASS; do
+              if [ -z "${!secret}" ]; then
+                echo "::error::Secret obrigatório ausente ou vazio: $secret"
+                exit 1
+              fi
+            done
+            if ! printf '%s' "$KEYSTORE_B64" | base64 -d > release.p12; then
+              echo "::error::ANDROID_KEYSTORE_BASE64 não contém um keystore Base64 válido."
+              exit 1
+            fi
+            if [ ! -s release.p12 ]; then
+              echo "::error::O keystore decodificado está vazio."
+              exit 1
+            fi
+            if ! keytool -list -keystore release.p12 -storetype PKCS12 -storepass "$KEYSTORE_PASS" -alias "$KEY_ALIAS" > /dev/null; then
+              echo "::error::Não foi possível validar o keystore, a senha ou o alias configurado."
+              exit 1
+            fi
+            KS=release.p12; PASS="$KEYSTORE_PASS"; ALIAS="$KEY_ALIAS"; KPASS="$KEY_PASS"
           fi
           mkdir -p signed
           find src-tauri/gen/android/app/build/outputs/apk -name "*-unsigned.apk" | while read -r apk; do
