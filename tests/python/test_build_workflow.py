@@ -524,6 +524,20 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("device_recovery_attempts == 0", player)
         self.assertIn("super::mpv_d3d11::recreate_host_device(parent)", player)
         self.assertIn("drop(render_context.take())", player)
+        for diagnostic in (
+            "CINEHUB_DEBUG_SIMULATE_D3D11_DEVICE_LOSS",
+            "should_simulate_d3d11_device_loss",
+            "cfg!(debug_assertions)",
+            "setting == Some(\"once\")",
+            "simulate_device_loss_once = false",
+            "RenderError::simulated_device_loss()",
+        ):
+            with self.subTest(d3d11_diagnostic=diagnostic):
+                self.assertIn(diagnostic, player)
+        self.assertIn("#[cfg(all(windows, debug_assertions))]", player)
+        self.assertIn("drop(renderer)", player)
+        self.assertIn("recovered_renderer", player)
+        self.assertIn("novo dispositivo D3D11", player)
         self.assertIn('init.set_option("vo", "libmpv")?', player)
         self.assertIn('command("loadfile", &[frame_path_string.as_str(), "replace"])', player)
         self.assertIn('.render_to_smoke_swap_chain(&swap_chain)', player)
