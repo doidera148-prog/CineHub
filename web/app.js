@@ -2028,6 +2028,13 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
     } else args.subtitleUrl = pickSubtitles(stream, subs)[0]?.url ?? null;
     // Botão de pular no player nativo: tecla F12 (mpv, desktop) ou botão na tela (Android)
     args.segments = IS_ANDROID ? JSON.stringify(segments) : segments;
+    if (IS_ANDROID) {
+      const upcoming = nextEpisode(meta?.videos, id);
+      if (upcoming) {
+        args.nextEpisodeLabel =
+          `${meta?.name || label} · T${upcoming.season ?? 0}E${upcoming.episode ?? ''}`;
+      }
+    }
     let playback;
     if (IS_WINDOWS) {
       // Mostra os controles do CineHub acima do vídeo nativo. Na composição,
@@ -2052,7 +2059,7 @@ async function playNative(stream, label, id, meta, subs, segments = []) {
     const res = await playback;
     completed = true;
     saveProgress(true, { t: (res?.positionMs || 0) / 1000, duration: (res?.durationMs || 0) / 1000 });
-    return true;
+    return { ended: res?.ended === true, autoNext: res?.autoNext === true };
   } catch (e) {
     console.warn('player nativo indisponível, usando o do navegador:', e);
     // Guarda o motivo: o aviso do player web (ex.: "não toca MKV") o mostra junto.
@@ -2116,13 +2123,23 @@ async function play(stream, label, id, meta, subs) {
   // vídeo, áudio, contêineres e protocolos suportados pelo próprio mpv.
   // Não restringir por extensão: URLs sem extensão e streams também são válidos.
   if (IS_WINDOWS) {
-    if (await playNative(stream, label, id, meta, subs, segments)) return;
+    const nativePlayback = await playNative(stream, label, id, meta, subs, segments);
+    if (nativePlayback) {
+      if (nativePlayback.ended) markWatched(id);
+      if (nativePlayback.autoNext) await playNextEpisodeFor(meta, id);
+      return;
+    }
     // Não cair no HTML5 após falha do mpv: isso gerava uma mensagem falsa de formato
     // incompatível mesmo quando a causa era inicialização/configuração do player nativo.
     toast(`O player nativo não conseguiu abrir esta fonte: ${nativeFailure || 'erro desconhecido'}`);
     return;
   }
-  if (await playNative(stream, label, id, meta, subs, segments)) return;
+  const nativePlayback = await playNative(stream, label, id, meta, subs, segments);
+  if (nativePlayback) {
+    if (nativePlayback.ended) markWatched(id);
+    if (nativePlayback.autoNext) await playNextEpisodeFor(meta, id);
+    return;
+  }
 
   saveProgress(true);
   const seq = ++playSeq;
@@ -2434,11 +2451,14 @@ function hideNext() {
 }
 $('#next-ep').onclick = () => playNextEpisode();
 
-async function playNextEpisode() {
-  if (!nextUp) return;
-  const { ep, meta } = nextUp;
+async function playNextEpisodeFor(meta, currentId) {
+  const ep = nextEpisode(meta?.videos, currentId);
+  if (!ep) return;
+  await loadEpisode(meta, ep);
+}
+
+async function loadEpisode(meta, ep) {
   const epKind = meta.type === 'anime' ? 'anime' : 'series';
-  hideNext();
   const label = `${meta.name} · T${ep.season ?? 0}E${ep.episode ?? ''}`;
   try {
     const { streams = [], subtitles = [] } = await withBusy(
@@ -2454,6 +2474,13 @@ async function playNextEpisode() {
   } catch (err) {
     toast(`Não consegui abrir o próximo episódio: ${describeError(err)}`);
   }
+}
+
+async function playNextEpisode() {
+  if (!nextUp) return;
+  const { ep, meta } = nextUp;
+  hideNext();
+  await loadEpisode(meta, ep);
 }
 function markWatched(id) {
   setWatched(id, true);
