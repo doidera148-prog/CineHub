@@ -81,19 +81,9 @@ async fn rpc(
     if !response.status().is_success() {
         return Err(format!("Kodi respondeu com HTTP {}", response.status()));
     }
-    if response
-        .content_length()
-        .is_some_and(|n| n > MAX_RESPONSE_BYTES as u64)
-    {
-        return Err("Resposta do Kodi excede 2 MiB".into());
-    }
-    let bytes = response
-        .bytes()
+    let bytes = crate::addon::read_response_capped(&mut response, MAX_RESPONSE_BYTES)
         .await
         .map_err(|e| format!("Resposta Kodi inválida: {e}"))?;
-    if bytes.len() > MAX_RESPONSE_BYTES {
-        return Err("Resposta do Kodi excede 2 MiB".into());
-    }
     let body: Value =
         serde_json::from_slice(&bytes).map_err(|_| "Kodi retornou JSON inválido".to_string())?;
     if let Some(error) = body.get("error") {
