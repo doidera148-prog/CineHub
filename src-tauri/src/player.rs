@@ -498,7 +498,7 @@ mod imp {
         // Create the render context before loadfile so vo=libmpv never creates a
         // separate native window. Wry supplies the device used by its composition swap chain.
         #[cfg(windows)]
-        let render_context = if composition_mode {
+        let mut render_context = if composition_mode {
             let parent = wid.expect("composition_mode requer o HWND da janela principal");
             let device = super::mpv_d3d11::host_device(parent)?;
             Some(super::mpv_d3d11::D3d11RenderContext::new(&mpv, &device)?)
@@ -541,6 +541,8 @@ mod imp {
         // Fim do trecho cuja tecla está ligada (None: nenhum trecho agora)
         let mut bound_end: Option<f64> = None;
         let mut failed = false;
+        #[cfg(windows)]
+        let mut device_recovery_attempts = 0u8;
         let mut last_state_emit = std::time::Instant::now();
         // Dentro da janela do app: esconde os controles web e traz o vídeo para frente (Windows).
         #[cfg(all(windows, feature = "mpv"))]
@@ -590,11 +592,54 @@ mod imp {
             }
 
             #[cfg(windows)]
-            if let (Some(parent), Some(renderer)) = (wid, render_context.as_ref()) {
-                if renderer.frame_is_pending() {
-                    match super::mpv_d3d11::render_to_host(parent, renderer) {
-                        Ok(true) => renderer.report_swap(),
+            {
+                let render_result = match (wid, render_context.as_ref()) {
+                    (Some(parent), Some(renderer)) if renderer.frame_is_pending() => {
+                        Some((parent, super::mpv_d3d11::render_to_host(parent, renderer)))
+                    }
+                    _ => None,
+                };
+
+                if let Some((parent, result)) = render_result {
+                    match result {
+                        Ok(true) => {
+                            if let Some(renderer) = render_context.as_ref() {
+                                renderer.report_swap();
+                            }
+                        }
                         Ok(false) => {}
+                        Err(super::mpv_d3d11::RenderError::DeviceLost {
+                            operation,
+                            hresult,
+                            removal_reason,
+                        }) if device_recovery_attempts == 0 => {
+                            device_recovery_attempts += 1;
+                            eprintln!(
+                                "perda do dispositivo D3D11 em {operation} (HRESULT 0x{:08X}; motivo 0x{:08X}); tentando uma recuperação",
+                                hresult as u32,
+                                removal_reason as u32
+                            );
+
+                            // libmpv must release all references to the removed device
+                            // before Wry replaces its swap chain and DirectComposition tree.
+                            drop(render_context.take());
+                            let recovery =
+                                super::mpv_d3d11::recreate_host_device(parent).and_then(|()| {
+                                    let device = super::mpv_d3d11::host_device(parent)?;
+                                    let renderer =
+                                        super::mpv_d3d11::D3d11RenderContext::new(&mpv, &device)?;
+                                    render_context = Some(renderer);
+                                    Ok(())
+                                });
+                            if let Err(error) = recovery {
+                                eprintln!(
+                                    "não foi possível recuperar o player após perda do D3D11: {error}"
+                                );
+                                failed = true;
+                                break;
+                            }
+                            eprintln!("dispositivo D3D11 e render context do libmpv recriados");
+                        }
                         Err(error) => {
                             eprintln!("erro no renderizador D3D11 do CineHub: {error}");
                             failed = true;
@@ -1186,6 +1231,16 @@ mod tests {
                 super::mpv_d3d11::abi_layout_is_valid(),
                 "a ABI do render API D3D11 precisa corresponder aos headers nativos do libmpv"
             );
+            for hresult in [0x887A0005_u32, 0x887A0006, 0x887A0007, 0x887A0020] {
+                assert!(
+                    super::mpv_d3d11::is_device_loss_hresult(hresult as i32),
+                    "HRESULT 0x{hresult:08X} precisa ser classificado como perda de dispositivo"
+                );
+            }
+            assert!(!super::mpv_d3d11::is_device_loss_hresult(0));
+            assert!(!super::mpv_d3d11::is_device_loss_hresult(
+                0x887A0001_u32 as i32
+            ));
 
             // Runtime smoke test: initialize libmpv's D3D11 render backend, decode
             // a local test frame, render it into a DXGI composition backbuffer, and

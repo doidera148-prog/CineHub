@@ -10,6 +10,7 @@
 
 use std::{
     ffi::c_void,
+    fmt,
     marker::PhantomData,
     mem,
     ptr::NonNull,
@@ -95,8 +96,47 @@ extern "C" {
 /// thread, never inside libmpv's callback thread.
 pub(super) struct D3d11RenderContext<'a> {
     context: NonNull<MpvRenderContextOpaque>,
+    device: ID3D11Device,
     frame_pending: Arc<AtomicBool>,
     _mpv: PhantomData<&'a Mpv>,
+}
+
+#[derive(Debug)]
+pub(super) enum RenderError {
+    DeviceLost {
+        operation: &'static str,
+        hresult: i32,
+        removal_reason: i32,
+    },
+    Other(String),
+}
+
+impl fmt::Display for RenderError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DeviceLost {
+                operation,
+                hresult,
+                removal_reason,
+            } => write!(
+                formatter,
+                "dispositivo D3D11 removido durante {operation} (HRESULT 0x{:08X}; motivo 0x{:08X})",
+                *hresult as u32,
+                *removal_reason as u32
+            ),
+            Self::Other(message) => formatter.write_str(message),
+        }
+    }
+}
+
+pub(super) fn is_device_loss_hresult(hresult: i32) -> bool {
+    matches!(
+        hresult as u32,
+        0x887A0005 // DXGI_ERROR_DEVICE_REMOVED
+            | 0x887A0006 // DXGI_ERROR_DEVICE_HUNG
+            | 0x887A0007 // DXGI_ERROR_DEVICE_RESET
+            | 0x887A0020 // DXGI_ERROR_DRIVER_INTERNAL_ERROR
+    )
 }
 
 unsafe extern "C" fn notify_render_update(callback_ctx: *mut c_void) {
@@ -160,6 +200,7 @@ impl<'a> D3d11RenderContext<'a> {
         }
         Ok(Self {
             context,
+            device: device.clone(),
             frame_pending,
             _mpv: PhantomData,
         })
@@ -171,8 +212,37 @@ impl<'a> D3d11RenderContext<'a> {
         unsafe { mpv_render_context_update(self.context.as_ptr()) }
     }
 
+    fn device_removed_reason(&self) -> i32 {
+        // The windows crate exposes this HRESULT as Result<(), Error>.
+        unsafe { self.device.GetDeviceRemovedReason() }
+            .err()
+            .map_or(0, |error| error.code().0)
+    }
+
+    fn render_failure(
+        &self,
+        operation: &'static str,
+        hresult: i32,
+        message: String,
+    ) -> RenderError {
+        // Capture the native removal reason before the old device is released.
+        let removal_reason = self.device_removed_reason();
+        if is_device_loss_hresult(hresult) || is_device_loss_hresult(removal_reason) {
+            RenderError::DeviceLost {
+                operation,
+                hresult,
+                removal_reason,
+            }
+        } else {
+            RenderError::Other(format!(
+                "{message} (HRESULT 0x{:08X}; GetDeviceRemovedReason 0x{:08X})",
+                hresult as u32, removal_reason as u32
+            ))
+        }
+    }
+
     /// Renders the current frame into a render-target texture from the same device.
-    pub(super) fn render(&self, texture: &ID3D11Texture2D) -> Result<(), String> {
+    pub(super) fn render(&self, texture: &ID3D11Texture2D) -> Result<(), RenderError> {
         let mut target = MpvD3d11Fbo {
             tex: texture.as_raw(),
         };
@@ -189,8 +259,10 @@ impl<'a> D3d11RenderContext<'a> {
         let result =
             unsafe { mpv_render_context_render(self.context.as_ptr(), params.as_mut_ptr()) };
         if result < 0 {
-            return Err(format!(
-                "libmpv falhou ao renderizar o frame D3D11 (código {result})"
+            return Err(self.render_failure(
+                "mpv_render_context_render",
+                result,
+                format!("libmpv falhou ao renderizar o frame D3D11 (código {result})"),
             ));
         }
         Ok(())
@@ -230,7 +302,9 @@ impl Drop for D3d11RenderContext<'_> {
 unsafe extern "C" {
     fn cinehub_wry_composition_get_device(parent: isize) -> *mut c_void;
     fn cinehub_wry_composition_get_backbuffer(parent: isize) -> *mut c_void;
+    fn cinehub_wry_composition_get_backbuffer_error(parent: isize) -> i32;
     fn cinehub_wry_composition_present(parent: isize) -> i32;
+    fn cinehub_wry_composition_recreate_device(parent: isize) -> i32;
     fn cinehub_wry_composition_set_video_rect(
         parent: isize,
         x: i32,
@@ -253,10 +327,18 @@ pub(super) fn host_device(parent: i64) -> Result<ID3D11Device, String> {
 pub(super) fn render_to_host(
     parent: i64,
     context: &D3d11RenderContext<'_>,
-) -> Result<bool, String> {
+) -> Result<bool, RenderError> {
     let raw = unsafe { cinehub_wry_composition_get_backbuffer(parent as isize) };
     let Some(raw) = NonNull::new(raw) else {
-        // The window is minimized or its player geometry is temporarily empty.
+        let error = unsafe { cinehub_wry_composition_get_backbuffer_error(parent as isize) };
+        if error < 0 {
+            return Err(context.render_failure(
+                "IDXGISwapChain::ResizeBuffers/GetBuffer",
+                error,
+                "DXGI não conseguiu adquirir o backbuffer do CineHub".to_string(),
+            ));
+        }
+        // A janela está minimizada ou a geometria do player está temporariamente vazia.
         return Ok(false);
     };
     // SAFETY: Wry transfers one COM reference to the current backbuffer.
@@ -266,12 +348,25 @@ pub(super) fn render_to_host(
     drop(texture);
     let result = unsafe { cinehub_wry_composition_present(parent as isize) };
     if result < 0 {
-        return Err(format!(
-            "DXGI não conseguiu apresentar o frame do CineHub (HRESULT 0x{:08X})",
-            result as u32
+        return Err(context.render_failure(
+            "IDXGISwapChain::Present",
+            result,
+            "DXGI não conseguiu apresentar o frame do CineHub".to_string(),
         ));
     }
     Ok(result == 0)
+}
+
+/// Rebuilds the Wry D3D11 and DirectComposition resources on the window-owning thread.
+pub(super) fn recreate_host_device(parent: i64) -> Result<(), String> {
+    let result = unsafe { cinehub_wry_composition_recreate_device(parent as isize) };
+    if result < 0 {
+        return Err(format!(
+            "Wry não conseguiu recriar o dispositivo/superfície de composição (HRESULT 0x{:08X})",
+            result as u32
+        ));
+    }
+    Ok(())
 }
 
 /// Creates the same kind of composition swap chain used by Wry for the Windows CI smoke test.
@@ -407,12 +502,19 @@ impl D3d11RenderContext<'_> {
     ) -> Result<(), String> {
         let texture = unsafe { swap_chain.GetBuffer::<ID3D11Texture2D>(0) }
             .map_err(|error| format!("DXGI não conseguiu obter o backbuffer: {error}"))?;
-        self.render(&texture)?;
+        self.render(&texture).map_err(|error| error.to_string())?;
         drop(texture);
 
         let present_result =
             unsafe { swap_chain.Present(0, windows::Win32::Graphics::Dxgi::DXGI_PRESENT(0)) };
         if present_result.0 < 0 {
+            let reason = self.device_removed_reason();
+            if is_device_loss_hresult(present_result.0) || is_device_loss_hresult(reason) {
+                return Err(format!(
+                    "DXGI Present indicou perda do dispositivo (HRESULT 0x{:08X}; motivo 0x{:08X})",
+                    present_result.0 as u32, reason as u32
+                ));
+            }
             return Err(format!(
                 "DXGI Present falhou no smoke test (HRESULT 0x{:08X})",
                 present_result.0 as u32
