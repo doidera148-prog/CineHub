@@ -689,13 +689,16 @@ mod tests {
             Router,
         };
 
-        let app = Router::new().route("/", get(|| async {
-            let chunks = futures::stream::iter(vec![
-                Ok::<_, std::io::Error>(Bytes::from_static(b"1234")),
-                Ok::<_, std::io::Error>(Bytes::from_static(b"5678")),
-            ]);
-            Response::new(Body::from_stream(chunks))
-        }));
+        let app = Router::new().route(
+            "/",
+            get(|| async {
+                let chunks = futures::stream::iter(vec![
+                    Ok::<_, std::io::Error>(Bytes::from_static(b"1234")),
+                    Ok::<_, std::io::Error>(Bytes::from_static(b"5678")),
+                ]);
+                Response::new(Body::from_stream(chunks))
+            }),
+        );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .unwrap();
