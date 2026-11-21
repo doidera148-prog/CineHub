@@ -1351,8 +1351,8 @@ mod tests {
             );
             eprintln!("D3D11 runtime smoke test aprovado usando driver {driver}");
 
-            // Exercise the recovery lifecycle: free the old render context first,
-            // then bind a fresh libmpv context to a newly created D3D11 device.
+            // Exercise recovery without reloading media: the current decoded frame
+            // must remain drawable through the replacement render context and device.
             drop(renderer);
             drop(swap_chain);
             drop(device);
@@ -1363,9 +1363,6 @@ mod tests {
             let recovered_renderer =
                 super::mpv_d3d11::D3d11RenderContext::new(&d3d_mpv, &recovered_device)
                     .expect("libmpv precisa recriar o render context em um novo dispositivo D3D11");
-            d3d_mpv
-                .command("loadfile", &[frame_path_string.as_str(), "replace"])
-                .expect("libmpv precisa reabrir o quadro após a recriação do render context");
 
             let mut recovered_frame = false;
             for _ in 0..100 {
