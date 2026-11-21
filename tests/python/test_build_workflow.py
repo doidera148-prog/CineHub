@@ -107,6 +107,17 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
             "cargo test --features mpv --lib mpv_osc_script_options_are_valid",
             desktop,
         )
+        self.assertIn(
+            "cargo tauri build --debug --config tauri.windows.conf.json --features mpv",
+            desktop,
+        )
+        self.assertIn("cinehub-windows-d3d11-diagnostic-debug", desktop)
+        self.assertIn("src-tauri/target/debug/bundle/**", desktop)
+        self.assertLess(
+            desktop.index("cargo test --features mpv --lib mpv_osc_script_options_are_valid"),
+            desktop.index("cargo tauri build --debug --config tauri.windows.conf.json --features mpv"),
+            "A build de diagnóstico deve vir depois do smoke test Windows já existente",
+        )
         self.assertIn("actions/upload-artifact@", desktop)
         self.assertIn("cinehub-" + "$" + "{{ matrix.platform }}", desktop)
 
