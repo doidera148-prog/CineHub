@@ -52,7 +52,7 @@ await page.setContent(`<!doctype html><html><head><style>
       <button id="action">Ação</button>
     </section>
   </main>
-  <dialog id="test-dialog"><button id="dialog-first">Primeiro</button><button id="dialog-last">Último</button><button id="dialog-cancel" value="cancel">Cancelar</button></dialog>
+  <dialog id="test-dialog"><button id="dialog-first" value="cancel">Primeiro</button><button id="dialog-last">Último</button></dialog>
   <div id="player" class="hidden"><button id="close-player">Fechar player</button></div>
   <div id="toast" class="hidden"></div>
 </body></html>`);
@@ -193,7 +193,7 @@ await expectFocus('', 'Voltar nativo deve retirar o foco do campo de texto');
 
 // Voltar fecha um diálogo usando a ação de cancelar, sem navegar por trás dele.
 await page.locator('#test-dialog').evaluate((el) => el.showModal());
-await page.locator('#dialog-cancel').evaluate((button) => {
+await page.locator('#dialog-first').evaluate((button) => {
   button.addEventListener('click', () => button.closest('dialog').close());
 });
 const dialogBackHandled = await page.evaluate(() => window.__cinehubBack());
