@@ -68,7 +68,7 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
             "python3 -m compileall -q src-tauri/google-tv tests/python",
             "python3 -m unittest discover -s tests/python -v",
             "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings",
-            "cargo-deny-action@v2",
+            "cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd",
         )
         for command in checks:
             with self.subTest(command=command):
@@ -571,13 +571,54 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
         self.assertIn("body.native-composition-mode { background: transparent !important; }", css)
         self.assertIn("body.native-composition-mode #player .video-js", css)
 
-    def test_only_optional_ffmpeg_download_can_fail_without_stopping_android_job(self):
+    def test_optional_ffmpeg_asset_is_hash_verified_and_tampering_fails_the_android_job(self):
         android = job_block(self.workflow, "android")
-        self.assertIn("name: Extensão FFmpeg do Media3 (opcional", android)
-        self.assertIn("continue-on-error: true", android)
-        self.assertIn("gh release download ffmpeg-ext-1.4.1", android)
-        self.assertIn("|| echo \"Extensão FFmpeg ainda não publicada", android)
+        ffmpeg = android.split(
+            "      - name: Extensão FFmpeg do Media3", 1
+        )[1].split("      - uses: dtolnay/rust-toolchain@", 1)[0]
+        approved_release = re.search(r"(?m)^          FFMPEG_RELEASE_TAG='([^']+)'$", ffmpeg)
+        self.assertIsNotNone(approved_release, "O build Android precisa declarar o release FFmpeg aprovado")
+        self.assertEqual(approved_release.group(1), "ffmpeg-ext-1.4.1")
+        self.assertIn('gh release download "$FFMPEG_RELEASE_TAG"', ffmpeg)
+        self.assertIn("8d7cc27e1fbae9673437909032d955cb16fd8993bc9b9e52b54a2ec34900b4cf", ffmpeg)
+        self.assertIn("sha256sum --check --status", ffmpeg)
+        self.assertIn('rm -f "$AAR"', ffmpeg)
+        self.assertIn("::error::SHA-256 do AAR FFmpeg", ffmpeg)
+        self.assertIn("::warning::Extensão FFmpeg não publicada/disponível", ffmpeg)
+        self.assertNotIn("continue-on-error: true", ffmpeg)
 
+        extension_workflow = (ROOT / ".github/workflows/ffmpeg-extension.yml").read_text(encoding="utf-8")
+        candidate_release = re.search(r'(?m)^  RELEASE_TAG: "([^"]+)"$', extension_workflow)
+        self.assertIsNotNone(candidate_release, "O workflow de extensão precisa declarar a tag candidata")
+        self.assertEqual(candidate_release.group(1), "ffmpeg-ext-1.4.1-r2")
+        self.assertNotEqual(
+            candidate_release.group(1),
+            approved_release.group(1),
+            "Um AAR candidato não pode ser consumido pelo Android antes da validação e promoção do SHA-256",
+        )
+        self.assertIn("só então atualize FFMPEG_RELEASE_TAG e EXPECTED_SHA256", extension_workflow)
+
+    def test_windows_mpv_archive_is_hash_verified_and_cache_key_includes_digest(self):
+        desktop = job_block(self.workflow, "desktop")
+        expected_sha256 = "7c147cb7ceaba717414e782ef4398de728f679db6e86daaa8aeb175670cb7994"
+        self.assertIn(expected_sha256, desktop)
+        self.assertIn("Get-FileHash -Path $archive -Algorithm SHA256", desktop)
+        self.assertIn("libmpv-dev-x86_64-20261108-git-55d3feb45c-sha256-7c147cb7ceab", desktop)
+
+    def test_manual_libmpv_preparation_uses_the_same_pinned_checksum(self):
+        script = (ROOT / ".github/scripts/prepare-libmpv.ps1").read_text(encoding="utf-8")
+        self.assertIn("7c147cb7ceaba717414e782ef4398de728f679db6e86daaa8aeb175670cb7994", script)
+        self.assertIn("Get-FileHash -Path $archivePath -Algorithm SHA256", script)
+        self.assertIn("https://sourceforge.net/projects/mpv-player-windows/files/libmpv/", script)
+        self.assertNotIn("releases?per_page=10", script)
+
+    def test_ffmpeg_extension_workflow_pins_source_commits_and_never_overwrites_release_assets(self):
+        workflow = (ROOT / ".github/workflows/ffmpeg-extension.yml").read_text(encoding="utf-8")
+        self.assertIn('MEDIA3_COMMIT: "c35a9d62baec57118ea898e271ac66819399649b"', workflow)
+        self.assertIn('FFMPEG_COMMIT: "573f2b81ebd97da81def2ba762e81b0328547004"', workflow)
+        self.assertIn('git -C "$RUNNER_TEMP/ffmpeg" fetch --depth 1 origin "$FFMPEG_COMMIT"', workflow)
+        self.assertIn('sha256sum "$AAR"', workflow)
+        self.assertNotIn("--clobber", workflow)
 
     def test_workflow_yaml_parses_and_has_no_duplicate_mapping_keys(self):
         # Psych faz parte do Ruby disponível nos runners Ubuntu do GitHub Actions.

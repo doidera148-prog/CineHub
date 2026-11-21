@@ -1,34 +1,31 @@
-# Prepara o libmpv para o build de Windows do CineHub (feature `mpv`).
+# Prepara o libmpv fixado e validado por SHA-256 para o build Windows do CineHub.
 #
-# - Baixa o pacote de desenvolvimento do mpv (release mais recente que o contém).
+# - Baixa um pacote de desenvolvimento identificado por data e commit.
+# - Verifica o SHA-256 antes de extrair qualquer arquivo.
 # - Copia mpv-2.dll para src-tauri/resources/ (o Tauri instala a DLL junto do app).
 # - Procura mpv.lib (import library MSVC). Se o pacote não tiver, gera um a partir das
 #   exportações da DLL, usando dumpbin/lib do Visual Studio.
 # - Define RUSTFLAGS para o linker achar o mpv.lib nas próximas etapas do job.
 #
 # Uso (no diretório src-tauri): pwsh -File ../.github/scripts/prepare-libmpv.ps1
-param([string]$Root = (Get-Location).Path)
+param(
+    [string]$Root = (Get-Location).Path,
+    [string]$Archive = 'mpv-dev-x86_64-20261108-git-55d3feb45c.7z',
+    [string]$ExpectedSha256 = '7c147cb7ceaba717414e782ef4398de728f679db6e86daaa8aeb175670cb7994'
+)
 $ErrorActionPreference = 'Stop'
-
-# Usa a release mais recente que tenha o pacote mpv-dev x86_64 (o nome do arquivo inclui a data
-# e o hash do commit, então ele é lido da API em vez de escrito à mão).
-$headers = @{ 'Accept' = 'application/vnd.github+json' }
-if ($env:GH_TOKEN) { $headers['Authorization'] = "Bearer $env:GH_TOKEN" }
-$releases = Invoke-RestMethod -Headers $headers -Uri 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases?per_page=10'
-$asset = $null
-foreach ($release in $releases) {
-    $asset = $release.assets | Where-Object { $_.name -match '^mpv-dev-x86_64-\d{8}-git-[0-9a-f]+\.7z$' } | Select-Object -First 1
-    if ($asset) { Write-Host "release usada: $($release.tag_name)"; break }
-}
-if (-not $asset) { throw 'nenhum pacote mpv-dev x86_64 nas releases recentes' }
-$Archive = $asset.name
 
 $work = Join-Path $env:RUNNER_TEMP 'libmpv'
 $extract = Join-Path $work 'x'
 New-Item -ItemType Directory -Force $work | Out-Null
 $archivePath = Join-Path $work $Archive
-Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $archivePath
-Write-Host "baixado: $Archive"
+$downloadUrl = "https://sourceforge.net/projects/mpv-player-windows/files/libmpv/$Archive/download"
+Invoke-WebRequest -Uri $downloadUrl -OutFile $archivePath
+$actualSha256 = (Get-FileHash -Path $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actualSha256 -ne $ExpectedSha256.ToLowerInvariant()) {
+    throw "SHA-256 inválido para $Archive`: esperado $ExpectedSha256; obtido $actualSha256."
+}
+Write-Host "baixado e validado: $Archive (SHA-256 $actualSha256)"
 
 $7z = 'C:\Program Files\7-Zip\7z.exe'
 & $7z x $archivePath "-o$extract" -y | Out-Null

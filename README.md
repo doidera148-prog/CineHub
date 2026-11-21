@@ -109,6 +109,7 @@ docs/
 - O acesso a endereços privados é uma exceção separada e explícita na integração Kodi, que exige o endereço/IP informado pelo usuário e não faz descoberta da rede.
 - Respostas de addons têm limite de 8 MiB; legendas têm limite de 2 MiB. O cache de catálogo/metadados/fontes tem TTL de 10 minutos e limites de entradas/tamanho.
 - O armazenamento local de addons preserva dados corrompidos para diagnóstico em vez de sobrescrevê-los silenciosamente.
+- As exceções RustSec em `src-tauri/deny.toml` são restritas a avisos INFO de crates sem manutenção; devem ser reavaliadas quando as dependências-pai forem atualizadas e não substituem a correção de vulnerabilidades.
 
 ## Testes
 
@@ -188,14 +189,14 @@ O patch de manifesto adiciona o launcher Leanback, declara toque opcional e conf
 
 ## Builds automáticos e releases
 
-O workflow [build.yml](.github/workflows/build.yml) roda em pushes para `main` (exceto alterações apenas em arquivos Markdown), pull requests e execução manual. O workflow [cleanup-actions.yml](.github/workflows/cleanup-actions.yml) remove semanalmente execuções concluídas com mais de 30 dias; também pode ser iniciado manualmente com período de retenção configurável e modo de simulação.
+O workflow [build.yml](.github/workflows/build.yml) roda em pushes para `main` (exceto alterações apenas em arquivos Markdown), pull requests e execução manual. O workflow [cleanup-actions.yml](.github/workflows/cleanup-actions.yml) remove semanalmente execuções concluídas com mais de 30 dias; também pode ser iniciado manualmente com período de retenção configurável e modo de simulação. As Actions externas são fixadas por SHA de commit; o Dependabot acompanha atualizações semanais para revisão.
 
 - **Testes:** suíte Rust.
-- **Lint:** rustfmt, Clippy e verificação de sintaxe JavaScript; auditorias adicionais de licenças e vulnerabilidades são executadas como etapas não bloqueantes.
+- **Lint e segurança:** rustfmt, Clippy, sintaxe JavaScript, `cargo-deny` (advisories, licenças e fontes) e `npm audit --audit-level=high`; essas verificações são bloqueantes.
 - **Web:** teste de fumaça Playwright.
 - **Desktop:** Linux, Windows e macOS. No Windows, o workflow compila o player integrado com libmpv/FFmpeg e inclui as DLLs necessárias no pacote; Linux e macOS usam Video.js/WebView no build padrão.
 - **Android:** APKs separados por ABI para arm64-v8a, armeabi-v7a, x86 e x86_64.
-- **Release:** publica os artefatos quando testes, lint, smoke web e pelo menos um build de plataforma passam; mantém as 10 releases automáticas mais recentes.
+- **Release:** publica os artefatos somente quando testes, lint, smoke web, todos os builds desktop (Linux, Windows e macOS) e Android passam; mantém as 10 releases automáticas mais recentes.
 
 Os artefatos de cada execução também ficam disponíveis na aba **Actions** do GitHub.
 
