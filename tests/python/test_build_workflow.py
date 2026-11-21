@@ -158,7 +158,7 @@ class BuildWorkflowRegressionTests(unittest.TestCase):
             "for secret in KEYSTORE_B64 KEYSTORE_PASS KEY_ALIAS KEY_PASS; do",
             'if [ -z "${!secret}" ]; then',
             "base64 -d > release.p12",
-            "test -s release.p12",
+            "if [ ! -s release.p12 ]; then",
             'keytool -list -keystore release.p12 -storetype PKCS12 -storepass "$KEYSTORE_PASS" -alias "$KEY_ALIAS" > /dev/null',
             'echo "::error::Secret obrigatório ausente ou vazio: $secret"',
         ):
