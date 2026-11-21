@@ -309,12 +309,14 @@ jobs:
           AAR="$EXT/libs/$AAR_NAME"
           EXPECTED_SHA256='8d7cc27e1fbae9673437909032d955cb16fd8993bc9b9e52b54a2ec34900b4cf'
           mkdir -p "$EXT/libs"
+          rm -f "$AAR"
           if gh release download ffmpeg-ext-1.4.1 --pattern "$AAR_NAME" --dir "$EXT/libs"; then
             printf '%s  %s\n' "$EXPECTED_SHA256" "$AAR" | sha256sum --check --status || {
               echo "::error::SHA-256 do AAR FFmpeg não corresponde ao artefato aprovado."
               exit 1
             }
           else
+            rm -f "$AAR"
             echo "::warning::Extensão FFmpeg não publicada/disponível; o APK será gerado sem ela."
           fi
           # Desempacota somente o AAR já validado: classes.jar e bibliotecas nativas.
