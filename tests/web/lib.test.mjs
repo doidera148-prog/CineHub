@@ -114,6 +114,18 @@ test('conclusão salva a duração final e usa o tempo atual quando não há dur
   assert.equal(invalidValues.duration, 0);
 });
 
+test('retomada ignora progresso assistido e posições próximas do fim', () => {
+  const partial = { t: 40, duration: 100, watched: false };
+  assert.equal(L.resumePosition(partial), 40);
+  assert.equal(L.resumePosition({ ...partial, watched: true }), 0);
+  assert.equal(L.resumePosition({ t: 85, duration: 100 }), 0);
+  // A duração atual prevalece se a fonte tiver um tempo total diferente do salvo.
+  assert.equal(L.resumePosition({ t: 70, duration: 100 }, 80), 0);
+  assert.equal(L.resumePosition({ t: 4, duration: 100 }), 0);
+  // Sem duração conhecida, conserva a retomada parcial.
+  assert.equal(L.resumePosition({ t: 25, duration: 0 }), 25);
+});
+
 test('cleanProgress preserva o marcador de assistido e descarta lixo', () => {
   const p = L.cleanProgress({ t: '12', duration: 'x', watched: true });
   assert.equal(p.t, 12);
