@@ -210,6 +210,10 @@ impl<'a> D3d11RenderContext<'a> {
                 Arc::as_ptr(&frame_pending) as *mut c_void,
             );
         }
+        // A replacement render context must redraw the frame already loaded by mpv.
+        // Device recovery intentionally does not reload the media, so queue an
+        // initial update check instead of waiting only for the next decoded frame.
+        frame_pending.store(true, Ordering::Release);
         Ok(Self {
             context,
             device: device.clone(),
