@@ -512,11 +512,11 @@ async fn register_child(
         headers
             .iter()
             .filter(|(name, _)| {
-            *name != header::AUTHORIZATION
-                && *name != header::COOKIE
-                && *name != header::ORIGIN
-                && *name != header::REFERER
-        })
+                *name != header::AUTHORIZATION
+                    && *name != header::COOKIE
+                    && *name != header::ORIGIN
+                    && *name != header::REFERER
+            })
             .cloned()
             .collect()
     };
