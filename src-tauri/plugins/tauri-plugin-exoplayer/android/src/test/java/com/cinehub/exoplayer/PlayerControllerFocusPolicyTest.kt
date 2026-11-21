@@ -22,25 +22,53 @@ class PlayerControllerFocusPolicyTest {
 
     @Test
     fun dpadConnectsPlaybackProgressAndAvailableTrackSelectors() {
-        val policy = PlayerControllerFocusPolicy
-        assertEquals(FocusNode.AUDIO, policy.nextFocusTarget(FocusNode.PLAY_PAUSE, FocusDirection.UP, true))
-        assertEquals(FocusNode.SUBTITLES, policy.nextFocusTarget(node.PLAY_PAUSE, direction.UP, false))
-        assertEquals(FocusNode.PROGRESS, policy.nextFocusTarget(node.PLAY_PAUSE, FocusDirection.DOWN, true))
-        assertEquals(node.SUBTITLES, policy.nextFocusTarget(node.AUDIO, direction.DOWN, true))
-        assertEquals(node.PROGRESS, policy.nextFocusTarget(node.SUBTITLES, direction.DOWN, true))
-        assertEquals(node.SUBTITLES, policy.nextFocusTarget(node.PROGRESS, direction.UP, true))
-        assertEquals(node.PLAY_PAUSE, policy.nextFocusTarget(node.PROGRESS, direction.DOWN, true))
+        assertEquals(
+            FocusNode.AUDIO,
+            PlayerControllerFocusPolicy.nextFocusTarget(FocusNode.PLAY_PAUSE, FocusDirection.UP, true),
+        )
+        assertEquals(
+            FocusNode.SUBTITLES,
+            PlayerControllerFocusPolicy.nextFocusTarget(FocusNode.PLAY_PAUSE, FocusDirection.UP, false),
+        )
+        assertEquals(
+            FocusNode.PROGRESS,
+            PlayerControllerFocusPolicy.nextFocusTarget(FocusNode.PLAY_PAUSE, FocusDirection.DOWN, true),
+        )
+        assertEquals(
+            FocusNode.SUBTITLES,
+            PlayerControllerFocusPolicy.nextFocusTarget(FocusNode.AUDIO, FocusDirection.DOWN, true),
+        )
+        assertEquals(
+            FocusNode.PROGRESS,
+            PlayerControllerFocusPolicy.nextFocusTarget(FocusNode.SUBTITLES, FocusDirection.DOWN, true),
+        )
+        assertEquals(
+            FocusNode.SUBTITLES,
+            PlayerControllerFocusPolicy.nextFocusTarget(FocusNode.PROGRESS, FocusDirection.UP, true),
+        )
+        assertEquals(
+            FocusNode.PLAY_PAUSE,
+            PlayerControllerFocusPolicy.nextFocusTarget(FocusNode.PROGRESS, FocusDirection.DOWN, true),
+        )
     }
 
     @Test
     fun dpadReturnsFromTrackSelectorsAndSkipsUnavailableAudioSelector() {
-        val policy = PlayerControllerFocusPolicy
-        val node = PlayerControllerFocusPolicy.FocusNode
-        val direction = PlayerControllerFocusPolicy.FocusDirection
-
-        assertEquals(node.PLAY_PAUSE, policy.nextFocusTarget(node.SUBTITLES, direction.UP, false))
-        assertEquals(node.AUDIO, policy.nextFocusTarget(node.SUBTITLES, direction.UP, true))
-        assertEquals(node.PLAY_PAUSE, policy.nextFocusTarget(node.AUDIO, FocusDirection.LEFT, true))
-        assertEquals(node.PLAY_PAUSE, policy.nextFocusTarget(node.SUBTITLES, direction.LEFT, true))
+        assertEquals(
+            FocusNode.PLAY_PAUSE,
+            PlayerControllerFocusPolicy.nextFocusTarget(FocusNode.SUBTITLES, FocusDirection.UP, false),
+        )
+        assertEquals(
+            FocusNode.AUDIO,
+            PlayerControllerFocusPolicy.nextFocusTarget(FocusNode.SUBTITLES, FocusDirection.UP, true),
+        )
+        assertEquals(
+            FocusNode.PLAY_PAUSE,
+            PlayerControllerFocusPolicy.nextFocusTarget(FocusNode.AUDIO, FocusDirection.LEFT, true),
+        )
+        assertEquals(
+            FocusNode.PLAY_PAUSE,
+            PlayerControllerFocusPolicy.nextFocusTarget(FocusNode.SUBTITLES, FocusDirection.LEFT, true),
+        )
     }
 }
