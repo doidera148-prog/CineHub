@@ -451,7 +451,7 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
             }
         })
         // Os botões sobrepostos não fazem parte do cronômetro de foco do Media3.
-        // Enquanto Áudio, Legendas ou Pular estiver focado, mantenha os controles
+        // Enquanto Áudio, Legendas, Pular ou Próximo episódio estiver focado, mantenha os controles
         // visíveis; ao sair, restaure os 6 segundos normais de auto-ocultação.
         fun updateOverlayButtonFocusTimeout() {
             val overlayButtonHasFocus = audioButton.hasFocus() || subtitleButton.hasFocus() ||
