@@ -48,6 +48,8 @@ class PlayArgs {
     var subtitlesDisabled: Boolean = false
     var audioLanguage: String? = null
     var subtitleLanguage: String? = null
+    /** Rótulo do próximo episódio, quando houver, para oferecer reprodução automática ao terminar. */
+    var nextEpisodeLabel: String? = null
     /** Trechos para pular, como JSON: [{"type":"intro","start":5,"end":90}, ...] (opcional). */
     var segments: String? = null
 }
@@ -93,7 +95,7 @@ internal object ExoPlayerUrlValidator {
 internal object PlayerControllerFocusPolicy {
     const val AUTO_HIDE_TIMEOUT_MS = 6_000
 
-    enum class FocusNode { PLAY_PAUSE, PROGRESS, AUDIO, SUBTITLES, SKIP }
+    enum class FocusNode { PLAY_PAUSE, PROGRESS, AUDIO, SUBTITLES, SKIP, NEXT_EPISODE }
     enum class FocusDirection { UP, DOWN, LEFT, RIGHT }
 
     fun timeoutMs(overlayControlHasFocus: Boolean): Int =
@@ -105,6 +107,7 @@ internal object PlayerControllerFocusPolicy {
         direction: FocusDirection,
         hasAudioSelector: Boolean,
         hasSkipButton: Boolean = false,
+        hasNextEpisode: Boolean = false,
     ): FocusNode? = when (current) {
         FocusNode.PLAY_PAUSE -> when (direction) {
             FocusDirection.UP -> if (hasAudioSelector) FocusNode.AUDIO else FocusNode.SUBTITLES
@@ -119,21 +122,49 @@ internal object PlayerControllerFocusPolicy {
         FocusNode.AUDIO -> when (direction) {
             FocusDirection.UP -> null
             FocusDirection.DOWN -> FocusNode.SUBTITLES
-            FocusDirection.LEFT -> if (hasSkipButton) FocusNode.SKIP else FocusNode.PLAY_PAUSE
+            FocusDirection.LEFT -> when {
+                hasNextEpisode -> FocusNode.NEXT_EPISODE
+                hasSkipButton -> FocusNode.SKIP
+                else -> FocusNode.PLAY_PAUSE
+            }
             FocusDirection.RIGHT -> null
         }
         FocusNode.SUBTITLES -> when (direction) {
             FocusDirection.UP -> if (hasAudioSelector) FocusNode.AUDIO else FocusNode.PLAY_PAUSE
             FocusDirection.DOWN -> FocusNode.PROGRESS
-            FocusDirection.LEFT -> if (hasSkipButton) FocusNode.SKIP else FocusNode.PLAY_PAUSE
+            FocusDirection.LEFT -> when {
+                hasNextEpisode -> FocusNode.NEXT_EPISODE
+                hasSkipButton -> FocusNode.SKIP
+                else -> FocusNode.PLAY_PAUSE
+            }
             FocusDirection.RIGHT -> null
         }
         FocusNode.SKIP -> when (direction) {
             FocusDirection.UP, FocusDirection.LEFT -> null
             FocusDirection.DOWN -> FocusNode.PLAY_PAUSE
+            FocusDirection.RIGHT -> when {
+                hasNextEpisode -> FocusNode.NEXT_EPISODE
+                hasAudioSelector -> FocusNode.AUDIO
+                else -> FocusNode.SUBTITLES
+            }
+        }
+        FocusNode.NEXT_EPISODE -> when (direction) {
+            FocusDirection.UP -> FocusNode.SUBTITLES
+            FocusDirection.DOWN -> FocusNode.PLAY_PAUSE
+            FocusDirection.LEFT -> if (hasSkipButton) FocusNode.SKIP else null
             FocusDirection.RIGHT -> if (hasAudioSelector) FocusNode.AUDIO else FocusNode.SUBTITLES
         }
     }
+}
+
+/** Regras puras do temporizador de reprodução automática do próximo episódio. */
+internal object NextEpisodeAutoPlayPolicy {
+    const val COUNTDOWN_SECONDS = 10
+
+    fun hasNextEpisode(label: String?): Boolean = !label.isNullOrBlank()
+
+    fun shouldStart(hasNextEpisode: Boolean, cancelled: Boolean, secondsRemaining: Int): Boolean =
+        hasNextEpisode && !cancelled && secondsRemaining <= 0
 }
 
 /** Trecho a pular (abertura, recapitulação, créditos), em segundos. */
@@ -326,12 +357,28 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         }
         // O botão de pular trecho é criado antes do mapa de foco para participar
         // da navegação D-pad assim que um segmento ficar ativo.
+        val handler = Handler(Looper.getMainLooper())
         val skipButton = Button(act).apply {
             id = View.generateViewId()
             visibility = View.GONE
             isAllCaps = false
             isFocusable = true
             isFocusableInTouchMode = true
+        }
+        val nextEpisodeLabel = args.nextEpisodeLabel?.trim()
+            ?.takeIf { NextEpisodeAutoPlayPolicy.hasNextEpisode(it) }
+        var playbackEnded = false
+        var nextEpisodeCountdownActive = false
+        var nextEpisodeCountdownCancelled = false
+        var autoNextRequested = false
+        var countdownSecondsRemaining = NextEpisodeAutoPlayPolicy.COUNTDOWN_SECONDS
+        val nextEpisodeButton = Button(act).apply {
+            id = View.generateViewId()
+            visibility = View.GONE
+            isAllCaps = false
+            isFocusable = true
+            isFocusableInTouchMode = true
+            maxLines = 2
         }
         var hasMultipleAudioTracks = false
 
@@ -348,7 +395,9 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
                 PlayerControllerFocusPolicy.FocusNode.SUBTITLES to subtitleButton,
             )
             val hasSkipButton = skipButton.visibility == View.VISIBLE
+            val hasNextEpisode = nextEpisodeButton.visibility == View.VISIBLE
             if (hasSkipButton) focusViews[PlayerControllerFocusPolicy.FocusNode.SKIP] = skipButton
+            if (hasNextEpisode) focusViews[PlayerControllerFocusPolicy.FocusNode.NEXT_EPISODE] = nextEpisodeButton
 
             for ((node, source) in focusViews) {
                 if (source == null) continue
@@ -358,6 +407,7 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
                         direction,
                         hasAudioSelector = hasMultipleAudioTracks && audioButton.visibility == View.VISIBLE,
                         hasSkipButton = hasSkipButton,
+                        hasNextEpisode = hasNextEpisode,
                     ) ?: continue
                     val target = focusViews[targetNode] ?: continue
                     if (target.id == View.NO_ID) continue
@@ -373,7 +423,8 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
 
         fun updateTrackButtons(visible: Boolean) {
             // Não remova da hierarquia um seletor que ainda está focado pelo D-pad.
-            val keepFocusedOverlayButton = audioButton.hasFocus() || subtitleButton.hasFocus() || skipButton.hasFocus()
+            val keepFocusedOverlayButton = audioButton.hasFocus() || subtitleButton.hasFocus() ||
+                skipButton.hasFocus() || nextEpisodeButton.hasFocus()
             val shouldShow = visible || keepFocusedOverlayButton
             audioButton.visibility = if (hasMultipleAudioTracks && shouldShow) View.VISIBLE else View.GONE
             // Botão fica disponível mesmo sem faixa para explicar que a fonte não oferece legenda.
@@ -403,22 +454,23 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         // Enquanto Áudio, Legendas ou Pular estiver focado, mantenha os controles
         // visíveis; ao sair, restaure os 6 segundos normais de auto-ocultação.
         fun updateOverlayButtonFocusTimeout() {
-            val overlayButtonHasFocus = audioButton.hasFocus() || subtitleButton.hasFocus() || skipButton.hasFocus()
+            val overlayButtonHasFocus = audioButton.hasFocus() || subtitleButton.hasFocus() ||
+                skipButton.hasFocus() || nextEpisodeButton.hasFocus()
             view.setControllerShowTimeoutMs(PlayerControllerFocusPolicy.timeoutMs(overlayButtonHasFocus))
             if (overlayButtonHasFocus) view.showController()
         }
-        listOf(audioButton, subtitleButton, skipButton).forEach { button ->
+        listOf(audioButton, subtitleButton, skipButton, nextEpisodeButton).forEach { button ->
             button.setOnFocusChangeListener { _, _ -> updateOverlayButtonFocusTimeout() }
         }
         view.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
-            val overlayButtonHasFocus = audioButton.hasFocus() || subtitleButton.hasFocus() || skipButton.hasFocus()
+            val overlayButtonHasFocus = audioButton.hasFocus() || subtitleButton.hasFocus() ||
+                skipButton.hasFocus() || nextEpisodeButton.hasFocus()
             if (visibility != View.VISIBLE && overlayButtonHasFocus) view.showController()
             updateTrackButtons(visibility == View.VISIBLE)
         })
 
         // Pular abertura, recapitulação e créditos: um botão sobre o vídeo enquanto o trecho toca.
         val skips = parseSkips(args.segments)
-        val handler = Handler(Looper.getMainLooper())
         val density = act.resources.displayMetrics.density
         var shownEnd: Double? = null
         skipButton.setOnClickListener {
@@ -453,6 +505,60 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
                 handler.postDelayed(this, 500)
             }
         }
+        val nextEpisodeCountdownTick = object : Runnable {
+            override fun run() {
+                if (!nextEpisodeCountdownActive || nextEpisodeCountdownCancelled) return
+                countdownSecondsRemaining--
+                if (NextEpisodeAutoPlayPolicy.shouldStart(
+                        hasNextEpisode = NextEpisodeAutoPlayPolicy.hasNextEpisode(nextEpisodeLabel),
+                        cancelled = nextEpisodeCountdownCancelled,
+                        secondsRemaining = countdownSecondsRemaining,
+                    )
+                ) {
+                    nextEpisodeCountdownActive = false
+                    autoNextRequested = true
+                    nextEpisodeButton.text = "Abrindo próximo episódio…"
+                    dialog.dismiss()
+                    return
+                }
+                nextEpisodeButton.text =
+                    "Próximo: $nextEpisodeLabel em ${countdownSecondsRemaining}s · OK cancela"
+                handler.postDelayed(this, 1_000)
+            }
+        }
+        fun startNextEpisodeCountdown() {
+            if (!NextEpisodeAutoPlayPolicy.hasNextEpisode(nextEpisodeLabel) ||
+                nextEpisodeCountdownActive || nextEpisodeCountdownCancelled
+            ) return
+            nextEpisodeCountdownActive = true
+            countdownSecondsRemaining = NextEpisodeAutoPlayPolicy.COUNTDOWN_SECONDS
+            nextEpisodeButton.text =
+                "Próximo: $nextEpisodeLabel em ${countdownSecondsRemaining}s · OK cancela"
+            nextEpisodeButton.visibility = View.VISIBLE
+            updatePlayerFocusNavigation()
+            view.showController()
+            nextEpisodeButton.requestFocus()
+            handler.postDelayed(nextEpisodeCountdownTick, 1_000)
+        }
+        nextEpisodeButton.setOnClickListener {
+            val returnFocus = nextEpisodeButton.hasFocus()
+            nextEpisodeCountdownCancelled = true
+            nextEpisodeCountdownActive = false
+            handler.removeCallbacks(nextEpisodeCountdownTick)
+            nextEpisodeButton.visibility = View.GONE
+            updatePlayerFocusNavigation()
+            if (returnFocus) {
+                view.findViewById<View>(androidx.media3.ui.R.id.exo_play_pause)?.requestFocus()
+            }
+        }
+        player.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    playbackEnded = true
+                    startNextEpisodeCountdown()
+                }
+            }
+        })
         val frame = FrameLayout(act)
         frame.addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         val buttonParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START)
@@ -473,6 +579,13 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
         )
         subtitleButtonParams.setMargins(0, margin + (56 * density).toInt(), margin, 0)
         frame.addView(subtitleButton, subtitleButtonParams)
+        val nextEpisodeButtonParams = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+        )
+        nextEpisodeButtonParams.setMargins(margin, 0, margin, (104 * density).toInt())
+        frame.addView(nextEpisodeButton, nextEpisodeButtonParams)
         dialog.setContentView(frame, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
         var errorMessage: String? = null
@@ -482,6 +595,7 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
             if (answered) return
             answered = true
             handler.removeCallbacks(skipTick)
+            handler.removeCallbacks(nextEpisodeCountdownTick)
             val position = player.currentPosition.coerceAtLeast(0L)
             val duration = player.duration.takeIf { it > 0L } ?: 0L
             view.player = null
@@ -492,6 +606,8 @@ class ExoPlayerPlugin(private val act: Activity) : Plugin(act) {
             else invoke.resolve(JSObject().apply {
                 put("positionMs", position)
                 put("durationMs", duration)
+                put("ended", playbackEnded)
+                put("autoNext", autoNextRequested)
             })
         }
         player.addListener(object : Player.Listener {
