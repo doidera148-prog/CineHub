@@ -982,6 +982,24 @@ mod tests {
             .unwrap()
     }
 
+    async fn request_test_child_resource(
+        state: &ProxyState,
+        token: String,
+        resource: String,
+        query: Option<String>,
+    ) -> Response {
+        proxy_request_inner(
+            state.clone(),
+            token,
+            Some(resource),
+            query,
+            Method::GET,
+            HeaderMap::new(),
+        )
+        .await
+        .unwrap()
+    }
+
     fn rewritten_token(text: &str) -> String {
         let marker = "/media/";
         let start = text.find(marker).expect("proxy URL missing") + marker.len();
@@ -1184,6 +1202,104 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(&segment_body[..], b"bcd");
+    }
+
+    #[tokio::test]
+    async fn dash_proxy_rewrites_base_url_and_dynamic_segment_templates() {
+        const MANIFEST: &str = r#"<?xml version="1.0"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static">
+  <Period>
+    <BaseURL>video/</BaseURL>
+    <AdaptationSet>
+      <Representation id="v1">
+        <SegmentTemplate timescale="1" initialization="init.mp4" media="chunk-$Number$.m4s" startNumber="1">
+          <SegmentTimeline><S t="0" d="4" r="1"/></SegmentTimeline>
+        </SegmentTemplate>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>"#;
+        let origin = Router::new()
+            .route(
+                "/manifest.mpd",
+                axum::routing::get(|| async {
+                    (
+                        [(header::CONTENT_TYPE, "application/dash+xml")],
+                        MANIFEST,
+                    )
+                }),
+            )
+            .route(
+                "/video/chunk-1.m4s",
+                axum::routing::get(|| async { "segment-one" }),
+            )
+            .route(
+                "/video/init.mp4",
+                axum::routing::get(|| async { "initialization" }),
+            );
+        let origin_address = start_test_server(origin).await;
+        let state = local_test_state();
+        let manifest_url =
+            Url::parse(&format!("http://{origin_address}/manifest.mpd")).unwrap();
+        let manifest_token = add_test_target(&state, manifest_url, false).await;
+
+        let manifest_response =
+            request_test_resource(&state, manifest_token, HeaderMap::new()).await;
+        assert_eq!(manifest_response.status(), StatusCode::OK);
+        assert_eq!(
+            manifest_response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/dash+xml"
+        );
+        let body = axum::body::to_bytes(manifest_response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let rewritten = String::from_utf8(body.to_vec()).unwrap();
+        assert!(rewritten.contains("<BaseURL>/media/"));
+        assert!(rewritten.contains("$Number$"));
+
+        let media_start = rewritten.find("media=\"").unwrap() + "media=\"".len();
+        let media_end = rewritten[media_start..].find('"').unwrap() + media_start;
+        let media_template = &rewritten[media_start..media_end];
+        let media_url = media_template.replace("$Number$", "1");
+        let (segment_token, segment_path, segment_query) = dash_local_parts(&media_url);
+        let segment_response = request_test_child_resource(
+            &state,
+            segment_token,
+            segment_path,
+            segment_query,
+        )
+        .await;
+        assert_eq!(segment_response.status(), StatusCode::OK);
+        assert_eq!(
+            &axum::body::to_bytes(segment_response.into_body(), 1024)
+                .await
+                .unwrap()[..],
+            b"segment-one"
+        );
+
+        let init_start =
+            rewritten.find("initialization=\"").unwrap() + "initialization=\"".len();
+        let init_end = rewritten[init_start..].find('"').unwrap() + init_start;
+        let (init_token, init_path, init_query) =
+            dash_local_parts(&rewritten[init_start..init_end]);
+        let init_response =
+            request_test_child_resource(&state, init_token, init_path, init_query).await;
+        assert_eq!(init_response.status(), StatusCode::OK);
+        assert_eq!(
+            &axum::body::to_bytes(init_response.into_body(), 1024)
+                .await
+                .unwrap()[..],
+            b"initialization"
+        );
+    }
+
+    fn dash_local_parts(local: &str) -> (String, String, Option<String>) {
+        let parsed = Url::parse(&format!("http://proxy.invalid{local}")).unwrap();
+        let mut parts = parsed.path().trim_start_matches('/').splitn(3, '/');
+        assert_eq!(parts.next(), Some("media"));
+        let token = parts.next().expect("DASH proxy token missing").to_string();
+        let resource = parts.next().expect("DASH resource path missing").to_string();
+        (token, resource, parsed.query().map(str::to_owned))
     }
 
     #[test]
