@@ -64,9 +64,15 @@ O plugin `tauri-plugin-exoplayer` usa AndroidX Media3/ExoPlayer em tela cheia. O
 
 ### Windows
 
-No Windows, `app.js` usa `player_play` para iniciar libmpv com aceleração de hardware automática segura. A janela filha do mpv é posicionada acima da WebView, mas não deve ocultar toda a interface: `player_set_geometry` aplica uma região Win32 limitada à caixa do vídeo e subtrai recortes retangulares para o título e o botão Fechar do CineHub. Como regiões Win32 afetam pintura e hit-testing, a WebView permanece visível e recebe cliques nos recortes. A geometria é calculada em pixels físicos a partir de `getBoundingClientRect()` e atualizada em redimensionamentos.
+Nos builds Windows com a feature `mpv`, `main.rs` ativa o host WebView2/DirectComposition antes de criar a janela Tauri. O caminho usa um `ICoreWebView2CompositionController` e uma árvore DirectComposition com dois visuais: a interface WebView2 acima do vídeo. O Wry vendorizado mantém o dispositivo D3D11 e a swap chain DXGI compartilhados; o libmpv usa a API de renderização D3D11 para desenhar diretamente no backbuffer dessa swap chain, sem criar uma janela filha independente para o vídeo.
 
-Esta é a primeira etapa do protótipo inspirado no Ventic. Os controles de transporte continuam sendo fornecidos pelo OSC do mpv; a integração de comandos, faixas de áudio/legenda e controles HTML completos será ampliada após validar a composição em Windows real. Se a técnica de recortes apresentar instabilidade, a alternativa a comparar é uma janela de overlay separada, como a arquitetura estudada no OpenPlayer. Android e Google TV continuam usando ExoPlayer e não passam por esse caminho.
+A superfície de composição também recebe as atualizações de geometria e encaminha eventos de mouse/toque/caneta ao WebView2. Os controles HTML do player nativo oferecem pausa/reprodução, busca, volume, mudo, tela cheia, seleção de áudio e seleção/desativação de legendas. As preferências de idioma das faixas são restauradas entre reproduções. O backend mantém o controle de reprodução e os eventos do libmpv no worker dedicado.
+
+O host de composição é selecionado por padrão nos builds Windows com `mpv`. Para diagnóstico/rollback, `CINEHUB_DISABLE_WEBVIEW2_COMPOSITION=1` força o caminho convencional HWND. Builds locais sem a feature `mpv` não habilitam essa integração e continuam usando o player do WebView. Android/Google TV permanecem no ExoPlayer; Linux e macOS permanecem no Video.js/WebView no build padrão.
+
+A rotina Windows reconhece os HRESULTs de perda/reset do dispositivo D3D11. Em uma reprodução, o worker libera o render context antigo, pede ao thread proprietário da janela para reconstruir o dispositivo/swap chain/árvore DirectComposition e cria um novo render context libmpv. Há somente uma tentativa automática por reprodução; uma segunda falha encerra a sessão com diagnóstico.
+
+**Limite de validação:** o CI compila o caminho Windows e executa um smoke test nativo de renderização D3D11/DXGI, mas isso não comprova transparência/z-order, DPI, interação física, fullscreen/redimensionamento ou recuperação após perda real do adaptador em uma GPU Windows. A simulação de perda é exclusiva de builds Debug e serve para diagnóstico; a validação visual completa em hardware continua pendente.
 
 ### Linux e macOS
 
