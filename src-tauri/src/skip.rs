@@ -154,10 +154,9 @@ async fn get_json(client: &Client, url: &str) -> Option<Value> {
     if !resp.status().is_success() {
         return None;
     }
-    let bytes = resp.bytes().await.ok()?;
-    if bytes.len() > MAX_BODY {
-        return None;
-    }
+    let bytes = addon::read_response_capped(&mut resp, MAX_BODY)
+        .await
+        .ok()?;
     serde_json::from_slice(&bytes).ok()
 }
 
