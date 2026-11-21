@@ -12,8 +12,8 @@ import re
 import sys
 
 FEATURES = (
-    '    <uses-feature android:name="android.software.leanback" android:required="false" />\n'
-    '    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n'
+    "android.software.leanback",
+    "android.hardware.touchscreen",
 )
 LAUNCHER = '<category android:name="android.intent.category.LAUNCHER" />'
 LEANBACK = '<category android:name="android.intent.category.LEANBACK_LAUNCHER" />'
@@ -24,27 +24,59 @@ def fail(message: str) -> None:
     sys.exit(f"erro ao ajustar o manifesto para TV: {message}")
 
 
+def ensure_feature(xml: str, feature: str) -> str:
+    marker = f'android:name="{feature}"'
+    if marker in xml:
+        return xml
+
+    element = (
+        f'    <uses-feature android:name="{feature}" '
+        'android:required="false" />'
+    )
+    xml, count = re.subn(
+        r"(<manifest\b[^>]*>)",
+        lambda match: match.group(1) + "\n" + element,
+        xml,
+        count=1,
+    )
+    if count == 0:
+        fail("tag <manifest> não encontrada")
+    return xml
+
+
 def main(path: str) -> None:
     manifest = pathlib.Path(path)
     xml = manifest.read_text(encoding="utf-8")
 
-    if "android.software.leanback" not in xml:
-        xml, n = re.subn(r"(<manifest[^>]*>\n)", lambda m: m.group(1) + FEATURES, xml, count=1)
-        if n == 0:
-            fail("tag <manifest> não encontrada")
+    for feature in FEATURES:
+        xml = ensure_feature(xml, feature)
 
     if LEANBACK not in xml:
         if LAUNCHER not in xml:
             fail("categoria LAUNCHER não encontrada")
         xml = xml.replace(LAUNCHER, LAUNCHER + "\n                " + LEANBACK, 1)
 
-    if "android:banner" not in xml:
-        xml, n = re.subn(r"<application\b", '<application android:banner="@drawable/banner"', xml, count=1)
-        if n == 0:
+    application_has_banner = re.search(
+        r"<application\b[^>]*\bandroid:banner=",
+        xml,
+    )
+    if application_has_banner is None:
+        xml, count = re.subn(
+            r"<application\b",
+            '<application android:banner="@drawable/banner"',
+            xml,
+            count=1,
+        )
+        if count == 0:
             fail("tag <application> não encontrada")
 
     # Confere o resultado antes de gravar.
-    for needle in ("android.software.leanback", LEANBACK, 'android:banner="@drawable/banner"'):
+    for needle in (
+        'android:name="android.software.leanback"',
+        'android:name="android.hardware.touchscreen"',
+        LEANBACK,
+        'android:banner="@drawable/banner"',
+    ):
         if needle not in xml:
             fail(f"não foi possível inserir: {needle}")
 

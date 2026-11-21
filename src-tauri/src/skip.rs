@@ -150,14 +150,13 @@ pub fn mal_from_mapping(v: &Value) -> Option<u32> {
 }
 
 async fn get_json(client: &Client, url: &str) -> Option<Value> {
-    let resp = client.get(url).send().await.ok()?;
+    let mut resp = client.get(url).send().await.ok()?;
     if !resp.status().is_success() {
         return None;
     }
-    let bytes = resp.bytes().await.ok()?;
-    if bytes.len() > MAX_BODY {
-        return None;
-    }
+    let bytes = addon::read_response_capped(&mut resp, MAX_BODY)
+        .await
+        .ok()?;
     serde_json::from_slice(&bytes).ok()
 }
 

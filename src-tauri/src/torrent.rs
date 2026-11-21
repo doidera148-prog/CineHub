@@ -680,7 +680,8 @@ fn parse_range(value: Option<&axum::http::HeaderValue>, size: u64) -> Result<(u6
         if suffix == 0 {
             return Err(());
         }
-        return Ok((size.saturating_sub(suffix), size - 1, true));
+        let length = suffix.min(size).min(MAX_RANGE_BYTES);
+        return Ok((size - length, size - 1, true));
     }
     let start: u64 = start.parse().map_err(|_| ())?;
     let requested_end = if end.is_empty() {
@@ -740,6 +741,16 @@ mod tests {
         assert_eq!(parse_range(Some(&exact), 100), Ok((10, 19, true)));
         let suffix = axum::http::HeaderValue::from_static("bytes=-10");
         assert_eq!(parse_range(Some(&suffix), 100), Ok((90, 99, true)));
+        let suffix_larger_than_file = axum::http::HeaderValue::from_static("bytes=-1000");
+        assert_eq!(
+            parse_range(Some(&suffix_larger_than_file), 100),
+            Ok((0, 99, true))
+        );
+        let oversized_suffix = axum::http::HeaderValue::from_static("bytes=-999999999");
+        assert_eq!(
+            parse_range(Some(&oversized_suffix), MAX_RANGE_BYTES * 3),
+            Ok((MAX_RANGE_BYTES * 2, MAX_RANGE_BYTES * 3 - 1, true))
+        );
         let open = axum::http::HeaderValue::from_static("bytes=50-");
         assert_eq!(parse_range(Some(&open), 100), Ok((50, 99, true)));
         let huge = axum::http::HeaderValue::from_static("bytes=0-99999999");

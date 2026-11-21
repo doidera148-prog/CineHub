@@ -37,6 +37,24 @@ class PatchManifestTests(unittest.TestCase):
             self.assertIn('android:banner="@drawable/banner"', result)
             self.assertTrue((pathlib.Path(directory) / "res/drawable/banner.png").is_file())
 
+    def test_adds_touchscreen_feature_when_leanback_already_exists(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = pathlib.Path(directory) / "AndroidManifest.xml"
+            partial = self.sample_manifest().replace(
+                '    <application>',
+                '    <uses-feature android:name="android.software.leanback" '
+                'android:required="false" />\n'
+                '    <application>',
+            )
+            manifest.write_text(partial, encoding="utf-8")
+
+            PATCH.main(str(manifest))
+
+            result = manifest.read_text(encoding="utf-8")
+            self.assertEqual(result.count('android:name="android.software.leanback"'), 1)
+            self.assertEqual(result.count('android:name="android.hardware.touchscreen"'), 1)
+            self.assertIn('android.intent.category.LEANBACK_LAUNCHER', result)
+
     def test_is_idempotent(self):
         with tempfile.TemporaryDirectory() as directory:
             manifest = pathlib.Path(directory) / "AndroidManifest.xml"
