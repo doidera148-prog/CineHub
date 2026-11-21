@@ -1,6 +1,9 @@
 # cargo-deny: licenças, avisos de segurança e fontes das dependências.
 # Usado no CI como verificação obrigatória. Rode localmente com:
 #   cargo deny --manifest-path src-tauri/Cargo.toml check
+# Os cinco ignores abaixo são advisories INFO de crates sem manutenção, não CVEs.
+# Reavaliar cada exceção quando as dependências-pai mudarem; não ampliar a lista
+# sem verificar a árvore transitiva e registrar uma justificativa específica.
 
 [advisories]
 version = 2
